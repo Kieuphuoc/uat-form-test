@@ -1,0 +1,13 @@
+version: "3.8"
+services:
+  arito-form-web:
+    image: gitlab.arito.vn:4567/arito/arito-form-web:latest
+    container_name: arito-form-web
+    network_mode: host
+    environment:
+      PORT: "3008"
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
