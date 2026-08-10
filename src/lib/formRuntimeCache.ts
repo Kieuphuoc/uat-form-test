@@ -50,13 +50,28 @@ export function setRuntimeCache(parts: string[], value: unknown): void {
   }
 }
 
-/** Xóa toàn bộ cache runtime form trên origin form-web. */
+/** Xóa cache runtime form trên origin form-web. */
 export function clearAllRuntimeFormCache(): void {
   try {
     const keys: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
       if (k?.startsWith(PREFIX)) keys.push(k);
+    }
+    for (const k of keys) localStorage.removeItem(k);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Xóa cache của một slug (sau Designer Save). */
+export function clearRuntimeFormCacheForSlug(slug: string): void {
+  const needle = `:${slug}:`;
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k?.startsWith(PREFIX) && k.includes(needle)) keys.push(k);
     }
     for (const k of keys) localStorage.removeItem(k);
   } catch {

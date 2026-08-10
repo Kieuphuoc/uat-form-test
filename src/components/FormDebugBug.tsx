@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getAdminApp, getAdminForm } from '../api/formApi';
 import { emitFormDebugLog, isFormDebugEnabled } from '../lib/formDebug';
+import { resolveLocalizedText } from '../lib/localizedText';
 import type { ClientFormDto } from '../types/form';
 
 type Props = {
@@ -10,9 +11,12 @@ type Props = {
 
 type SpecInfo = {
   file?: string;
-  path?: string;
-  contentRoot?: string;
+  relativePath?: string;
+  fileId?: string;
+  fileName?: string;
   contentSource?: string;
+  filesBaseUrl?: string;
+  folderId?: string;
   json?: unknown;
   error?: string;
 };
@@ -44,9 +48,12 @@ export function FormDebugBug({ slug, form }: Props) {
 
       setInfo({
         file: formRes.data.file || fileFromApp,
-        path: formRes.data.path,
-        contentRoot: formRes.data.contentRoot ?? appRes.data?.contentRoot,
+        relativePath: formRes.data.relativePath,
+        fileId: formRes.data.fileId,
+        fileName: formRes.data.fileName,
         contentSource: formRes.data.contentSource ?? appRes.data?.contentSource,
+        filesBaseUrl: formRes.data.filesBaseUrl,
+        folderId: formRes.data.folderId,
         json: formRes.data.json,
       });
     } catch (e) {
@@ -90,26 +97,45 @@ export function FormDebugBug({ slug, form }: Props) {
             </div>
             <div className="form-debug-panel__body stack">
               <p className="muted">
-                slug: <code>{slug}</code> · formId: <code>{form.id}</code> · {form.title}
+                slug: <code>{slug}</code> · formId: <code>{form.id}</code> ·{' '}
+                {resolveLocalizedText(form.title, 'v')}
               </p>
               {loading ? <p className="muted">Đang tải từ Form.Api…</p> : null}
               {info?.error ? <div className="banner">{info.error}</div> : null}
               {info && !info.error ? (
                 <>
-                  {info.contentRoot ? (
-                    <p className="muted">
-                      contentRoot: <code>{info.contentRoot}</code>
-                      {info.contentSource ? ` (${info.contentSource})` : ''}
+                  <p className="muted">
+                    source: <code>{info.contentSource || '?'}</code>
+                    {info.filesBaseUrl ? (
+                      <>
+                        {' '}
+                        · host: <code>{info.filesBaseUrl}</code>
+                      </>
+                    ) : null}
+                    {info.folderId ? (
+                      <>
+                        {' '}
+                        · folderId: <code>{info.folderId}</code>
+                      </>
+                    ) : null}
+                  </p>
+                  {info.relativePath ? (
+                    <p>
+                      Path: <code>{info.relativePath}</code>
                     </p>
                   ) : null}
-                  {info.file ? (
+                  {info.fileName ? (
+                    <p>
+                      File: <code>{info.fileName}</code>
+                    </p>
+                  ) : info.file ? (
                     <p>
                       File: <code>{info.file}</code>
                     </p>
                   ) : null}
-                  {info.path ? (
+                  {info.fileId ? (
                     <p>
-                      Path: <code>{info.path}</code>
+                      fileId: <code>{info.fileId}</code>
                     </p>
                   ) : null}
                   <pre className="form-debug-json">

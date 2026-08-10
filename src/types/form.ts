@@ -1,39 +1,209 @@
+import type { LocalizedText } from '../lib/localizedText';
+
+export type FormControlDef = {
+  id: string;
+  type: string;
+  /** Khi type=include: id fragment shared/fragments/{fragment}.json */
+  fragment?: string;
+  /**
+   * Design-only: control đã expand từ fragment (stamp khi merge).
+   * Không ghi vào JSON source.
+   */
+  includeOf?: string;
+  /** Design-only: id slot type=include trên form source. */
+  includeSlotId?: string;
+  label?: LocalizedText;
+  order: number;
+  /** Controls cùng rowId (kề nhau theo order) hiển thị một hàng. */
+  rowId?: string;
+  /**
+   * Vùng render:
+   * - `body` (mặc định): trong vùng scroll, trước list
+   * - `footer`: thanh cố định cuối form (sau list), luôn hiện khi scroll
+   */
+  placement?: 'body' | 'footer' | string;
+  /**
+   * Controls cùng groupId (kề nhau theo order) gom thành accordion
+   * (header + icon expand/collapse).
+   */
+  groupId?: string;
+  /** Tiêu đề accordion; lấy control đầu tiên có giá trị trong cụm. */
+  groupLabel?: LocalizedText;
+  /** Icon trên header accordion (giống button); lấy control đầu tiên có giá trị. */
+  groupIcon?: string;
+  /** Màu nền accordion; lấy control đầu tiên có giá trị. */
+  groupBackground?: string;
+  /** true = accordion mặc định thu gọn. */
+  groupCollapsed?: boolean;
+  /** Chiều rộng trong hàng, vd. "40%", "60%" (cùng rowId). */
+  width?: string;
+  /** Chiều cao control (textarea…), vd. "120px". */
+  height?: string;
+  required?: boolean;
+  enabled?: boolean;
+  visible?: boolean;
+  /** Chỉ hiện khi formMode thuộc danh sách, vd. ["new","edit"]. */
+  visibleModes?: string[];
+  bind?: string;
+  text?: LocalizedText;
+  /** Gợi ý trong ô nhập (text / textarea / number…). */
+  placeholder?: LocalizedText;
+  /** Giá trị mặc định khi formMode = new. */
+  defaultValue?: string | number | boolean;
+  /** Emoji / ký tự icon (iconButton hoặc button). */
+  icon?: string;
+  /** Màu nền: ô icon (iconButton) hoặc nút (button). */
+  color?: string;
+  /** Màu chữ button. */
+  textColor?: string;
+  /** Mở form khác khi bấm (không cần action SQL). */
+  linkFormId?: string;
+  options?: unknown;
+  optionsFrom?: string;
+  /**
+   * Nguồn options cho select:
+   * - static: mảng `options`
+   * - sqlCache: dataset `optionsFrom` (load onLoad, cache như cố định)
+   * - sqlSearch: chạy `optionsAction` khi tìm (param @q)
+   * - listPicker: mở form `optionsPickerFormId`
+   */
+  optionsMode?: 'static' | 'sqlCache' | 'sqlSearch' | 'listPicker' | string;
+  optionsAction?: string;
+  optionsPickerFormId?: string;
+  optionsValueField?: string;
+  optionsLabelField?: string;
+  /**
+   * number: pattern ### …
+   * date: `dd/MM/yyyy` | `yyyy-MM-dd` | …
+   * time: `HH:mm` | `HH:mm:ss`
+   */
+  format?: string;
+  /**
+   * label / text: `link` | `mail` | `phone` —
+   * view (và label) mở URL / mailto / tel.
+   */
+  openAs?: 'link' | 'mail' | 'phone' | string;
+  /** file/image: extension cho phép, vd. `pdf,doc,docx` hoặc `jpg,png,webp`. */
+  accept?: string;
+  /** file/image: số file tối đa (mặc định file=5, image=1). */
+  maxFiles?: number;
+  /**
+   * file/image:
+   * - `immediate` (mặc định): chọn file → upload ngay (Files status=0 draft)
+   * - `onSave`: giữ local, gọi `uploadPendingFormAttachments` khi lưu form
+   */
+  uploadMode?: 'immediate' | 'onSave' | string;
+  /** image: cạnh preview vuông (px), mặc định 50. */
+  previewWidth?: number;
+  onChange?: string[];
+  onClick?: string[];
+};
+
+/** Chế độ tương tác form (khác mode=modal|sheet|fullscreen của showForm). */
+export type FormMode = 'view' | 'new' | 'edit';
+
 export type ClientActionMeta = {
   type: string;
   paramNames?: string[];
   formId?: string;
   mode?: string;
+  formMode?: string;
 };
 
-export type FormControlDef = {
-  id: string;
-  type: string;
-  label?: string;
-  order: number;
-  required?: boolean;
+export type FormListColumnDef = {
+  field: string;
+  title: LocalizedText;
+  /** text (default) | checkbox | icon | image | stepper */
+  type?: string;
+  width?: string;
+  bold?: boolean;
+  italic?: boolean;
+  color?: string;
+  readOnly?: boolean;
+};
+
+export type FormListPaging = {
+  /** none | loadMore | pages */
+  mode?: string;
+  pageSize?: number;
+  /** State key trang 1-based (không prefix state.). */
+  pageBind?: string;
+  /** replace | append */
+  merge?: string;
+  totalDataset?: string;
+  totalField?: string;
+  pageCountBind?: string;
+};
+
+export type FormListItemTemplate = {
+  /** Field file id / URL ảnh (media). */
+  imageField?: string;
+  /** Field emoji / icon text. */
+  iconField?: string;
+  /** Icon khi thiếu ảnh / iconField. */
+  defaultIcon?: string;
+  /** Fields ghép dòng 1 (vd ma_vt, dvt). */
+  line1?: string[];
+  /** Fields ghép dòng 2 (vd ten_vt). */
+  line2?: string[];
+  /** Field meta nhỏ. */
+  metaField?: string;
+  /** Cạnh thumb vuông px, mặc định 48. */
+  imageWidth?: number;
+  /** Ngăn cách field cùng line, mặc định " · ". */
+  lineSep?: string;
+};
+
+export type FormListSearchColumn = {
+  field: string;
+  /** like | likePrefix | likeSuffix | eq | in */
+  op?: string;
+};
+
+export type FormListSearch = {
   enabled?: boolean;
-  visible?: boolean;
-  bind?: string;
-  text?: string;
-  options?: unknown;
-  optionsFrom?: string;
-  onChange?: string[];
-  onClick?: string[];
+  placeholder?: LocalizedText;
+  /** State key chuỗi tìm (không prefix state.). */
+  queryBind?: string;
+  debounceMs?: number;
+  /** server (default) | client */
+  mode?: string;
+  onSearch?: string[];
+  columns?: FormListSearchColumn[];
 };
 
 export type FormListDef = {
   id: string;
+  /** list (mặc định) | include */
+  type?: string;
+  /** Khi type=include: id fragment. */
+  fragment?: string;
+  /** Design-only sau merge. */
+  includeOf?: string;
+  includeSlotId?: string;
   order: number;
   bind: string;
-  columns: { field: string; title: string }[];
+  columns: FormListColumnDef[];
   rowKey?: string;
   onRowClick?: string[];
+  /** none | single | multiple */
+  selection?: string;
+  /** State key mảng khóa đã chọn. */
+  selectedKeysBind?: string;
+  paging?: FormListPaging;
+  onLoadMore?: string[];
+  /** table (default) | card | media */
+  template?: string;
+  itemTemplate?: FormListItemTemplate;
+  search?: FormListSearch;
 };
 
 export type ClientFormDto = {
   id: string;
-  title: string;
+  title: LocalizedText;
   layout: string;
+  /** Mặc định khi mở form nếu không truyền formMode (view|new|edit). */
+  defaultFormMode?: string;
   controls: FormControlDef[];
   lists: FormListDef[];
   datasets?: Record<string, string>;
@@ -54,7 +224,7 @@ export type RuntimeAppResponse = {
 };
 
 export type RuntimeUiDirective = {
-  openForm?: { formId: string; mode?: string; returnMap?: Record<string, string> };
+  openForm?: { formId: string; mode?: string; formMode?: string; returnMap?: Record<string, string> };
   close?: { ok?: boolean; returnValues?: Record<string, unknown> };
   message?: { text: string; level?: string };
 };

@@ -27,7 +27,12 @@ export async function fetchRuntimeApp(slug: string, preview = false): Promise<Ap
   return res;
 }
 
-export async function fetchRuntimeForm(slug: string, formId: string, preview = false) {
+export async function fetchRuntimeForm(
+  slug: string,
+  formId: string,
+  preview = false,
+  cacheBust?: number | string,
+) {
   type FormPayload = {
     form: ClientFormDto;
     datasets?: Record<string, Record<string, unknown>[]>;
@@ -40,7 +45,10 @@ export async function fetchRuntimeForm(slug: string, formId: string, preview = f
     if (hit) return { success: true as const, data: hit };
   }
 
-  const q = preview ? '?preview=true' : '';
+  const params = new URLSearchParams();
+  if (preview) params.set('preview', 'true');
+  if (cacheBust != null && cacheBust !== '') params.set('_', String(cacheBust));
+  const q = params.toString() ? `?${params}` : '';
   const res = await apiFetch<FormPayload>(
     `/v1/form/runtime/apps/${encodeURIComponent(slug)}/forms/${encodeURIComponent(formId)}${q}`,
   );
@@ -108,16 +116,63 @@ export async function getAdminForm(id: string, formId: string) {
   return apiFetch<{
     formId: string;
     file?: string;
-    path?: string;
-    contentRoot?: string;
+    relativePath?: string;
+    fileId?: string;
+    fileName?: string;
     contentSource?: string;
+    filesBaseUrl?: string;
+    folderId?: string;
     json: unknown;
   }>(`/v1/form/admin/apps/${encodeURIComponent(id)}/forms/${encodeURIComponent(formId)}`);
 }
 
+export type FormContentLocation = {
+  contentSource: string;
+  relativePath: string;
+  file?: string;
+  fileId?: string;
+  fileName?: string;
+  filesBaseUrl?: string;
+  folderId?: string;
+};
+
 export async function putAdminForm(id: string, formId: string, json: unknown) {
-  return apiFetch<{ formId: string; saved: boolean }>(
+  return apiFetch<{ formId: string; saved: boolean; location?: FormContentLocation }>(
     `/v1/form/admin/apps/${encodeURIComponent(id)}/forms/${encodeURIComponent(formId)}`,
     { method: 'PUT', body: JSON.stringify({ json }) },
   );
+}
+
+export async function getAdminShared(id: string) {
+  return apiFetch<{
+    actions: Record<string, Record<string, unknown>>;
+    fragments: Record<string, unknown>;
+  }>(`/v1/form/admin/apps/${encodeURIComponent(id)}/shared`);
+}
+
+export async function putAdminShared(
+  id: string,
+  body: {
+    actions?: Record<string, Record<string, unknown>>;
+    fragments?: Record<string, unknown>;
+  },
+) {
+  return apiFetch<{ saved: boolean }>(`/v1/form/admin/apps/${encodeURIComponent(id)}/shared`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function createAdminForm(
+  id: string,
+  body: { id: string; title?: string; template?: 'blank' | 'picker' | 'list' },
+) {
+  return apiFetch<{
+    app: AdminAppSummary;
+    formId: string;
+    form: unknown;
+  }>(`/v1/form/admin/apps/${encodeURIComponent(id)}/forms`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }

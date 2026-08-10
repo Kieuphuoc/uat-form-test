@@ -1,0 +1,57 @@
+/** Icon phổ biến cho button / iconButton (emoji ổn định). */
+export const ICON_PRESETS: { icon: string; label: string }[] = [
+  // Thao tác thường dùng
+  { icon: '💾', label: 'Lưu' },
+  { icon: '🗑️', label: 'Xóa' },
+  { icon: '✏️', label: 'Sửa' },
+  { icon: '✅', label: 'Duyệt / xác nhận' },
+  { icon: '❌', label: 'Hủy / từ chối' },
+  { icon: '➕', label: 'Thêm mới / cộng' },
+  { icon: '➖', label: 'Trừ' },
+  { icon: '＋', label: 'Insert / thêm' },
+  { icon: '⧉', label: 'Copy' },
+  { icon: '📋', label: 'Đơn / clipboard' },
+  { icon: '📄', label: 'Tài liệu' },
+  { icon: '🔍', label: 'Tìm kiếm' },
+  { icon: '🔄', label: 'Đồng bộ / làm mới' },
+  { icon: '↩️', label: 'Hoàn tác' },
+  { icon: '↪️', label: 'Làm lại' },
+  { icon: '⬆️', label: 'Lên' },
+  { icon: '⬇️', label: 'Xuống' },
+  { icon: '➡️', label: 'Tiếp / chuyển' },
+  { icon: '⬅️', label: 'Quay lại' },
+  { icon: '👁️', label: 'Xem' },
+  { icon: '🖨️', label: 'In' },
+  { icon: '📥', label: 'Tải về / nhận' },
+  { icon: '📤', label: 'Gửi / xuất' },
+  { icon: '🔗', label: 'Liên kết' },
+  { icon: '📎', label: 'Đính kèm' },
+  // Nghiệp vụ
+  { icon: '📅', label: 'Lịch / nghỉ' },
+  { icon: '⏰', label: 'Giờ / chấm công' },
+  { icon: '👤', label: 'Người' },
+  { icon: '👥', label: 'Nhóm' },
+  { icon: '🏢', label: 'Công ty' },
+  { icon: '📊', label: 'Bảng / báo cáo' },
+  { icon: '📈', label: 'Tăng trưởng' },
+  { icon: '💰', label: 'Lương / tiền' },
+  { icon: '✉️', label: 'Thư / thông báo' },
+  { icon: '🔔', label: 'Cảnh báo' },
+  { icon: '📝', label: 'Ghi chú' },
+  { icon: '📁', label: 'Hồ sơ' },
+  { icon: '🗂️', label: 'Phân loại' },
+  { icon: '⚙️', label: 'Cài đặt' },
+  { icon: '🏠', label: 'Trang chủ' },
+  { icon: '📌', label: 'Ghim' },
+  { icon: '🔒', label: 'Bảo mật' },
+  { icon: '⭐', label: 'Ưu tiên' },
+  { icon: '🆕', label: 'Mới' },
+  { icon: '✔️', label: 'Tick' },
+  { icon: '🛑', label: 'Dừng' },
+  { icon: '⚠️', label: 'Cảnh báo mạnh' },
+];
+
+export function isPresetIcon(icon: string | undefined): boolean {
+  if (!icon) return false;
+  return ICON_PRESETS.some((p) => p.icon === icon);
+}

@@ -59,7 +59,10 @@ export function AdminAppPage() {
     <div className="shell wide stack">
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <h1>{title || id}</h1>
-        <Link to="/admin">← List</Link>
+        <div className="row">
+          <Link to={`/admin/design/${slug || id}`}>Designer</Link>
+          <Link to="/admin">← List</Link>
+        </div>
       </div>
       {error && <div className="banner">{error}</div>}
       {message && <div className="toast success">{message}</div>}

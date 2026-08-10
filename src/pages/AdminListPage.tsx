@@ -5,7 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import type { AdminAppSummary } from '../types/form';
 
 export function AdminListPage() {
-  const { jwt, status } = useAuth();
+  const { jwt, status, user, logout } = useAuth();
   const [apps, setApps] = useState<AdminAppSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [slug, setSlug] = useState('');
@@ -44,19 +44,21 @@ export function AdminListPage() {
   };
 
   if (!jwt) {
-    return (
-      <div className="shell stack">
-        <div className="banner">Admin cần JWT (embed từ mobile hoặc session Form.Api).</div>
-        <Link to="/">← Home</Link>
-      </div>
-    );
+    return null; // RequireAdmin đã hiện login
   }
 
   return (
     <div className="shell wide stack">
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <h1>Form Admin</h1>
-        <Link to="/">Home</Link>
+        <div className="row">
+          <span className="muted">{user?.nickname || user?.email || 'admin'}</span>
+          <button type="button" className="secondary" onClick={() => logout()}>
+            Đăng xuất
+          </button>
+          <Link to="/admin/design">Designer</Link>
+          <Link to="/">Home</Link>
+        </div>
       </div>
       {error && <div className="banner">{error}</div>}
 
@@ -88,7 +90,8 @@ export function AdminListPage() {
               </div>
             </div>
             <div className="row">
-              <Link to={`/admin/apps/${a.slug}`}>Sửa</Link>
+              <Link to={`/admin/design/${a.slug}`}>Design</Link>
+              <Link to={`/admin/apps/${a.slug}`}>JSON</Link>
               <Link to={`/runtime/${a.slug}${a.status !== 'published' ? '?preview=true' : ''}`}>
                 Runtime
               </Link>
