@@ -1143,22 +1143,8 @@ export function FormRuntimeView({
       )}
       {isModal && (
         <div
-          className={`modal-header${isFullscreen ? ' modal-header--app' : ''}${
-            headerControls.length ? ' modal-header--has-actions' : ''
-          }`}
+          className={`modal-header${headerControls.length ? ' modal-header--has-actions' : ''}`}
         >
-          {isFullscreen ? (
-            <button
-              type="button"
-              className="modal-back"
-              title={uiCopy(lan, 'close')}
-              aria-label={uiCopy(lan, 'close')}
-              onClick={() => setStack((s) => s.slice(0, -1))}
-              disabled={busy}
-            >
-              ‹
-            </button>
-          ) : null}
           <h2>{resolveLocalizedText(top.form.title, lan)}</h2>
           <div className="modal-header-actions">
             {headerControls.map((hc) => {
@@ -1179,18 +1165,16 @@ export function FormRuntimeView({
                 </button>
               );
             })}
-            {!isFullscreen ? (
-              <button
-                type="button"
-                className="modal-close"
-                title={uiCopy(lan, 'close')}
-                aria-label={uiCopy(lan, 'close')}
-                onClick={() => setStack((s) => s.slice(0, -1))}
-                disabled={busy}
-              >
-                ×
-              </button>
-            ) : null}
+            <button
+              type="button"
+              className="modal-close"
+              title={uiCopy(lan, 'close')}
+              aria-label={uiCopy(lan, 'close')}
+              onClick={() => setStack((s) => s.slice(0, -1))}
+              disabled={busy}
+            >
+              ×
+            </button>
           </div>
         </div>
       )}

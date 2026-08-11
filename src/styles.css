@@ -604,18 +604,24 @@ table.data tr.selected {
   justify-content: stretch;
   padding: 0;
   background: #fff;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .modal--fullscreen {
   width: 100%;
-  max-width: none;
   height: 100%;
+  max-width: none;
   max-height: none;
   border-radius: 0;
   box-shadow: none;
-  padding: 12px 16px 16px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
 }
 
 .modal--fullscreen > .form-shell,
@@ -623,6 +629,7 @@ table.data tr.selected {
 .modal--fullscreen > .form-drawer {
   flex: 1 1 auto;
   min-height: 0;
+  height: 100%;
 }
 
 .modal--fullscreen > .form-shell > .form-scroll,
@@ -665,58 +672,6 @@ table.data tr.selected {
   padding: 6px 4px;
   cursor: pointer;
   white-space: nowrap;
-}
-
-.modal-header--app {
-  align-items: center;
-  margin: -16px -16px 12px;
-  padding: 10px 12px;
-  background: #1976d2;
-  color: #fff;
-}
-
-.modal--fullscreen .modal-header--app {
-  margin: 0 0 12px;
-  width: calc(100% + 32px);
-  margin-left: -16px;
-  margin-right: -16px;
-  margin-top: -16px;
-}
-
-.modal-header--app h2 {
-  text-align: center;
-  font-size: 1.05rem;
-  font-weight: 700;
-  color: #fff;
-  padding: 0;
-}
-
-.modal-header--app .modal-header-link {
-  color: #fff;
-  font-weight: 600;
-}
-
-.modal-back {
-  flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: #fff;
-  font-size: 1.75rem;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.modal-back:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.modal-back:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .modal-close {
@@ -1873,10 +1828,26 @@ pre.json {
   align-items: center;
 }
 
+.design-phone .modal-backdrop.embedded.modal-backdrop--fullscreen {
+  align-items: stretch;
+  justify-content: stretch;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 16px;
+}
+
 .design-phone .modal {
   width: min(100%, 100%);
   max-height: 90%;
   border-radius: 12px;
+}
+
+.design-phone .modal.modal--fullscreen {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
 }
 
 .design-empty {
