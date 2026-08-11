@@ -6,19 +6,27 @@ export function isFooterControl(c: FormControlDef): boolean {
   return (c.placement ?? '').trim().toLowerCase() === 'footer';
 }
 
-/** Tách controls body / footer (đã sort theo order). */
+/** Control trên modal header (vd. «Lịch sử»). */
+export function isHeaderControl(c: FormControlDef): boolean {
+  return (c.placement ?? '').trim().toLowerCase() === 'header';
+}
+
+/** Tách controls header / body / footer (đã sort theo order). */
 export function splitControlsByPlacement(controls: FormControlDef[]): {
+  header: FormControlDef[];
   body: FormControlDef[];
   footer: FormControlDef[];
 } {
   const sorted = [...controls].sort((a, b) => a.order - b.order);
+  const header: FormControlDef[] = [];
   const body: FormControlDef[] = [];
   const footer: FormControlDef[] = [];
   for (const c of sorted) {
-    if (isFooterControl(c)) footer.push(c);
+    if (isHeaderControl(c)) header.push(c);
+    else if (isFooterControl(c)) footer.push(c);
     else body.push(c);
   }
-  return { body, footer };
+  return { header, body, footer };
 }
 
 /** Hàng ngang (cùng rowId kề nhau). */

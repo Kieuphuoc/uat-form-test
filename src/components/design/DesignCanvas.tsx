@@ -9,7 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
-import { controlLayoutStyle } from '../../lib/controlLayout';
+import { controlLayoutStyle, controlTextStyle, controlVisualStyle } from '../../lib/controlLayout';
 import {
   groupControlsByRowId,
   resolveGroupBackground,
@@ -27,6 +27,7 @@ import {
 import { resolveLocalizedText } from '../../lib/localizedText';
 import type { FormControlDef, FormListDef } from '../../types/form';
 import type { DesignSelection, FormDocument } from '../../types/formDoc';
+import { LiveClockLabel } from '../LiveClockLabel';
 import { DesignContextMenu, type ContextMenuState } from './DesignContextMenu';
 
 type Props = {
@@ -55,7 +56,7 @@ type Props = {
 
 function displayLabel(c: FormControlDef): string {
   if (c.type === 'button' || c.type === 'iconButton' || c.type === 'label')
-    return resolveLocalizedText(c.text, 'v') || resolveLocalizedText(c.label, 'v') || c.id;
+    return resolveLocalizedText(c.text, 'v') || c.id;
   return resolveLocalizedText(c.label, 'v') || c.id;
 }
 
@@ -98,9 +99,14 @@ export function DesignCanvas({
   const dragColumn = useRef<{ listId: string; field: string } | null>(null);
   moveRef.current = onMoveGroupToInsertIndex;
 
-  const { body: bodyControls, footer: footerControls } = useMemo(
+  const { header: headerControls, body: bodyOnly, footer: footerControls } = useMemo(
     () => splitControlsByPlacement(doc.controls),
     [doc.controls],
+  );
+  /** Design: header controls hiện cùng vùng body (có type badge). */
+  const bodyControls = useMemo(
+    () => [...headerControls, ...bodyOnly],
+    [headerControls, bodyOnly],
   );
   const bodyGroups = useMemo(() => groupControlsForDesign(bodyControls), [bodyControls]);
   const footerGroups = useMemo(() => groupControlsForDesign(footerControls), [footerControls]);
@@ -302,13 +308,16 @@ export function DesignCanvas({
       ? { height: c.height.trim(), minHeight: c.height.trim() }
       : undefined;
     const labelText = resolveLocalizedText(c.label, 'v').trim();
-    const showLabel = labelText.length > 0;
+    const showLabel = c.type !== 'label' && labelText.length > 0;
     const placeholderText = resolveLocalizedText(c.placeholder, 'v');
+    const textStyle = controlTextStyle(c);
+    const visualStyle = controlVisualStyle(c, inRow);
+    const labelFmt = (c.format ?? '').trim().toLowerCase();
     const btnStyle: CSSProperties | undefined =
       c.type === 'button'
         ? {
+            ...visualStyle,
             ...(c.color?.trim() ? { background: c.color.trim(), borderColor: c.color.trim() } : {}),
-            ...(c.textColor?.trim() ? { color: c.textColor.trim() } : {}),
           }
         : undefined;
 
@@ -323,6 +332,7 @@ export function DesignCanvas({
         }}
         onDoubleClick={(e) => {
           e.stopPropagation();
+          if (c.type === 'label' && (labelFmt === 'livedate' || labelFmt === 'livetime')) return;
           beginEdit(c);
         }}
         onContextMenu={(e) =>
@@ -360,7 +370,9 @@ export function DesignCanvas({
               >
                 {c.icon || '⬜'}
               </span>
-              <span className="form-icon-btn__label">{displayLabel(c)}</span>
+              <span className="form-icon-btn__label" style={textStyle}>
+                {displayLabel(c)}
+              </span>
             </button>
           )
         ) : c.type === 'button' ? (
@@ -384,7 +396,27 @@ export function DesignCanvas({
             </button>
           )
         ) : c.type === 'label' ? (
-          isEditing ? (
+          labelFmt === 'livedate' ? (
+            <LiveClockLabel
+              kind="liveDate"
+              className="form-label-control form-live-date"
+              style={textStyle}
+            />
+          ) : labelFmt === 'livetime' ? (
+            <LiveClockLabel
+              kind="liveTime"
+              className="form-label-control form-live-time"
+              style={textStyle}
+            />
+          ) : labelFmt === 'personnel' ||
+            (c.bind ?? '').trim().toLowerCase() === 'sessionuser' ? (
+            <div className="form-personnel-row" style={textStyle}>
+              <span className="form-personnel-row__label">
+                {resolveLocalizedText(c.text, 'v').trim() || 'Nhân sự'}
+              </span>
+              <span className="form-personnel-row__value">(user đang login)</span>
+            </div>
+          ) : isEditing ? (
             <input
               ref={editRef}
               className="design-inline-edit"
@@ -398,8 +430,14 @@ export function DesignCanvas({
               onClick={(e) => e.stopPropagation()}
             />
           ) : (
-            <p className="muted">{displayLabel(c)}</p>
+            <p className="form-label-control" style={textStyle}>
+              {displayLabel(c)}
+            </p>
           )
+        ) : c.type === 'maps' ? (
+          <div className="form-maps form-maps--design" style={heightStyle}>
+            <span className="form-maps__overlay">maps · {c.id}</span>
+          </div>
         ) : (
           <label className="field">
             {isEditing ? (
@@ -424,9 +462,15 @@ export function DesignCanvas({
               </span>
             ) : null}
             {c.type === 'textarea' ? (
-              <textarea disabled readOnly placeholder={placeholderText || ''} style={heightStyle} tabIndex={-1} />
+              <textarea
+                disabled
+                readOnly
+                placeholder={placeholderText || ''}
+                style={{ ...heightStyle, ...textStyle }}
+                tabIndex={-1}
+              />
             ) : c.type === 'select' ? (
-              <select disabled tabIndex={-1}>
+              <select disabled tabIndex={-1} style={textStyle}>
                 <option>—</option>
               </select>
             ) : (
@@ -436,7 +480,7 @@ export function DesignCanvas({
                 tabIndex={-1}
                 type={c.type === 'number' ? 'number' : 'text'}
                 placeholder={placeholderText || ''}
-                style={heightStyle}
+                style={{ ...heightStyle, ...textStyle }}
               />
             )}
           </label>

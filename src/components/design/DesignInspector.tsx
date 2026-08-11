@@ -1155,6 +1155,19 @@ export function DesignInspector({
             />
           </PropRow>
         )}
+        {c.type === 'label' && (
+          <PropRow label="format" title="liveDate / liveTime / personnel — đồng hồ & nhân sự">
+            <select
+              value={(c.format ?? '').trim()}
+              onChange={(e) => patch({ format: e.target.value.trim() || undefined })}
+            >
+              <option value="">(text thường)</option>
+              <option value="liveDate">liveDate — ngày realtime</option>
+              <option value="liveTime">liveTime — giờ realtime</option>
+              <option value="personnel">personnel — kèm user login</option>
+            </select>
+          </PropRow>
+        )}
         {(c.type === 'label' || c.type === 'text') && (
           <PropRow label="openAs" title="view: mở link / mail / phone">
             <select
@@ -1168,7 +1181,7 @@ export function DesignInspector({
             </select>
           </PropRow>
         )}
-        {c.type !== 'button' && c.type !== 'iconButton' && (
+        {c.type !== 'button' && c.type !== 'iconButton' && c.type !== 'label' && (
           <PropRow label="label">
             <LocalizedTextInput
               value={c.label}
@@ -1194,15 +1207,6 @@ export function DesignInspector({
                 onChange={(color) => patch({ color })}
               />
             </PropRow>
-            {c.type === 'button' && (
-              <PropRow label="textColor">
-                <ColorPropInput
-                  value={c.textColor ?? ''}
-                  placeholder="#ffffff"
-                  onChange={(textColor) => patch({ textColor })}
-                />
-              </PropRow>
-            )}
             <label className="design-prop-row design-prop-row--block" title="Mở form khác khi bấm">
               <span className="design-prop-label">linkFormId</span>
               <span className="design-prop-value">
@@ -1213,6 +1217,73 @@ export function DesignInspector({
                 />
               </span>
             </label>
+          </>
+        )}
+        {(c.type === 'label' ||
+          c.type === 'text' ||
+          c.type === 'textarea' ||
+          c.type === 'button' ||
+          c.type === 'iconButton' ||
+          c.type === 'number' ||
+          c.type === 'date' ||
+          c.type === 'time' ||
+          c.type === 'select') && (
+          <>
+            <PropRow label="fontFamily" title="Font chữ">
+              <input
+                value={c.fontFamily ?? ''}
+                placeholder="system-ui, Arial…"
+                onChange={(e) => patch({ fontFamily: e.target.value.trim() || undefined })}
+              />
+            </PropRow>
+            <PropRow label="fontSize" title="Cỡ chữ">
+              <input
+                value={c.fontSize ?? ''}
+                placeholder="14px / 1.25rem"
+                onChange={(e) => patch({ fontSize: e.target.value.trim() || undefined })}
+              />
+            </PropRow>
+            <PropRow label="fontWeight" title="Độ đậm">
+              <select
+                value={c.fontWeight ?? ''}
+                onChange={(e) => patch({ fontWeight: e.target.value.trim() || undefined })}
+              >
+                <option value="">(mặc định)</option>
+                <option value="normal">normal</option>
+                <option value="500">500</option>
+                <option value="600">600</option>
+                <option value="700">bold</option>
+                <option value="800">800</option>
+              </select>
+            </PropRow>
+            <PropRow label="fontStyle" title="Kiểu chữ">
+              <select
+                value={c.fontStyle ?? ''}
+                onChange={(e) => patch({ fontStyle: e.target.value.trim() || undefined })}
+              >
+                <option value="">(mặc định)</option>
+                <option value="normal">normal</option>
+                <option value="italic">italic</option>
+              </select>
+            </PropRow>
+            <PropRow label="textAlign" title="Căn chữ">
+              <select
+                value={c.textAlign ?? ''}
+                onChange={(e) => patch({ textAlign: e.target.value.trim() || undefined })}
+              >
+                <option value="">(mặc định)</option>
+                <option value="left">left</option>
+                <option value="center">center</option>
+                <option value="right">right</option>
+              </select>
+            </PropRow>
+            <PropRow label="textColor" title="Màu chữ">
+              <ColorPropInput
+                value={c.textColor ?? ''}
+                placeholder="#0f172a"
+                onChange={(textColor) => patch({ textColor })}
+              />
+            </PropRow>
           </>
         )}
         {(c.type === 'text' ||
@@ -1368,15 +1439,27 @@ export function DesignInspector({
           groupCollapsed={c.groupCollapsed}
           patch={patch}
         />
-        <PropRow label="placement" title="body = vùng scroll; footer = pin cuối form (sau list)">
+        <PropRow
+          label="placement"
+          title="body = vùng scroll; header = nút trên modal header; footer = pin cuối form"
+        >
           <select
-            value={(c.placement ?? 'body').toLowerCase() === 'footer' ? 'footer' : 'body'}
+            value={
+              (c.placement ?? 'body').toLowerCase() === 'footer'
+                ? 'footer'
+                : (c.placement ?? '').toLowerCase() === 'header'
+                  ? 'header'
+                  : 'body'
+            }
             onChange={(e) => {
               const v = e.target.value;
-              patch({ placement: v === 'footer' ? 'footer' : undefined });
+              patch({
+                placement: v === 'footer' || v === 'header' ? v : undefined,
+              });
             }}
           >
             <option value="body">body</option>
+            <option value="header">header</option>
             <option value="footer">footer</option>
           </select>
         </PropRow>
@@ -1394,12 +1477,42 @@ export function DesignInspector({
             onChange={(e) => patch({ width: e.target.value.trim() || undefined })}
           />
         </PropRow>
-        {(c.type === 'textarea' || c.height) && (
+        {(c.type === 'textarea' || c.type === 'maps' || c.height) && (
           <PropRow label="height">
             <input
               value={c.height ?? ''}
-              placeholder="120px"
+              placeholder={c.type === 'maps' ? '220px' : '120px'}
               onChange={(e) => patch({ height: e.target.value.trim() || undefined })}
+            />
+          </PropRow>
+        )}
+        {(c.type === 'label' || c.type === 'text' || c.type === 'maps') && (
+          <PropRow
+            label="bind"
+            title="sessionUser = tên/email user login (label format personnel)"
+          >
+            <input
+              value={c.bind ?? ''}
+              placeholder={c.type === 'maps' ? '(value locations)' : 'sessionUser'}
+              onChange={(e) => patch({ bind: e.target.value.trim() || undefined })}
+            />
+          </PropRow>
+        )}
+        {c.type === 'maps' && (
+          <PropRow label="defaultValue" title='vd. "10.76, 106.61" hoặc nhiều điểm cách ;'>
+            <input
+              value={
+                c.defaultValue == null
+                  ? ''
+                  : typeof c.defaultValue === 'string'
+                    ? c.defaultValue
+                    : String(c.defaultValue)
+              }
+              placeholder="lat, lng;lat, lng"
+              onChange={(e) => {
+                const t = e.target.value;
+                patch({ defaultValue: t.trim() ? t : undefined });
+              }}
             />
           </PropRow>
         )}

@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import { fetchRuntimeForm, runAction } from '../api/formApi';
-import { controlLayoutStyle } from '../lib/controlLayout';
+import { controlLayoutStyle, controlTextStyle, controlVisualStyle } from '../lib/controlLayout';
 import {
   groupControlsByRowId,
   groupControlsForLayout,
@@ -53,8 +53,13 @@ import {
   RuntimeColorInput,
   RuntimeFileImageInput,
 } from './formControlsExtras';
+import { MapsControl } from './MapsControl';
+import { LiveClockLabel } from './LiveClockLabel';
 import { getCachedImagePreviewUrl, loadImagePreviewBlob, parseAttachments, stripAttachmentPreviewUrls } from '../api/formUploadApi';
 import { useUiLan } from '../hooks/useUiLan';
+import { useAuth } from '../auth/AuthContext';
+import { buildGoogleMapsUrl, requestDeviceGps } from '../lib/deviceGps';
+import { formatMapLocations } from '../lib/mapLocations';
 
 type Toast = { text: string; level: string } | null;
 
@@ -422,6 +427,7 @@ export function FormRuntimeView({
 }: Props) {
   const authLan = useUiLan();
   const lan = uiLan ?? authLan;
+  const { user } = useAuth();
   const [stack, setStack] = useState<StackFrame[]>([
     buildFrame(initialForm, {
       values: initialValues,
@@ -516,6 +522,62 @@ export function FormRuntimeView({
         let frames = [...stack.slice(0, -1), working];
 
         for (const actionId of actionIds) {
+          const meta = working.form.actions?.[actionId];
+          if ((meta?.type ?? '').trim().toLowerCase() === 'getgps') {
+            try {
+              const fix = await requestDeviceGps();
+              const loc = formatMapLocations([{ lat: fix.latitude, lng: fix.longitude }]);
+              const mapsIds = working.form.controls
+                .filter((c) => c.type === 'maps')
+                .map((c) => c.id);
+              const nextValues = { ...working.values };
+              for (const mid of mapsIds) nextValues[mid] = loc;
+              working = { ...working, values: nextValues };
+              frames = [...frames.slice(0, -1), working];
+
+              const resultFormId = meta?.formId?.trim();
+              if (resultFormId) {
+                const loaded = await fetchRuntimeForm(slug, resultFormId, preview);
+                if (!loaded.success || !loaded.data) {
+                  showToast(loaded.error || uiCopy(lan, 'cannotOpenForm'), 'error');
+                  setStack(frames);
+                  return;
+                }
+                const seed = {
+                  latitude: fix.latitude.toFixed(7),
+                  longitude: fix.longitude.toFixed(7),
+                  accuracy: fix.accuracy != null ? fix.accuracy.toFixed(1) : '—',
+                  timestamp: new Date(fix.timestamp).toLocaleString('vi-VN'),
+                  mapsUrl: buildGoogleMapsUrl(fix.latitude, fix.longitude),
+                  location: loc,
+                };
+                frames = [
+                  ...frames,
+                  buildFrame(loaded.data.form, {
+                    values: { ...(loaded.data.values ?? {}), ...seed },
+                    state: loaded.data.state,
+                    datasets: loaded.data.datasets,
+                    formMode: meta?.formMode,
+                    uiMode: meta?.mode || 'modal',
+                  }),
+                ];
+                working = frames[frames.length - 1]!;
+              } else {
+                showToast(
+                  `GPS: ${fix.latitude.toFixed(5)}, ${fix.longitude.toFixed(5)} (±${
+                    fix.accuracy != null ? fix.accuracy.toFixed(0) : '?'
+                  }m)`,
+                  'success',
+                );
+              }
+            } catch (e) {
+              showToast(e instanceof Error ? e.message : String(e), 'error');
+              setStack(frames);
+              return;
+            }
+            continue;
+          }
+
           const res = await runAction(slug, actionId, {
             formId: working.formId,
             controlValues: stripAttachmentPreviewUrls(working.values),
@@ -697,7 +759,7 @@ export function FormRuntimeView({
     void runActions(actions, undefined, undefined, { [qBind]: query, [pageBind]: 1 });
   };
 
-  const { body: bodyControls, footer: footerControls } = useMemo(
+  const { header: headerControls, body: bodyControls, footer: footerControls } = useMemo(
     () => splitControlsByPlacement(top.form.controls),
     [top.form.controls],
   );
@@ -730,26 +792,82 @@ export function FormRuntimeView({
     const editable = isControlEditable(c, top.formMode, busy);
     const disabled = !editable;
     const layoutStyle = controlLayoutStyle(c, inRow);
+    const textStyle = controlTextStyle(c);
+    const visualStyle = controlVisualStyle(c, inRow);
     const heightStyle: CSSProperties | undefined = c.height?.trim()
       ? { height: c.height.trim(), minHeight: c.height.trim() }
       : undefined;
     const labelText = resolveLocalizedText(c.label, lan).trim();
-    const showLabel = labelText.length > 0;
+    const showLabel = c.type !== 'label' && labelText.length > 0;
     const textText = resolveLocalizedText(c.text, lan);
     const placeholderText = resolveLocalizedText(c.placeholder, lan) || undefined;
 
     if (c.type === 'label') {
+      const fmt = (c.format ?? '').trim().toLowerCase();
+      if (fmt === 'livedate') {
+        return (
+          <LiveClockLabel
+            key={c.id}
+            kind="liveDate"
+            className="form-label-control form-live-date"
+            style={visualStyle}
+          />
+        );
+      }
+      if (fmt === 'livetime') {
+        return (
+          <LiveClockLabel
+            key={c.id}
+            kind="liveTime"
+            className="form-label-control form-live-time"
+            style={visualStyle}
+          />
+        );
+      }
+
       const openAs = resolveOpenAs(c.openAs);
       const fromValue = asInputValue(top.values[c.id]).trim();
-      const raw = (fromValue || textText || labelText).trim();
+      let sessionText = '';
+      if ((c.bind ?? '').trim().toLowerCase() === 'sessionuser') {
+        const name = (user?.nickname || user?.email || '').trim();
+        const email = (user?.email || '').trim();
+        sessionText =
+          name && email && name !== email ? `${name} (${email})` : name || email || '—';
+      }
+      // type=label: nội dung chỉ lấy từ `text` (không dùng prop `label`).
+      const caption = textText.trim();
+      const raw = (fromValue || sessionText || caption).trim();
+      if (fmt === 'personnel' || (c.bind ?? '').trim().toLowerCase() === 'sessionuser') {
+        const left = caption || 'Nhân sự';
+        return (
+          <div key={c.id} className="form-personnel-row" style={visualStyle}>
+            <span className="form-personnel-row__label">{left}</span>
+            <span className="form-personnel-row__value">{sessionText || fromValue || '—'}</span>
+          </div>
+        );
+      }
       return (
-        <p key={c.id} className="form-label-control" style={layoutStyle}>
-          {openAs && raw ? <OpenAsAnchor kind={openAs} value={raw} /> : raw || labelText}
+        <p key={c.id} className="form-label-control" style={visualStyle}>
+          {openAs && raw ? <OpenAsAnchor kind={openAs} value={raw} /> : raw || c.id}
         </p>
       );
     }
 
     if (c.type === 'hidden') return null;
+
+    if (c.type === 'maps') {
+      return (
+        <div key={c.id} className="form-maps-field" style={layoutStyle}>
+          {showLabel ? <span className="form-maps-field__label">{labelText}</span> : null}
+          <MapsControl
+            value={top.values[c.id] ?? c.defaultValue}
+            height={c.height}
+            autoLocate={!asInputValue(top.values[c.id] ?? c.defaultValue).trim()}
+            onLocationsChange={(serialized) => setValue(c.id, serialized)}
+          />
+        </div>
+      );
+    }
 
     if (c.type === 'iconButton') {
       const bg = c.color?.trim() || '#2f6fed';
@@ -775,9 +893,8 @@ export function FormRuntimeView({
 
     if (c.type === 'button') {
       const btnStyle: CSSProperties = {
-        ...layoutStyle,
+        ...visualStyle,
         ...(c.color?.trim() ? { background: c.color.trim(), borderColor: c.color.trim() } : {}),
-        ...(c.textColor?.trim() ? { color: c.textColor.trim() } : {}),
       };
       return (
         <button
@@ -803,6 +920,7 @@ export function FormRuntimeView({
       readOnly: disabled,
       placeholder: placeholderText,
       value: asInputValue(top.values[c.id]),
+      style: { ...heightStyle, ...textStyle } as CSSProperties,
       onChange: (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         if (!editable) return;
         const v = e.target.value;
@@ -833,7 +951,7 @@ export function FormRuntimeView({
           </em>
         ) : null}
         {c.type === 'textarea' ? (
-          <textarea {...common} style={heightStyle} />
+          <textarea {...common} style={{ ...heightStyle, ...textStyle }} />
         ) : c.type === 'select' ? (
           <RuntimeSelectControl
             c={c}
@@ -841,7 +959,7 @@ export function FormRuntimeView({
             editable={editable}
             value={asInputValue(top.values[c.id])}
             datasets={top.datasets}
-            heightStyle={heightStyle}
+            heightStyle={{ ...heightStyle, ...textStyle }}
             placeholder={placeholderText}
             onChangeValue={(v) => {
               if (!editable) return;
@@ -871,7 +989,7 @@ export function FormRuntimeView({
             format={c.format}
             placeholder={placeholderText}
             value={top.values[c.id]}
-            style={heightStyle}
+            style={{ ...heightStyle, ...textStyle }}
             onCommit={(n) => {
               setValue(c.id, n);
               if (c.onChange?.length) void runActions(c.onChange, undefined, { [c.id]: n });
@@ -885,7 +1003,7 @@ export function FormRuntimeView({
             format={c.format}
             placeholder={placeholderText}
             value={top.values[c.id]}
-            style={heightStyle}
+            style={{ ...heightStyle, ...textStyle }}
             onCommit={(s) => {
               setValue(c.id, s);
               if (c.onChange?.length) void runActions(c.onChange, undefined, { [c.id]: s });
@@ -899,7 +1017,7 @@ export function FormRuntimeView({
             format={c.format}
             placeholder={placeholderText}
             value={top.values[c.id]}
-            style={heightStyle}
+            style={{ ...heightStyle, ...textStyle }}
             onCommit={(s) => {
               setValue(c.id, s);
               if (c.onChange?.length) void runActions(c.onChange, undefined, { [c.id]: s });
@@ -911,7 +1029,7 @@ export function FormRuntimeView({
             disabled={disabled}
             editable={editable}
             value={top.values[c.id]}
-            style={heightStyle}
+            style={{ ...heightStyle, ...textStyle }}
             lan={lan}
             onCommit={(hex) => {
               setValue(c.id, hex);
@@ -946,7 +1064,7 @@ export function FormRuntimeView({
               <OpenAsAnchor kind={openAs} value={raw} className="form-openas-link form-openas-link--field" />
             );
           }
-          return <input {...common} type="text" style={heightStyle} />;
+          return <input {...common} type="text" style={{ ...heightStyle, ...textStyle }} />;
         })()}
       </label>
     );
@@ -1024,18 +1142,56 @@ export function FormRuntimeView({
         <h1 className="form-drawer-title">{resolveLocalizedText(top.form.title, lan)}</h1>
       )}
       {isModal && (
-        <div className="modal-header">
+        <div
+          className={`modal-header${isFullscreen ? ' modal-header--app' : ''}${
+            headerControls.length ? ' modal-header--has-actions' : ''
+          }`}
+        >
+          {isFullscreen ? (
+            <button
+              type="button"
+              className="modal-back"
+              title={uiCopy(lan, 'close')}
+              aria-label={uiCopy(lan, 'close')}
+              onClick={() => setStack((s) => s.slice(0, -1))}
+              disabled={busy}
+            >
+              ‹
+            </button>
+          ) : null}
           <h2>{resolveLocalizedText(top.form.title, lan)}</h2>
-          <button
-            type="button"
-            className="modal-close"
-            title={uiCopy(lan, 'close')}
-            aria-label={uiCopy(lan, 'close')}
-            onClick={() => setStack((s) => s.slice(0, -1))}
-            disabled={busy}
-          >
-            ×
-          </button>
+          <div className="modal-header-actions">
+            {headerControls.map((hc) => {
+              if (!isControlVisible(hc, top.formMode)) return null;
+              const ht = resolveLocalizedText(hc.text, lan) || resolveLocalizedText(hc.label, lan);
+              return (
+                <button
+                  key={hc.id}
+                  type="button"
+                  className="modal-header-link"
+                  disabled={busy || hc.enabled === false}
+                  onClick={() => {
+                    if (hc.linkFormId?.trim()) void openLinkedForm(hc.linkFormId.trim());
+                    else if (hc.onClick?.length) void runActions(hc.onClick);
+                  }}
+                >
+                  {ht || hc.id}
+                </button>
+              );
+            })}
+            {!isFullscreen ? (
+              <button
+                type="button"
+                className="modal-close"
+                title={uiCopy(lan, 'close')}
+                aria-label={uiCopy(lan, 'close')}
+                onClick={() => setStack((s) => s.slice(0, -1))}
+                disabled={busy}
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
         </div>
       )}
 

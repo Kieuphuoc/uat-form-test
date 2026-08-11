@@ -54,8 +54,18 @@ export type FormControlDef = {
   icon?: string;
   /** Màu nền: ô icon (iconButton) hoặc nút (button). */
   color?: string;
-  /** Màu chữ button. */
+  /** Màu chữ button / label / text… */
   textColor?: string;
+  /** Font chữ, vd. `Arial`, `Roboto`, `system-ui`. */
+  fontFamily?: string;
+  /** Cỡ chữ, vd. `14px`, `1.25rem`. */
+  fontSize?: string;
+  /** Độ đậm: `normal` | `bold` | `600`… */
+  fontWeight?: string;
+  /** Kiểu: `normal` | `italic`. */
+  fontStyle?: string;
+  /** Căn chữ: `left` | `center` | `right`. */
+  textAlign?: string;
   /** Mở form khác khi bấm (không cần action SQL). */
   linkFormId?: string;
   options?: unknown;

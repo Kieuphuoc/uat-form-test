@@ -17,6 +17,7 @@ const ACTION_TYPES = [
   'setValue',
   'validate',
   'showForm',
+  'getGps',
   'closeForm',
   'message',
 ] as const;
@@ -40,6 +41,8 @@ const ACTION_TYPE_HINTS: Record<string, string> = {
   validate: 'validate: kiểm rules (required…). Lỗi → dừng chuỗi action, hiện message.',
   showForm:
     'showForm: mở form con (formId). mode=modal|sheet|fullscreen; formMode=view|new|edit; returnMap map giá trị trả về parent.',
+  getGps:
+    'getGps: client-only — lấy GPS độ chính xác cao, cập nhật control maps (nếu có), mở formId kết quả (giống Test & Debug).',
   closeForm:
     'closeForm: đóng modal/sheet/fullscreen, trả returnValues theo returnMap về form cha.',
   message: 'message: toast thông báo (message + level info|success|error).',
@@ -460,7 +463,7 @@ export function DesignActionsEditor({
               </label>
             )}
 
-            {type === 'showForm' && (
+            {(type === 'showForm' || type === 'getGps') && (
               <div className="design-actions-grid">
                 <label className="field design-actions-formid">
                   formId
@@ -567,6 +570,7 @@ export function DesignActionsEditor({
 
             {(type === 'setValue' || type === 'validate' || type === 'closeForm' || !isSql) &&
               type !== 'showForm' &&
+              type !== 'getGps' &&
               type !== 'message' && (
                 <label className="field design-actions-sql-field">
                   Action JSON (toàn bộ)

@@ -8,7 +8,7 @@ import {
 } from './controlGroups';
 import { resolveLocalizedText, type LocalizedText } from './localizedText';
 
-export { groupControlsForDesign, splitControlsByPlacement, isFooterControl } from './controlGroups';
+export { groupControlsForDesign, splitControlsByPlacement, isFooterControl, isHeaderControl } from './controlGroups';
 export type { DesignControlGroup } from './controlGroups';
 
 const ORDER_STEP = 10;
@@ -148,6 +148,13 @@ export function createControl(
       uploadMode: 'immediate',
       previewWidth: 50,
     };
+  if (type === 'maps')
+    return {
+      ...base,
+      label: 'Bản đồ',
+      height: '220px',
+      placeholder: 'lat, lng;lat, lng',
+    };
   return { ...base, label: 'Trường mới' };
 }
 
@@ -170,8 +177,8 @@ export function updateControl(
     controls: doc.controls.map((c) => (c.id === id ? { ...c, ...patch, id: c.id } : c)),
   };
   if (!('placement' in patch)) return next;
-  const { body, footer } = splitControlsByPlacement(next.controls);
-  return renumberOrders({ ...next, controls: [...body, ...footer] });
+  const { header, body, footer } = splitControlsByPlacement(next.controls);
+  return renumberOrders({ ...next, controls: [...header, ...body, ...footer] });
 }
 
 export function deleteControl(doc: FormDocument, id: string): FormDocument {
@@ -242,7 +249,7 @@ export function moveControlGroupToInsertIndexInZone(
   fromGroupIndex: number,
   insertIndexAfterRemoval: number,
 ): FormDocument {
-  const { body, footer } = splitControlsByPlacement(doc.controls);
+  const { header, body, footer } = splitControlsByPlacement(doc.controls);
   const zoneControls = zone === 'footer' ? footer : body;
   const other = zone === 'footer' ? body : footer;
   const groups = groupControls(zoneControls);
@@ -253,8 +260,8 @@ export function moveControlGroupToInsertIndexInZone(
   const to = Math.max(0, Math.min(insertIndexAfterRemoval, next.length));
   next.splice(to, 0, g);
   const flat = next.flatMap(flattenDesignGroup);
-  const controls = zone === 'footer' ? [...other, ...flat] : [...flat, ...other];
-  return renumberOrders({ ...doc, controls });
+  const mid = zone === 'footer' ? [...other, ...flat] : [...flat, ...other];
+  return renumberOrders({ ...doc, controls: [...header, ...mid] });
 }
 
 /** Di chuyển nhóm tới vị trí `toGroupIndex` trong list **sau khi đã remove** nguồn (0..n-1). */

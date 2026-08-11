@@ -32,6 +32,7 @@ export const CONTROL_TYPES = [
   'color',
   'file',
   'image',
+  'maps',
   'select',
   'button',
   'iconButton',

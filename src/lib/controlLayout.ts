@@ -20,3 +20,26 @@ export function controlLayoutStyle(c: FormControlDef, inRow: boolean): CSSProper
   }
   return { flex: `0 0 ${raw}`, width: raw, maxWidth: raw, minWidth: 0 };
 }
+
+/** Typography + màu chữ — dùng chung Design canvas và Runtime. */
+export function controlTextStyle(c: FormControlDef): CSSProperties {
+  const style: CSSProperties = {};
+  const family = c.fontFamily?.trim();
+  if (family) style.fontFamily = family;
+  const size = c.fontSize?.trim();
+  if (size) style.fontSize = size;
+  const weight = c.fontWeight?.trim();
+  if (weight) style.fontWeight = weight as CSSProperties['fontWeight'];
+  const fstyle = c.fontStyle?.trim();
+  if (fstyle) style.fontStyle = fstyle as CSSProperties['fontStyle'];
+  const align = c.textAlign?.trim();
+  if (align) style.textAlign = align as CSSProperties['textAlign'];
+  const color = c.textColor?.trim();
+  if (color) style.color = color;
+  return style;
+}
+
+/** Gộp layout hàng + typography. */
+export function controlVisualStyle(c: FormControlDef, inRow: boolean): CSSProperties {
+  return { ...controlLayoutStyle(c, inRow), ...controlTextStyle(c) };
+}
