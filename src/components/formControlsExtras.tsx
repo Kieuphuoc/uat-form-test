@@ -4,6 +4,7 @@ import {
   deleteDraftFormFile,
   extractAccessTokenFromUrl,
   formatSizeKb,
+  cacheImagePreviewUrl,
   getCachedImagePreviewUrl,
   invalidateImagePreviewCache,
   loadImagePreviewBlob,
@@ -11,7 +12,6 @@ import {
   resolveFileHref,
   resolveUploadMode,
   revokePreviewUrl,
-  serializeAttachments,
   stashPendingFile,
   takePendingFile,
   uploadFormFile,
@@ -218,7 +218,7 @@ export function RuntimeFileImageInput({
   const fallbackAccept = kind === 'image' ? 'jpg,jpeg,png,gif,webp' : 'pdf,doc,docx,xls,xlsx,png,jpg,jpeg';
   const acceptAttr = acceptAttrFromExtensions(accept, fallbackAccept);
 
-  const commit = (next: FormFileItem[]) => onCommit(serializeAttachments(next));
+  const commit = (next: FormFileItem[]) => onCommit(next);
 
   const addFiles = async (list: FileList | null) => {
     if (!list?.length || !canUpload) return;
@@ -257,8 +257,9 @@ export function RuntimeFileImageInput({
             status: up.status ?? 0,
             previewUrl,
           };
-          if (kind === 'image' && up.id) {
-            void loadImagePreviewBlob(up.id, extractAccessTokenFromUrl(up.url));
+          // Giữ thumb local ngay — không phụ thuộc Files /image/256 (thường fail draft/CORS).
+          if (kind === 'image' && up.id && previewUrl) {
+            cacheImagePreviewUrl(up.id, previewUrl);
           }
         }
         if (kind === 'image') next.push(item);

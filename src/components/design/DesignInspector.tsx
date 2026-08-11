@@ -1067,12 +1067,16 @@ export function DesignInspector({
             onChange={(title) => onCommit(setFormMeta(doc, { title: title ?? '' }))}
           />
         </PropRow>
-        <PropRow label="layout">
+        <PropRow
+          label="layout"
+          title="stack = form thường; list = list-only (không border/tiêu đề list/chọn tất cả); drawer = Appdrawer"
+        >
           <select
             value={doc.layout || 'stack'}
             onChange={(e) => onCommit(setFormMeta(doc, { layout: e.target.value }))}
           >
-            <option value="stack">stack</option>
+            <option value="stack">stack (form)</option>
+            <option value="list">list (list only)</option>
             <option value="drawer">drawer (Appdrawer)</option>
           </select>
         </PropRow>

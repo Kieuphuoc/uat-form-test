@@ -201,6 +201,7 @@ export type FormListDef = {
 export type ClientFormDto = {
   id: string;
   title: LocalizedText;
+  /** stack (form) | list (list-only chrome) | drawer (Appdrawer) */
   layout: string;
   /** Mặc định khi mở form nếu không truyền formMode (view|new|edit). */
   defaultFormMode?: string;
@@ -224,7 +225,14 @@ export type RuntimeAppResponse = {
 };
 
 export type RuntimeUiDirective = {
-  openForm?: { formId: string; mode?: string; formMode?: string; returnMap?: Record<string, string> };
+  openForm?: {
+    formId: string;
+    mode?: string;
+    formMode?: string;
+    returnMap?: Record<string, string>;
+    values?: Record<string, unknown>;
+    state?: Record<string, unknown>;
+  };
   close?: { ok?: boolean; returnValues?: Record<string, unknown> };
   message?: { text: string; level?: string };
 };

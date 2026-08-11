@@ -11,9 +11,9 @@ export function HomePage() {
       </p>
       <div className="card stack">
         <div className="row">
-          <Link to="/runtime/leave">Demo /runtime/leave</Link>
+          <Link to="/runtime/hrm">Demo /runtime/hrm</Link>
           <Link to="/admin">Admin</Link>
-          <Link to="/admin/design/leave">Designer</Link>
+          <Link to="/admin/design/hrm">Designer</Link>
         </div>
         <p className="muted">
           JWT: {jwt ? 'có' : 'chưa'}

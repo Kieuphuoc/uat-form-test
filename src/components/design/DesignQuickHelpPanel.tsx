@@ -224,7 +224,7 @@ const ACTIONS_GUIDE: Guide = {
     'Event Property chỉ gắn **id** — body nằm ở đây.',
     'sqlQuery → `targetDataset`; PreferMock + mockRows.',
     'showForm / closeForm / setValue / validate / message.',
-    'Params: `control.*` | `state.*` | `row.*` | `session.*`.',
+    'Params: `control.*` | `state.*` | `row.*` | `session.userId|clientId|lan`.',
   ],
   asks: [
     {

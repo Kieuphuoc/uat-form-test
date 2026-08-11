@@ -55,6 +55,16 @@ export function getCachedImagePreviewUrl(fileId: string): string | undefined {
   return id ? imagePreviewCache.get(id) : undefined;
 }
 
+/** Gắn blob: preview vào cache theo file id (giữ thumb sau khi strip previewUrl khỏi values). */
+export function cacheImagePreviewUrl(fileId: string, blobUrl: string): void {
+  const id = fileId.trim();
+  const url = blobUrl.trim();
+  if (!id || !url) return;
+  const prev = imagePreviewCache.get(id);
+  if (prev && prev !== url) revokePreviewUrl(prev);
+  imagePreviewCache.set(id, url);
+}
+
 export function invalidateImagePreviewCache(fileId?: string | null): void {
   const id = (fileId ?? '').trim();
   if (!id) return;
@@ -240,9 +250,25 @@ export function parseAttachments(value: unknown): FormFileItem[] {
   return [];
 }
 
-/** Serialize để lưu values (bỏ blob previewUrl). */
+/** Serialize để lưu values / gửi API (bỏ blob previewUrl). */
 export function serializeAttachments(items: FormFileItem[]): FormFileItem[] {
   return items.map(({ previewUrl: _p, ...rest }) => rest);
+}
+
+/** Strip blob previewUrl trong control values trước khi POST action (tránh gửi blob: lên server). */
+export function stripAttachmentPreviewUrls(
+  values: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...values };
+  for (const [k, v] of Object.entries(out)) {
+    if (!Array.isArray(v)) continue;
+    const hasPreview = v.some(
+      (x) => x && typeof x === 'object' && 'previewUrl' in (x as object),
+    );
+    if (!hasPreview) continue;
+    out[k] = serializeAttachments(parseAttachments(v));
+  }
+  return out;
 }
 
 export function parseFileIds(value: unknown): string[] {

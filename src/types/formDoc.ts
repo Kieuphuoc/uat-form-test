@@ -5,6 +5,7 @@ import type { LocalizedText } from '../lib/localizedText';
 export type FormDocument = {
   id: string;
   title: LocalizedText;
+  /** stack (form) | list (list-only) | drawer (Appdrawer) */
   layout?: string;
   /** view | new | edit — mặc định khi mở form. */
   defaultFormMode?: string;

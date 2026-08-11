@@ -32,11 +32,11 @@ const FORMID_CUSTOM = '__custom__';
 
 const ACTION_TYPE_HINTS: Record<string, string> = {
   sqlQuery:
-    'sqlQuery: chạy SELECT → đổ targetDataset. Bật mock để dùng mockRows (không gọi SQL). Gắn vào onLoad / onChange / optionsAction.',
+    'sqlQuery: chạy SELECT → đổ targetDataset. Bật mock để dùng mockRows (không gọi SQL). Params: control.* / state.* / session.userId|clientId|lan. Gắn vào onLoad / onChange / optionsAction.',
   sqlExec:
-    'sqlExec: INSERT/UPDATE/DELETE hoặc EXEC procedure. Bật mock để bỏ qua SQL (dev). Params từ control.* / state.* / session.*.',
+    'sqlExec: INSERT/UPDATE/DELETE hoặc EXEC procedure. Bật mock để bỏ qua SQL (dev). Params từ control.* / state.* / session.userId|clientId|lan.',
   setValue:
-    'setValue: gán control.* / state.* từ map values (vd row.id). Bật mock để ưu tiên mockValues thay vì map thật.',
+    'setValue: gán control.* / state.* từ map values (vd row.id, session.lan). Bật mock để ưu tiên mockValues thay vì map thật.',
   validate: 'validate: kiểm rules (required…). Lỗi → dừng chuỗi action, hiện message.',
   showForm:
     'showForm: mở form con (formId). mode=modal|sheet|fullscreen; formMode=view|new|edit; returnMap map giá trị trả về parent.',

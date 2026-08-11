@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light;
+  color-scheme: only light;
   --bg: #f4f6f8;
   --card: #ffffff;
   --text: #1a2332;
@@ -23,10 +23,12 @@ body,
   min-height: 100%;
   background: var(--bg);
   color: var(--text);
+  color-scheme: only light;
 }
 
 body.mobile-embed {
   background: #fff;
+  color-scheme: only light;
 }
 
 a {
@@ -254,6 +256,21 @@ select {
   padding: 10px 12px;
   background: #fff;
   color: var(--text);
+  color-scheme: only light;
+}
+
+/* Native Android/iOS select popup: ép nền sáng + chữ tối (tránh dark system theme). */
+select,
+select option,
+select optgroup {
+  background-color: #ffffff;
+  color: #1a2332;
+}
+
+select:disabled,
+select:disabled option {
+  background-color: #f1f5f9;
+  color: #64748b;
 }
 
 textarea {
@@ -331,6 +348,14 @@ table.data tr.selected {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+/** layout: list — không card/border, chỉ nội dung list + search. */
+.form-list--bare {
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 0;
 }
 
 .form-list-select-all {
@@ -2698,6 +2723,28 @@ pre.json {
 }
 
 .form-drawer-span {
+  grid-column: 1 / -1;
+}
+
+/*
+ * Design canvas bọc controls trong .design-canvas-groups — nếu để block
+ * thì chỉ còn 1 ô lưới → iconButton xếp 1 cột. contents = đưa con lên grid cha.
+ */
+.form-drawer > .design-canvas-groups {
+  display: contents;
+}
+
+.form-drawer > .design-canvas-groups > .design-drop-slot {
+  grid-column: 1 / -1;
+  margin-left: 0;
+}
+
+.form-drawer > .design-canvas-groups > div {
+  min-width: 0;
+}
+
+.form-drawer > .design-canvas-list,
+.form-drawer > .card {
   grid-column: 1 / -1;
 }
 

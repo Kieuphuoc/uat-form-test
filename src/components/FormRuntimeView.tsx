@@ -31,15 +31,11 @@ import { resolveLocalizedText, type LangCode } from '../lib/localizedText';
 import { uiCopy } from '../lib/uiCopy';
 import {
   defaultTimeValue,
-  filterDateInput,
   filterNumberInput,
-  filterTimeInput,
   formatDateValue,
   formatNumberValue,
   formatTimeValue,
-  parseDateInput,
   parseNumberInput,
-  parseTimeInput,
 } from '../lib/valueFormat';
 import type {
   ClientFormDto,
@@ -57,7 +53,7 @@ import {
   RuntimeColorInput,
   RuntimeFileImageInput,
 } from './formControlsExtras';
-import { getCachedImagePreviewUrl, loadImagePreviewBlob, parseAttachments } from '../api/formUploadApi';
+import { getCachedImagePreviewUrl, loadImagePreviewBlob, parseAttachments, stripAttachmentPreviewUrls } from '../api/formUploadApi';
 import { useUiLan } from '../hooks/useUiLan';
 
 type Toast = { text: string; level: string } | null;
@@ -522,7 +518,7 @@ export function FormRuntimeView({
         for (const actionId of actionIds) {
           const res = await runAction(slug, actionId, {
             formId: working.formId,
-            controlValues: working.values,
+            controlValues: stripAttachmentPreviewUrls(working.values),
             state: working.state,
             rowContext,
           });
@@ -549,8 +545,8 @@ export function FormRuntimeView({
             frames = [
               ...frames,
               buildFrame(loaded.data.form, {
-                values: loaded.data.values,
-                state: loaded.data.state,
+                values: { ...(loaded.data.values ?? {}), ...(ui.openForm.values ?? {}) },
+                state: { ...(loaded.data.state ?? {}), ...(ui.openForm.state ?? {}) },
                 datasets: loaded.data.datasets,
                 formMode: ui.openForm.formMode,
                 returnMap: ui.openForm.returnMap,
@@ -1013,13 +1009,15 @@ export function FormRuntimeView({
 
   const footerNodes = footerGroups.map(renderLayoutGroup).filter(Boolean);
   const hasFooter = footerNodes.length > 0;
+  /** list = list-only chrome (không card/border, không tiêu đề list + chọn tất cả). */
+  const isListLayout = (top.form.layout || '').toLowerCase() === 'list';
 
   const body = (
     <div className={`form-shell${hasFooter ? ' form-shell--has-footer' : ''}`}>
       <div
         className={`form-scroll ${top.form.layout === 'drawer' ? 'form-drawer' : 'stack'}`}
       >
-      {!isModal && top.form.layout !== 'drawer' && (
+      {!isModal && top.form.layout !== 'drawer' && !isListLayout && (
         <h1>{resolveLocalizedText(top.form.title, lan)}</h1>
       )}
       {!isModal && top.form.layout === 'drawer' && (
@@ -1143,21 +1141,26 @@ export function FormRuntimeView({
           ) : null;
 
         return (
-          <div key={list.id} className="card stack form-drawer-span">
-            <div className="form-list-head">
-              <strong className="muted">{list.id}</strong>
-              {multi && isCards && (
-                <label className="form-list-select-all">
-                  <input
-                    type="checkbox"
-                    checked={allVisibleSelected}
-                    disabled={busy || visibleKeys.length === 0}
-                    onChange={(e) => toggleAllVisibleKeys(list, visibleKeys, e.target.checked)}
-                  />
-                  <span className="muted">{uiCopy(lan, 'listSelectAll')}</span>
-                </label>
-              )}
-            </div>
+          <div
+            key={list.id}
+            className={`stack form-drawer-span form-list${isListLayout ? ' form-list--bare' : ' card'}`}
+          >
+            {!isListLayout && (
+              <div className="form-list-head">
+                <strong className="muted">{list.id}</strong>
+                {multi && isCards && (
+                  <label className="form-list-select-all">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      disabled={busy || visibleKeys.length === 0}
+                      onChange={(e) => toggleAllVisibleKeys(list, visibleKeys, e.target.checked)}
+                    />
+                    <span className="muted">{uiCopy(lan, 'listSelectAll')}</span>
+                  </label>
+                )}
+              </div>
+            )}
 
             {searchOn && (
               <FormListSearchBox
@@ -1501,38 +1504,34 @@ function FormattedDateInput({
   style?: CSSProperties;
   onCommit: (s: string | null) => void;
 }) {
-  const [text, setText] = useState(() => formatDateValue(value, format));
-  const focused = useRef(false);
-
-  useEffect(() => {
-    if (!focused.current) setText(formatDateValue(value, format));
-  }, [value, format]);
+  /** Android/iOS WebView: type=text + readOnly hay bị “khóa”; dùng native date khi sửa được. */
+  if (editable) {
+    const iso = formatDateValue(value, 'yyyy-MM-dd');
+    return (
+      <input
+        id={id}
+        type="date"
+        disabled={disabled}
+        value={iso}
+        placeholder={placeholder || format || 'dd/MM/yyyy'}
+        style={{ fontSize: 16, minHeight: 44, ...style }}
+        onChange={(e) => {
+          const v = e.target.value.trim();
+          onCommit(v || null);
+        }}
+      />
+    );
+  }
 
   return (
     <input
       id={id}
       type="text"
-      disabled={disabled}
-      readOnly={!editable}
+      disabled
+      readOnly
       placeholder={placeholder || format || 'dd/MM/yyyy'}
-      value={text}
+      value={formatDateValue(value, format)}
       style={style}
-      onFocus={() => {
-        focused.current = true;
-      }}
-      onChange={(e) => {
-        if (!editable) return;
-        setText(filterDateInput(e.target.value, format));
-      }}
-      onBlur={() => {
-        focused.current = false;
-        const parsed = parseDateInput(text, format);
-        onCommit(parsed);
-        setText(parsed ? formatDateValue(parsed, format) : '');
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-      }}
     />
   );
 }
@@ -1556,39 +1555,36 @@ function FormattedTimeInput({
   style?: CSSProperties;
   onCommit: (s: string) => void;
 }) {
-  const [text, setText] = useState(() => formatTimeValue(value, format));
-  const focused = useRef(false);
-
-  useEffect(() => {
-    if (!focused.current) setText(formatTimeValue(value, format));
-  }, [value, format]);
+  if (editable) {
+    const raw = formatTimeValue(value, format) || defaultTimeValue(format);
+    // HH:mm or HH:mm:ss → input type=time prefers HH:mm[:ss]
+    const timeVal = raw.length >= 5 ? raw.slice(0, format?.includes('ss') ? 8 : 5) : raw;
+    return (
+      <input
+        id={id}
+        type="time"
+        step={format?.includes('ss') ? 1 : 60}
+        disabled={disabled}
+        value={timeVal}
+        placeholder={placeholder || format || 'HH:mm'}
+        style={{ fontSize: 16, minHeight: 44, ...style }}
+        onChange={(e) => {
+          const v = e.target.value.trim();
+          onCommit(v || defaultTimeValue(format));
+        }}
+      />
+    );
+  }
 
   return (
     <input
       id={id}
       type="text"
-      inputMode="numeric"
-      disabled={disabled}
-      readOnly={!editable}
+      disabled
+      readOnly
       placeholder={placeholder || format || 'HH:mm'}
-      value={text}
+      value={formatTimeValue(value, format)}
       style={style}
-      onFocus={() => {
-        focused.current = true;
-      }}
-      onChange={(e) => {
-        if (!editable) return;
-        setText(filterTimeInput(e.target.value, format));
-      }}
-      onBlur={() => {
-        focused.current = false;
-        const parsed = parseTimeInput(text, format) ?? defaultTimeValue(format);
-        onCommit(parsed);
-        setText(parsed);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-      }}
     />
   );
 }
