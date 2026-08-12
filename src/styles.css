@@ -259,12 +259,24 @@ select {
   color-scheme: only light;
 }
 
+/* Native date/time/month: ép light scheme (Android WebView picker theo theme app). */
+input[type='date'],
+input[type='time'],
+input[type='datetime-local'],
+input[type='month'],
+input[type='week'] {
+  background-color: #ffffff;
+  color: #1a2332;
+  color-scheme: only light;
+}
+
 /* Native Android/iOS select popup: ép nền sáng + chữ tối (tránh dark system theme). */
 select,
 select option,
 select optgroup {
   background-color: #ffffff;
   color: #1a2332;
+  color-scheme: only light;
 }
 
 select:disabled,
