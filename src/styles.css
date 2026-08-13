@@ -2986,16 +2986,91 @@ pre.json {
 }
 
 .form-time-picker {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  position: relative;
   width: 100%;
+}
+
+.form-time-picker__row {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+}
+
+.form-time-picker__input {
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-right: 0;
+  border-radius: 8px 0 0 8px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  color-scheme: only light;
+}
+
+.form-time-picker__icon-btn {
+  flex: 0 0 auto;
+  width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 0 8px 8px 0;
+  background: #f8fafc;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.form-time-picker__icon-btn:hover:not(:disabled) {
+  background: #eef2f7;
+}
+
+.form-time-picker__icon-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.form-time-picker__pop {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  min-width: 240px;
+  max-width: 320px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+}
+
+.form-time-picker__cols {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.form-time-picker__col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-time-picker__col-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
 }
 
 .form-time-picker__sel {
-  flex: 1 1 0;
-  min-width: 0;
+  width: 100%;
   min-height: 44px;
   padding: 10px 8px;
   border: 1px solid var(--line);
@@ -3011,13 +3086,44 @@ pre.json {
   flex: 0 0 auto;
   font-weight: 700;
   color: var(--muted);
+  padding-bottom: 12px;
 }
 
-.form-time-picker__sec {
-  flex: 0 0 auto;
-  font-variant-numeric: tabular-nums;
-  color: var(--muted);
-  font-size: 14px;
+.form-time-picker__footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.form-time-picker__link {
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 6px 2px;
+}
+
+.form-time-picker__ok {
+  border: 0;
+  border-radius: 8px;
+  background: #1976d2;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 8px 16px;
+}
+
+.form-time-picker__ok:hover {
+  background: #1565c0;
 }
 
 .form-icon-btn {

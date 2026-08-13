@@ -487,14 +487,21 @@ export function DesignCanvas({
                 </button>
               </div>
             ) : c.type === 'time' ? (
-              <div className="form-time-picker" style={textStyle}>
-                <select className="form-time-picker__sel" disabled tabIndex={-1} defaultValue="">
-                  <option value="">--</option>
-                </select>
-                <span className="form-time-picker__sep">:</span>
-                <select className="form-time-picker__sel" disabled tabIndex={-1} defaultValue="">
-                  <option value="">--</option>
-                </select>
+              <div className="form-time-picker">
+                <div className="form-time-picker__row">
+                  <input
+                    className="form-time-picker__input"
+                    disabled
+                    readOnly
+                    tabIndex={-1}
+                    placeholder="00:00"
+                    style={textStyle}
+                    defaultValue=""
+                  />
+                  <button type="button" className="form-time-picker__icon-btn" tabIndex={-1} disabled>
+                    🕐
+                  </button>
+                </div>
               </div>
             ) : (
               <input

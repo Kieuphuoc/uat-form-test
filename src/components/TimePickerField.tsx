@@ -1,5 +1,20 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ChangeEvent } from 'react';
-import { normalizeTimeFormat, parseTimeInput } from '../lib/valueFormat';
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ChangeEvent,
+  type KeyboardEvent,
+} from 'react';
+import {
+  DEFAULT_TIME_FORMAT,
+  filterTimeInput,
+  formatTimeValue,
+  normalizeTimeFormat,
+  parseTimeInput,
+} from '../lib/valueFormat';
 
 function pad2(n: number): string {
   return String(n).padStart(2, '0');
@@ -40,120 +55,229 @@ type Props = {
   onCommit: (s: string) => void;
 };
 
-/** Time picker: select giờ 00–23 + phút theo block 5 phút. Không dùng native. */
+/**
+ * Time: input text (nhập tay số + `:`) + popover picker bên dưới (giờ / phút block 5′).
+ * Không dùng native Android/iOS time picker.
+ */
 export function TimePickerField({
   id,
   disabled,
   editable = true,
   format,
+  placeholder,
   value,
   style,
   onCommit,
 }: Props) {
   const fmt = normalizeTimeFormat(format);
   const withSec = fmt.includes('ss');
-  const fromValue = useMemo(() => parseParts(value, fmt), [value, fmt]);
+  const ph = placeholder?.trim() || (withSec ? '00:00:00' : '00:00') || DEFAULT_TIME_FORMAT;
 
-  const [hh, setHh] = useState<number | null>(fromValue.hh);
-  const [mm, setMm] = useState<number | null>(() => snapMinute(fromValue.mm));
+  const fromValue = useMemo(() => parseParts(value, fmt), [value, fmt]);
+  const displayFromValue = useMemo(() => formatTimeValue(value, fmt), [value, fmt]);
+
+  const [text, setText] = useState(displayFromValue);
+  const [open, setOpen] = useState(false);
+  const [pickH, setPickH] = useState<number>(() => fromValue.hh ?? 0);
+  const [pickM, setPickM] = useState<number>(() => snapMinute(fromValue.mm) ?? 0);
+
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const popId = useId();
+  const canEdit = editable && !disabled;
 
   useEffect(() => {
-    setHh(fromValue.hh);
-    setMm(snapMinute(fromValue.mm));
-  }, [fromValue.hh, fromValue.mm]);
+    setText(displayFromValue);
+  }, [displayFromValue]);
+
+  useEffect(() => {
+    if (!open) return;
+    setPickH(fromValue.hh ?? 0);
+    setPickM(snapMinute(fromValue.mm) ?? 0);
+  }, [open, fromValue.hh, fromValue.mm]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
 
   const minuteOpts = useMemo(() => {
     const set = new Set(MINUTES_5);
     if (fromValue.mm != null && fromValue.mm % 5 !== 0) set.add(fromValue.mm);
-    if (mm != null && mm % 5 !== 0) set.add(mm);
+    if (pickM % 5 !== 0) set.add(pickM);
     return [...set].sort((a, b) => a - b);
-  }, [fromValue.mm, mm]);
+  }, [fromValue.mm, pickM]);
 
-  const canEdit = editable && !disabled;
-  const ss = withSec ? (fromValue.ss ?? 0) : null;
-
-  const emit = (nextH: number | null, nextM: number | null) => {
-    if (nextH == null || nextM == null) {
+  const commitText = (raw: string) => {
+    const filtered = filterTimeInput(raw, fmt).trim();
+    if (!filtered) {
       onCommit('');
+      setText('');
       return;
     }
-    const base = `${pad2(nextH)}:${pad2(nextM)}`;
-    onCommit(withSec ? `${base}:${pad2(ss ?? 0)}` : base);
+    const parsed = parseTimeInput(filtered, fmt);
+    if (parsed) {
+      onCommit(parsed);
+      setText(parsed);
+    } else {
+      // Giữ text đang gõ; không ghi value hỏng
+      setText(filtered);
+    }
+  };
+
+  const applyPick = (h: number, m: number) => {
+    const base = `${pad2(h)}:${pad2(m)}`;
+    const next = withSec ? `${base}:${pad2(fromValue.ss ?? 0)}` : base;
+    onCommit(next);
+    setText(next);
+    setOpen(false);
+  };
+
+  const onChange = (e: ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit) return;
+    setText(filterTimeInput(e.target.value, fmt));
+  };
+
+  const onBlur = () => {
+    if (!canEdit) return;
+    // Trễ nhẹ để click trong popover không bị blur-commit sớm
+    window.setTimeout(() => {
+      if (rootRef.current?.contains(document.activeElement)) return;
+      commitText(text);
+    }, 120);
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commitText(text);
+      setOpen(false);
+      inputRef.current?.blur();
+    }
   };
 
   if (!canEdit) {
-    const text =
-      hh == null || mm == null
-        ? ''
-        : withSec
-          ? `${pad2(hh)}:${pad2(mm)}:${pad2(ss ?? 0)}`
-          : `${pad2(hh)}:${pad2(mm)}`;
     return (
       <input
         id={id}
         type="text"
         disabled
         readOnly
-        value={text}
-        placeholder="--:--"
+        value={displayFromValue}
+        placeholder={ph}
         style={style}
       />
     );
   }
 
-  const onHour = (e: ChangeEvent<HTMLSelectElement>) => {
-    const v = e.target.value;
-    const nextH = v === '' ? null : Number(v);
-    setHh(nextH);
-    emit(nextH, mm);
-  };
-  const onMinute = (e: ChangeEvent<HTMLSelectElement>) => {
-    const v = e.target.value;
-    const nextM = v === '' ? null : Number(v);
-    setMm(nextM);
-    emit(hh, nextM);
-  };
-
   return (
-    <div className="form-time-picker" style={style} id={id}>
-      <select
-        className="form-time-picker__sel"
-        disabled={disabled}
-        value={hh == null ? '' : String(hh)}
-        aria-label="Giờ"
-        onChange={onHour}
-      >
-        <option value="">--</option>
-        {HOURS.map((h) => (
-          <option key={h} value={h}>
-            {pad2(h)}
-          </option>
-        ))}
-      </select>
-      <span className="form-time-picker__sep" aria-hidden>
-        :
-      </span>
-      <select
-        className="form-time-picker__sel"
-        disabled={disabled}
-        value={mm == null ? '' : String(mm)}
-        aria-label="Phút"
-        onChange={onMinute}
-      >
-        <option value="">--</option>
-        {minuteOpts.map((m) => (
-          <option key={m} value={m}>
-            {pad2(m)}
-          </option>
-        ))}
-      </select>
-      {withSec ? (
-        <>
-          <span className="form-time-picker__sep" aria-hidden>
-            :
-          </span>
-          <span className="form-time-picker__sec">{pad2(ss ?? 0)}</span>
-        </>
+    <div className={`form-time-picker${open ? ' is-open' : ''}`} ref={rootRef}>
+      <div className="form-time-picker__row">
+        <input
+          ref={inputRef}
+          id={id}
+          type="text"
+          inputMode="numeric"
+          autoComplete="off"
+          disabled={disabled}
+          placeholder={ph}
+          value={text}
+          style={style}
+          className="form-time-picker__input"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-controls={open ? popId : undefined}
+          onChange={onChange}
+          onBlur={onBlur}
+          onKeyDown={onKeyDown}
+          onFocus={() => {
+            /* giữ mở nếu đang chọn picker */
+          }}
+        />
+        <button
+          type="button"
+          className="form-time-picker__icon-btn"
+          title="Chọn giờ"
+          aria-label="Mở time picker"
+          disabled={disabled}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => setOpen((v) => !v)}
+        >
+          🕐
+        </button>
+      </div>
+
+      {open ? (
+        <div id={popId} className="form-time-picker__pop" role="dialog" aria-label="Chọn giờ">
+          <div className="form-time-picker__cols">
+            <label className="form-time-picker__col">
+              <span className="form-time-picker__col-label">Giờ</span>
+              <select
+                className="form-time-picker__sel"
+                value={pickH}
+                aria-label="Giờ"
+                onChange={(e) => setPickH(Number(e.target.value))}
+              >
+                {HOURS.map((h) => (
+                  <option key={h} value={h}>
+                    {pad2(h)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span className="form-time-picker__sep" aria-hidden>
+              :
+            </span>
+            <label className="form-time-picker__col">
+              <span className="form-time-picker__col-label">Phút</span>
+              <select
+                className="form-time-picker__sel"
+                value={pickM}
+                aria-label="Phút"
+                onChange={(e) => setPickM(Number(e.target.value))}
+              >
+                {minuteOpts.map((m) => (
+                  <option key={m} value={m}>
+                    {pad2(m)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="form-time-picker__footer">
+            <button
+              type="button"
+              className="form-time-picker__link"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                onCommit('');
+                setText('');
+                setOpen(false);
+              }}
+            >
+              Xóa
+            </button>
+            <button
+              type="button"
+              className="form-time-picker__ok"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => applyPick(pickH, pickM)}
+            >
+              Đặt
+            </button>
+          </div>
+        </div>
       ) : null}
     </div>
   );
