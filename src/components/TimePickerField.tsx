@@ -119,6 +119,9 @@ export function TimePickerField({
     return [...set].sort((a, b) => a - b);
   }, [fromValue.mm, pickM]);
 
+  const textRef = useRef(text);
+  textRef.current = text;
+
   const commitText = (raw: string) => {
     const filtered = filterTimeInput(raw, fmt).trim();
     if (!filtered) {
@@ -131,8 +134,9 @@ export function TimePickerField({
       onCommit(parsed);
       setText(parsed);
     } else {
-      // Giữ text đang gõ; không ghi value hỏng
-      setText(filtered);
+      // Sai giờ (vd. 25, 10:99) → clear
+      onCommit('');
+      setText('');
     }
   };
 
@@ -154,14 +158,14 @@ export function TimePickerField({
     // Trễ nhẹ để click trong popover không bị blur-commit sớm
     window.setTimeout(() => {
       if (rootRef.current?.contains(document.activeElement)) return;
-      commitText(text);
+      commitText(textRef.current);
     }, 120);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      commitText(text);
+      commitText(textRef.current);
       setOpen(false);
       inputRef.current?.blur();
     }

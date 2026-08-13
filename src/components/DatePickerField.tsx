@@ -125,6 +125,9 @@ export function DatePickerField({
   const rows = useMemo(() => monthMatrix(view.y, view.m), [view.y, view.m]);
   const todayIso = toIsoDate(new Date());
 
+  const textRef = useRef(text);
+  textRef.current = text;
+
   const commitText = useCallback(
     (raw: string) => {
       const filtered = filterDateInput(raw, fmt).trim();
@@ -139,7 +142,9 @@ export function DatePickerField({
         const d = parseIsoOrValue(parsed);
         setText(d ? formatDateValue(d, fmt) : filtered);
       } else {
-        setText(filtered);
+        // Sai ngày (vd. 32/4) → null + xóa ô
+        onCommit(null);
+        setText('');
       }
     },
     [fmt, onCommit],
@@ -165,14 +170,14 @@ export function DatePickerField({
     if (!canEdit) return;
     window.setTimeout(() => {
       if (rootRef.current?.contains(document.activeElement)) return;
-      commitText(text);
+      commitText(textRef.current);
     }, 120);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      commitText(text);
+      commitText(textRef.current);
       setOpen(false);
       inputRef.current?.blur();
     }

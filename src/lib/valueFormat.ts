@@ -474,7 +474,9 @@ export function defaultTimeValue(format?: string | null): string {
   return f.includes('ss') ? '00:00:00' : '00:00';
 }
 
-/** Parse giờ → text HH:mm hoặc HH:mm:ss. Trống → null; sai → null. */
+/** Parse giờ → text HH:mm hoặc HH:mm:ss. Trống → null; sai → null.
+ * Smart blur: `10` → `10:00`, `9:5` → `09:05`, `930` → `09:30`.
+ */
 export function parseTimeInput(text: string, format?: string | null): string | null {
   const f = normalizeTimeFormat(format);
   const withSec = f.includes('ss');
@@ -489,16 +491,51 @@ export function parseTimeInput(text: string, format?: string | null): string | n
   if (segs.length >= 2) {
     HH = Number(segs[0]);
     mm = Number(segs[1]);
-    if (withSec) ss = segs.length >= 3 ? Number(segs[2]) : 0;
-  } else if (segs.length === 1 && /^\d+$/.test(segs[0]!)) {
-    let d = segs[0]!;
-    if (withSec && d.length >= 5) {
-      ss = Number(d.slice(-2));
-      d = d.slice(0, -2);
+    if (withSec) {
+      ss = segs.length >= 3 ? Number(segs[2]) : 0;
     }
-    if (d.length < 3 || d.length > 4) return null;
-    mm = Number(d.slice(-2));
-    HH = Number(d.slice(0, -2));
+  } else if (segs.length === 1 && /^\d+$/.test(segs[0]!)) {
+    const d = segs[0]!;
+    if (withSec) {
+      // HHmmss / Hmmss / HHmm / HH / H
+      if (d.length <= 2) {
+        HH = Number(d);
+        mm = 0;
+        ss = 0;
+      } else if (d.length === 3) {
+        HH = Number(d.slice(0, 1));
+        mm = Number(d.slice(1));
+        ss = 0;
+      } else if (d.length === 4) {
+        HH = Number(d.slice(0, 2));
+        mm = Number(d.slice(2));
+        ss = 0;
+      } else if (d.length === 5) {
+        HH = Number(d.slice(0, 1));
+        mm = Number(d.slice(1, 3));
+        ss = Number(d.slice(3));
+      } else if (d.length === 6) {
+        HH = Number(d.slice(0, 2));
+        mm = Number(d.slice(2, 4));
+        ss = Number(d.slice(4));
+      } else {
+        return null;
+      }
+    } else {
+      // HH / H / HHmm / Hmm
+      if (d.length <= 2) {
+        HH = Number(d);
+        mm = 0;
+      } else if (d.length === 3) {
+        HH = Number(d.slice(0, 1));
+        mm = Number(d.slice(1));
+      } else if (d.length === 4) {
+        HH = Number(d.slice(0, 2));
+        mm = Number(d.slice(2));
+      } else {
+        return null;
+      }
+    }
   } else {
     return null;
   }
