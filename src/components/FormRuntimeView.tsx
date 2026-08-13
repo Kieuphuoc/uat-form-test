@@ -30,11 +30,8 @@ import {
 import { resolveLocalizedText, type LangCode } from '../lib/localizedText';
 import { uiCopy } from '../lib/uiCopy';
 import {
-  defaultTimeValue,
   filterNumberInput,
-  formatDateValue,
   formatNumberValue,
-  formatTimeValue,
   parseNumberInput,
 } from '../lib/valueFormat';
 import type {
@@ -55,6 +52,8 @@ import {
 } from './formControlsExtras';
 import { MapsControl } from './MapsControl';
 import { LiveClockLabel } from './LiveClockLabel';
+import { DatePickerField } from './DatePickerField';
+import { TimePickerField } from './TimePickerField';
 import { getCachedImagePreviewUrl, loadImagePreviewBlob, parseAttachments, stripAttachmentPreviewUrls } from '../api/formUploadApi';
 import { useUiLan } from '../hooks/useUiLan';
 import { useAuth } from '../auth/AuthContext';
@@ -996,7 +995,7 @@ export function FormRuntimeView({
             }}
           />
         ) : c.type === 'date' ? (
-          <FormattedDateInput
+          <DatePickerField
             id={c.id}
             disabled={disabled}
             editable={editable}
@@ -1010,7 +1009,7 @@ export function FormRuntimeView({
             }}
           />
         ) : c.type === 'time' ? (
-          <FormattedTimeInput
+          <TimePickerField
             id={c.id}
             disabled={disabled}
             editable={editable}
@@ -1621,110 +1620,6 @@ function FormattedNumberInput({
       onKeyDown={(e) => {
         if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
       }}
-    />
-  );
-}
-
-function FormattedDateInput({
-  id,
-  disabled,
-  editable,
-  format,
-  placeholder,
-  value,
-  style,
-  onCommit,
-}: {
-  id: string;
-  disabled: boolean;
-  editable: boolean;
-  format?: string;
-  placeholder?: string;
-  value: unknown;
-  style?: CSSProperties;
-  onCommit: (s: string | null) => void;
-}) {
-  /** Android/iOS WebView: type=text + readOnly hay bị “khóa”; dùng native date khi sửa được. */
-  if (editable) {
-    const iso = formatDateValue(value, 'yyyy-MM-dd');
-    return (
-      <input
-        id={id}
-        type="date"
-        disabled={disabled}
-        value={iso}
-        placeholder={placeholder || format || 'dd/MM/yyyy'}
-        style={{ fontSize: 16, minHeight: 44, ...style }}
-        onChange={(e) => {
-          const v = e.target.value.trim();
-          onCommit(v || null);
-        }}
-      />
-    );
-  }
-
-  return (
-    <input
-      id={id}
-      type="text"
-      disabled
-      readOnly
-      placeholder={placeholder || format || 'dd/MM/yyyy'}
-      value={formatDateValue(value, format)}
-      style={style}
-    />
-  );
-}
-
-function FormattedTimeInput({
-  id,
-  disabled,
-  editable,
-  format,
-  placeholder,
-  value,
-  style,
-  onCommit,
-}: {
-  id: string;
-  disabled: boolean;
-  editable: boolean;
-  format?: string;
-  placeholder?: string;
-  value: unknown;
-  style?: CSSProperties;
-  onCommit: (s: string) => void;
-}) {
-  if (editable) {
-    const raw = formatTimeValue(value, format) || defaultTimeValue(format);
-    // HH:mm or HH:mm:ss → input type=time prefers HH:mm[:ss]
-    const timeVal = raw.length >= 5 ? raw.slice(0, format?.includes('ss') ? 8 : 5) : raw;
-    return (
-      <input
-        id={id}
-        type="time"
-        step={format?.includes('ss') ? 1 : 60}
-        disabled={disabled}
-        value={timeVal}
-        placeholder={placeholder || format || 'HH:mm'}
-        style={{ fontSize: 16, minHeight: 44, ...style }}
-        onChange={(e) => {
-          const v = e.target.value.trim();
-          onCommit(v || defaultTimeValue(format));
-        }}
-      />
-    );
-  }
-
-  return (
-    <input
-      id={id}
-      type="text"
-      disabled
-      readOnly
-      placeholder={placeholder || format || 'HH:mm'}
-      value={formatTimeValue(value, format)}
-      style={style}
     />
   );
 }

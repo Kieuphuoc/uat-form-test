@@ -473,6 +473,29 @@ export function DesignCanvas({
               <select disabled tabIndex={-1} style={textStyle}>
                 <option>—</option>
               </select>
+            ) : c.type === 'date' ? (
+              <div className="form-date-picker">
+                <button type="button" className="form-date-picker__trigger is-empty" tabIndex={-1} style={textStyle}>
+                  <span className="form-date-picker__mask">
+                    {(c.format || 'dd/MM/yyyy')
+                      .replace(/yyyy/g, '    ')
+                      .replace(/dd|MM|HH|hh|mm|ss/g, '  ')}
+                  </span>
+                  <span className="form-date-picker__icon" aria-hidden>
+                    📅
+                  </span>
+                </button>
+              </div>
+            ) : c.type === 'time' ? (
+              <div className="form-time-picker" style={textStyle}>
+                <select className="form-time-picker__sel" disabled tabIndex={-1} defaultValue="">
+                  <option value="">--</option>
+                </select>
+                <span className="form-time-picker__sep">:</span>
+                <select className="form-time-picker__sel" disabled tabIndex={-1} defaultValue="">
+                  <option value="">--</option>
+                </select>
+              </div>
             ) : (
               <input
                 disabled

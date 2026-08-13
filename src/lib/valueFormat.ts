@@ -163,6 +163,22 @@ export function normalizeDateFormat(format?: string | null): string {
   return s || DEFAULT_DATE_FORMAT;
 }
 
+/**
+ * Mask hiển thị khi chưa nhập ngày — giữ separator của format.
+ * vd. dd/MM/yyyy → `  /  /    `
+ */
+export function emptyDateMask(format?: string | null): string {
+  const f = normalizeDateFormat(format);
+  return f
+    .replace(/yyyy/g, '    ')
+    .replace(/dd/g, '  ')
+    .replace(/MM/g, '  ')
+    .replace(/HH/g, '  ')
+    .replace(/hh/g, '  ')
+    .replace(/mm/g, '  ')
+    .replace(/ss/g, '  ');
+}
+
 export function normalizeTimeFormat(format?: string | null): string {
   const s = (format ?? '').trim();
   if (!s) return DEFAULT_TIME_FORMAT;
@@ -447,10 +463,9 @@ export function filterTimeInput(raw: string, _format?: string | null): string {
 }
 
 export function formatTimeValue(value: unknown, format?: string | null): string {
-  const fallback = defaultTimeValue(format);
-  if (value == null || value === '') return fallback;
+  if (value == null || value === '') return '';
   const parsed = parseTimeInput(String(value), format);
-  return parsed ?? fallback;
+  return parsed ?? '';
 }
 
 /** Mặc định 00:00 hoặc 00:00:00 theo format. */
@@ -459,12 +474,12 @@ export function defaultTimeValue(format?: string | null): string {
   return f.includes('ss') ? '00:00:00' : '00:00';
 }
 
-/** Parse giờ → text HH:mm hoặc HH:mm:ss. Trống → mặc định; sai → null. */
+/** Parse giờ → text HH:mm hoặc HH:mm:ss. Trống → null; sai → null. */
 export function parseTimeInput(text: string, format?: string | null): string | null {
   const f = normalizeTimeFormat(format);
   const withSec = f.includes('ss');
   const raw = filterTimeInput(String(text), f).trim();
-  if (!raw) return defaultTimeValue(format);
+  if (!raw) return null;
 
   let HH: number;
   let mm: number;

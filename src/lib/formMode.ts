@@ -1,5 +1,4 @@
 import type { ClientFormDto, FormControlDef, FormMode } from '../types/form';
-import { defaultTimeValue } from './valueFormat';
 
 /** Chuẩn hóa formMode; alias create/add → new, update → edit. Mặc định view. */
 export function normalizeFormMode(raw?: string | null): FormMode {
@@ -38,9 +37,8 @@ export function applyDefaultValues(
     if (c.type === 'time' && emptyScalar) {
       if (formMode === 'new' && c.defaultValue !== undefined && c.defaultValue !== null) {
         next[c.id] = c.defaultValue;
-      } else {
-        next[c.id] = defaultTimeValue(c.format);
       }
+      // Không ép 00:00 — TimePicker để trống (--:--) đến khi chọn.
       continue;
     }
     if ((c.type === 'file' || c.type === 'image') && emptyScalar) {
