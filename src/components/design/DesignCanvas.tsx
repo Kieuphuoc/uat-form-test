@@ -475,16 +475,24 @@ export function DesignCanvas({
               </select>
             ) : c.type === 'date' ? (
               <div className="form-date-picker">
-                <button type="button" className="form-date-picker__trigger is-empty" tabIndex={-1} style={textStyle}>
-                  <span className="form-date-picker__mask">
-                    {(c.format || 'dd/MM/yyyy')
-                      .replace(/yyyy/g, '    ')
-                      .replace(/dd|MM|HH|hh|mm|ss/g, '  ')}
-                  </span>
-                  <span className="form-date-picker__icon" aria-hidden>
+                <div className="form-date-picker__row">
+                  <input
+                    className="form-date-picker__input"
+                    disabled
+                    readOnly
+                    tabIndex={-1}
+                    placeholder={
+                      (c.format || 'dd/MM/yyyy')
+                        .replace(/yyyy/g, '    ')
+                        .replace(/dd|MM|HH|hh|mm|ss/g, '  ')
+                    }
+                    style={textStyle}
+                    defaultValue=""
+                  />
+                  <button type="button" className="form-date-picker__icon-btn" tabIndex={-1} disabled>
                     📅
-                  </span>
-                </button>
+                  </button>
+                </div>
               </div>
             ) : c.type === 'time' ? (
               <div className="form-time-picker">

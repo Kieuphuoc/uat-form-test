@@ -6,12 +6,16 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ChangeEvent,
+  type KeyboardEvent,
 } from 'react';
 import {
   DEFAULT_DATE_FORMAT,
   emptyDateMask,
+  filterDateInput,
   formatDateValue,
   normalizeDateFormat,
+  parseDateInput,
 } from '../lib/valueFormat';
 
 const WEEKDAYS_VI = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
@@ -37,7 +41,6 @@ function parseIsoOrValue(value: unknown): Date | null {
 
 function monthMatrix(year: number, month0: number): (number | null)[][] {
   const first = new Date(year, month0, 1);
-  // Mon-first: JS getDay Sun=0 → shift
   let start = first.getDay() - 1;
   if (start < 0) start = 6;
   const daysInMonth = new Date(year, month0 + 1, 0).getDate();
@@ -61,7 +64,10 @@ type Props = {
   onCommit: (s: string | null) => void;
 };
 
-/** Date picker tùy chỉnh — không dùng native Android/iOS. */
+/**
+ * Date: input text (gõ số, tự chèn `/` `-` theo format) + icon lịch mở calendar.
+ * Không dùng native Android/iOS date picker.
+ */
 export function DatePickerField({
   id,
   disabled,
@@ -74,15 +80,25 @@ export function DatePickerField({
 }: Props) {
   const fmt = normalizeDateFormat(format);
   const selected = useMemo(() => parseIsoOrValue(value), [value]);
-  const display = selected ? formatDateValue(selected, fmt) : '';
+  const displayFromValue = selected ? formatDateValue(selected, fmt) : '';
   const mask = emptyDateMask(fmt);
+  const ph = placeholder?.trim() || mask || fmt || DEFAULT_DATE_FORMAT;
+
+  const [text, setText] = useState(displayFromValue);
   const [open, setOpen] = useState(false);
   const [view, setView] = useState(() => {
     const base = selected ?? new Date();
     return { y: base.getFullYear(), m: base.getMonth() };
   });
+
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const popId = useId();
+  const canEdit = editable && !disabled;
+
+  useEffect(() => {
+    setText(displayFromValue);
+  }, [displayFromValue]);
 
   useEffect(() => {
     if (!open) return;
@@ -95,7 +111,7 @@ export function DatePickerField({
     const onDoc = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
     };
     document.addEventListener('mousedown', onDoc);
@@ -109,51 +125,115 @@ export function DatePickerField({
   const rows = useMemo(() => monthMatrix(view.y, view.m), [view.y, view.m]);
   const todayIso = toIsoDate(new Date());
 
+  const commitText = useCallback(
+    (raw: string) => {
+      const filtered = filterDateInput(raw, fmt).trim();
+      if (!filtered) {
+        onCommit(null);
+        setText('');
+        return;
+      }
+      const parsed = parseDateInput(filtered, fmt);
+      if (parsed) {
+        onCommit(parsed);
+        const d = parseIsoOrValue(parsed);
+        setText(d ? formatDateValue(d, fmt) : filtered);
+      } else {
+        setText(filtered);
+      }
+    },
+    [fmt, onCommit],
+  );
+
   const pick = useCallback(
     (day: number) => {
       const iso = `${view.y}-${pad2(view.m + 1)}-${pad2(day)}`;
       onCommit(iso);
+      const d = new Date(view.y, view.m, day);
+      setText(formatDateValue(d, fmt));
       setOpen(false);
     },
-    [onCommit, view.m, view.y],
+    [fmt, onCommit, view.m, view.y],
   );
 
-  const canEdit = editable && !disabled;
+  const onChange = (e: ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit) return;
+    setText(filterDateInput(e.target.value, fmt));
+  };
+
+  const onBlur = () => {
+    if (!canEdit) return;
+    window.setTimeout(() => {
+      if (rootRef.current?.contains(document.activeElement)) return;
+      commitText(text);
+    }, 120);
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commitText(text);
+      setOpen(false);
+      inputRef.current?.blur();
+    }
+  };
+
+  if (!canEdit) {
+    return (
+      <input
+        id={id}
+        type="text"
+        disabled
+        readOnly
+        value={displayFromValue}
+        placeholder={ph}
+        style={style}
+      />
+    );
+  }
 
   return (
     <div className={`form-date-picker${open ? ' is-open' : ''}`} ref={rootRef}>
-      <button
-        id={id}
-        type="button"
-        className={`form-date-picker__trigger${display ? '' : ' is-empty'}`}
-        disabled={!canEdit}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-controls={open ? popId : undefined}
-        style={style}
-        onClick={() => {
-          if (canEdit) setOpen((v) => !v);
-        }}
-      >
-        {display ? (
-          <span className="form-date-picker__value">{display}</span>
-        ) : (
-          <span className="form-date-picker__mask" aria-label={placeholder || fmt || DEFAULT_DATE_FORMAT}>
-            {mask}
-          </span>
-        )}
-        <span className="form-date-picker__icon" aria-hidden>
+      <div className="form-date-picker__row">
+        <input
+          ref={inputRef}
+          id={id}
+          type="text"
+          inputMode="numeric"
+          autoComplete="off"
+          disabled={disabled}
+          placeholder={ph}
+          value={text}
+          style={style}
+          className="form-date-picker__input"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-controls={open ? popId : undefined}
+          onChange={onChange}
+          onBlur={onBlur}
+          onKeyDown={onKeyDown}
+        />
+        <button
+          type="button"
+          className="form-date-picker__icon-btn"
+          title="Chọn ngày"
+          aria-label="Mở lịch"
+          disabled={disabled}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => setOpen((v) => !v)}
+        >
           📅
-        </span>
-      </button>
+        </button>
+      </div>
 
-      {open && canEdit ? (
+      {open ? (
         <div id={popId} className="form-date-picker__pop" role="dialog" aria-label="Chọn ngày">
           <div className="form-date-picker__nav">
             <button
               type="button"
               className="form-date-picker__nav-btn"
               aria-label="Tháng trước"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() =>
                 setView((v) => {
                   const m = v.m - 1;
@@ -170,6 +250,7 @@ export function DatePickerField({
               type="button"
               className="form-date-picker__nav-btn"
               aria-label="Tháng sau"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() =>
                 setView((v) => {
                   const m = v.m + 1;
@@ -199,6 +280,7 @@ export function DatePickerField({
                     key={`${ri}-${ci}`}
                     type="button"
                     className={`form-date-picker__day${isSel ? ' is-selected' : ''}${isToday ? ' is-today' : ''}`}
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={() => pick(day)}
                   >
                     {day}
@@ -211,9 +293,11 @@ export function DatePickerField({
             <button
               type="button"
               className="form-date-picker__link"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 const n = new Date();
                 onCommit(toIsoDate(n));
+                setText(formatDateValue(n, fmt));
                 setOpen(false);
               }}
             >
@@ -222,8 +306,10 @@ export function DatePickerField({
             <button
               type="button"
               className="form-date-picker__link"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 onCommit(null);
+                setText('');
                 setOpen(false);
               }}
             >
