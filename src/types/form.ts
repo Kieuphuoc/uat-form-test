@@ -44,6 +44,8 @@ export type FormControlDef = {
   visible?: boolean;
   /** Chỉ hiện khi formMode thuộc danh sách, vd. ["new","edit"]. */
   visibleModes?: string[];
+  /** `debug` = chỉ hiện khi ?debug=1 (vd. Xem log). */
+  visibleWhen?: string;
   bind?: string;
   text?: LocalizedText;
   /** Gợi ý trong ô nhập (text / textarea / number…). */

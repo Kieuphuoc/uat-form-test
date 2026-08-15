@@ -3681,4 +3681,103 @@ pre.json {
   background: var(--accent, #2dd4bf);
 }
 
+/* Runtime standalone — header ngoài, ẩn modal-header trong form. */
+.form-outer-chrome {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 100dvh;
+  background: var(--bg);
+}
+
+.form-outer-chrome__bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 12px;
+  background: #001854;
+  color: #fff;
+}
+
+.form-outer-chrome__left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.form-outer-chrome__back {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.form-outer-chrome__back:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.form-outer-chrome__mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: #fff;
+  flex-shrink: 0;
+}
+
+.form-outer-chrome__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.form-outer-chrome__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.form-outer-chrome__link {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.form-outer-chrome__link:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.form-outer-chrome__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.form-outer-chrome__body > .shell {
+  max-width: none;
+  margin: 0;
+  height: 100%;
+  min-height: 100%;
+}
+
 

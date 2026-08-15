@@ -12,6 +12,7 @@ export function HomePage() {
       <div className="card stack">
         <div className="row">
           <Link to="/runtime/hrm">Demo /runtime/hrm</Link>
+          <Link to="/runtime/apps">Demo /runtime/apps</Link>
           <Link to="/admin">Admin</Link>
           <Link to="/admin/design/hrm">Designer</Link>
         </div>

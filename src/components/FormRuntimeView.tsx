@@ -59,6 +59,13 @@ import { useUiLan } from '../hooks/useUiLan';
 import { useAuth } from '../auth/AuthContext';
 import { buildGoogleMapsUrl, requestDeviceGps } from '../lib/deviceGps';
 import { formatMapLocations } from '../lib/mapLocations';
+import {
+  emitFormChrome,
+  FORM_BACK_MSG,
+  FORM_CHROME_REQUEST_MSG,
+  FORM_HEADER_ACTION_MSG,
+  requestOpenShell,
+} from '../lib/formShell';
 
 type Toast = { text: string; level: string } | null;
 
@@ -445,7 +452,9 @@ export function FormRuntimeView({
   const overlayMode = (top.uiMode ?? 'modal').trim().toLowerCase();
   const isFullscreen = overlayMode === 'fullscreen' || overlayMode === 'full';
   const isSheet = overlayMode === 'sheet';
-  const isModal = isOverlay; // form con (header ×) — mọi mode overlay
+  /** Designer preview giữ modal-header; runtime gom title ra chrome ngoài. */
+  const useOuterChrome = !embedded;
+  const isModal = isOverlay && !useOuterChrome;
 
   useEffect(() => {
     setGroupCollapsed({});
@@ -574,6 +583,18 @@ export function FormRuntimeView({
               setStack(frames);
               return;
             }
+            continue;
+          }
+
+          if ((meta?.type ?? '').trim().toLowerCase() === 'openshell') {
+            const target = (meta?.mode || meta?.formId || '').trim();
+            const ok = requestOpenShell(target);
+            if (!ok) {
+              showToast(uiCopy(lan, 'actionFailed'), 'error');
+              setStack(frames);
+              return;
+            }
+            working = frames[frames.length - 1]!;
             continue;
           }
 
@@ -774,6 +795,50 @@ export function FormRuntimeView({
     () => [...top.form.lists].sort((a, b) => a.order - b.order),
     [top.form.lists],
   );
+
+  const emitCurrentChrome = useCallback(() => {
+    if (!useOuterChrome) return;
+    const title = resolveLocalizedText(top.form.title, lan) || top.form.id;
+    const headerActions = headerControls
+      .filter((hc) => isControlVisible(hc, top.formMode))
+      .map((hc) => ({
+        id: hc.id,
+        label: resolveLocalizedText(hc.text, lan) || resolveLocalizedText(hc.label, lan) || hc.id,
+      }));
+    emitFormChrome({
+      title,
+      canBack: stack.length > 1,
+      headerActions,
+    });
+  }, [useOuterChrome, top.form, top.formMode, headerControls, lan, stack.length]);
+
+  useEffect(() => {
+    emitCurrentChrome();
+  }, [emitCurrentChrome]);
+
+  useEffect(() => {
+    if (!useOuterChrome) return;
+    const onMessage = (ev: MessageEvent) => {
+      const data = ev.data as { type?: string; controlId?: string } | null;
+      if (!data || typeof data !== 'object') return;
+      if (data.type === FORM_CHROME_REQUEST_MSG) {
+        emitCurrentChrome();
+        return;
+      }
+      if (data.type === FORM_BACK_MSG) {
+        setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
+        return;
+      }
+      if (data.type === FORM_HEADER_ACTION_MSG && data.controlId) {
+        const hc = headerControls.find((c) => c.id === data.controlId);
+        if (!hc) return;
+        if (hc.linkFormId?.trim()) void openLinkedForm(hc.linkFormId.trim());
+        else if (hc.onClick?.length) void runActions(hc.onClick);
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [useOuterChrome, headerControls, openLinkedForm, runActions, emitCurrentChrome]);
 
   const renderControl = (c: FormControlDef, inRow = false): ReactNode => {
     if (!isControlVisible(c, top.formMode)) return null;
@@ -1134,10 +1199,10 @@ export function FormRuntimeView({
       <div
         className={`form-scroll ${top.form.layout === 'drawer' ? 'form-drawer' : 'stack'}`}
       >
-      {!isModal && top.form.layout !== 'drawer' && !isListLayout && (
+      {!useOuterChrome && !isModal && top.form.layout !== 'drawer' && !isListLayout && (
         <h1>{resolveLocalizedText(top.form.title, lan)}</h1>
       )}
-      {!isModal && top.form.layout === 'drawer' && (
+      {!useOuterChrome && !isModal && top.form.layout === 'drawer' && (
         <h1 className="form-drawer-title">{resolveLocalizedText(top.form.title, lan)}</h1>
       )}
       {isModal && (
@@ -1446,7 +1511,7 @@ export function FormRuntimeView({
 
   return (
     <>
-      {isOverlay ? (
+      {isOverlay && !useOuterChrome ? (
         <>
           <div className={embedded ? 'shell embedded' : 'shell'}>
             <p className="muted">{uiCopy(lan, 'mainFormModalOpen')}</p>

@@ -18,8 +18,19 @@ const ACTION_TYPES = [
   'validate',
   'showForm',
   'getGps',
+  'openShell',
   'closeForm',
   'message',
+] as const;
+
+const OPEN_SHELL_TARGETS = [
+  { value: 'chart', label: 'chart — overlay Chart' },
+  { value: 'chat', label: 'chat — overlay Chat' },
+  { value: 'files', label: 'files — overlay Files' },
+  { value: 'docs', label: 'docs — overlay Portal/Docs' },
+  { value: 'monitor', label: 'monitor — Service Monitor' },
+  { value: 'settings', label: 'settings — Cấu hình' },
+  { value: 'logs', label: 'logs — Xem log (debug)' },
 ] as const;
 
 /** Cách mở form UI (showForm.mode). */
@@ -43,6 +54,8 @@ const ACTION_TYPE_HINTS: Record<string, string> = {
     'showForm: mở form con (formId). mode=modal|sheet|fullscreen; formMode=view|new|edit; returnMap map giá trị trả về parent.',
   getGps:
     'getGps: client-only — lấy GPS độ chính xác cao, cập nhật control maps (nếu có), mở formId kết quả (giống Test & Debug).',
+  openShell:
+    'openShell: client-only — bảo mobile AppShell đè Chart/Chat/Files/Docs/Monitor/Cấu hình/Log. mode = target. Runtime browser: toast.',
   closeForm:
     'closeForm: đóng modal/sheet/fullscreen, trả returnValues theo returnMap về form cha.',
   message: 'message: toast thông báo (message + level info|success|error).',
@@ -463,6 +476,27 @@ export function DesignActionsEditor({
               </label>
             )}
 
+            {type === 'openShell' && (
+              <div className="design-actions-grid">
+                <label className="field">
+                  target (mode)
+                  <select
+                    value={String(action.mode ?? 'chart')}
+                    onChange={(e) => patchAction({ mode: e.target.value })}
+                  >
+                    {OPEN_SHELL_TARGETS.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                    {!OPEN_SHELL_TARGETS.some((m) => m.value === String(action.mode ?? 'chart')) && (
+                      <option value={String(action.mode)}>{String(action.mode)}</option>
+                    )}
+                  </select>
+                </label>
+              </div>
+            )}
+
             {(type === 'showForm' || type === 'getGps') && (
               <div className="design-actions-grid">
                 <label className="field design-actions-formid">
@@ -571,6 +605,7 @@ export function DesignActionsEditor({
             {(type === 'setValue' || type === 'validate' || type === 'closeForm' || !isSql) &&
               type !== 'showForm' &&
               type !== 'getGps' &&
+              type !== 'openShell' &&
               type !== 'message' && (
                 <label className="field design-actions-sql-field">
                   Action JSON (toàn bộ)

@@ -1537,6 +1537,13 @@ export function DesignInspector({
             onChange={(e) => patch({ visible: e.target.checked ? undefined : false })}
           />
         </PropRow>
+        <PropRow label="visibleWhen" title="debug = chỉ hiện khi ?debug=1">
+          <input
+            value={c.visibleWhen ?? ''}
+            placeholder="debug"
+            onChange={(e) => patch({ visibleWhen: e.target.value.trim() || undefined })}
+          />
+        </PropRow>
         <PropRow label="visibleModes" title="vd. new,edit — trống = mọi mode">
           <input
             value={(c.visibleModes ?? []).join(',')}

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { fetchRuntimeApp, fetchRuntimeForm } from '../api/formApi';
 import { useAuth } from '../auth/AuthContext';
+import { FormOuterChrome } from '../components/FormOuterChrome';
 import { FormRuntimeHost } from '../components/FormRuntimeView';
 import { useUiLan } from '../hooks/useUiLan';
 import { emitFormDebugLog, isFormDebugEnabled } from '../lib/formDebug';
@@ -145,7 +146,7 @@ export function RuntimePage() {
     );
   }
 
-  return (
+  const host = (
     <FormRuntimeHost
       slug={data.slug}
       initialForm={data.form}
@@ -156,4 +157,7 @@ export function RuntimePage() {
       preview={preview}
     />
   );
+
+  if (mobile) return host;
+  return <FormOuterChrome fallbackTitle={data.form.id}>{host}</FormOuterChrome>;
 }
