@@ -15,6 +15,7 @@ import { ConversationList } from '../components/chat/ConversationList';
 import { MessageThread, type PendingMessage } from '../components/chat/MessageThread';
 import { UserPickerDialog, type PickerMode } from '../components/chat/UserPickerDialog';
 import { useAuth } from '../auth/AuthContext';
+import { navigateChat } from '../lib/chatNav';
 import {
   getDesktopNotificationMode,
   setChatPlatform,
@@ -261,6 +262,7 @@ export function ChatPage() {
       setDetail(null);
       setMessages([]);
       setPending([]);
+      setPane('list');
       return;
     }
 
@@ -480,7 +482,7 @@ export function ChatPage() {
           void markRead(id, newest);
         }
       }
-      navigate(`/chat/${id}`);
+      navigateChat(navigate, `/chat/${id}`);
       setPane('thread');
     },
     [activeId, markRead, navigate],
@@ -586,7 +588,7 @@ export function ChatPage() {
       const result = await chatApi.leave(activeId);
       await refreshConversations();
       setPane('list');
-      navigate('/chat');
+      navigateChat(navigate, '/chat');
       if (result.disbanded) setError(null);
     } catch (e) {
       setError(errorMessage(e, 'Không rời được nhóm.'));
@@ -671,8 +673,8 @@ export function ChatPage() {
               setPickerError(null);
               setPicker('group');
             }}
-            companyLabel={companyLabel}
-            companyTitle={me?.unit?.address || companyLabel}
+            companyLabel={mobile ? null : companyLabel}
+            companyTitle={mobile ? null : me?.unit?.address || companyLabel}
           />
         </aside>
 
@@ -704,7 +706,7 @@ export function ChatPage() {
             onJumpToMessage={onJumpToMessage}
             onBack={() => {
               setPane('list');
-              navigate('/chat');
+              navigateChat(navigate, '/chat');
             }}
             onOpenInfo={() => {
               if (window.matchMedia('(max-width: 1023px)').matches) setPane('info');

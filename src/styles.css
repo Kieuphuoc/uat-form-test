@@ -4877,6 +4877,48 @@ body.chat-is-resizing {
   font-size: 20px;
 }
 
+.chat-image-attach {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.chat-image-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 12;
+  min-width: 168px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+}
+
+.chat-image-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #0f172a;
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-image-menu button:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.chat-image-menu button:disabled {
+  opacity: 0.5;
+}
+
 .chat-send {
   display: inline-flex;
   align-items: center;
@@ -5714,9 +5756,42 @@ body.chat-is-resizing {
   }
 }
 
-/* Nhúng trong app mobile: vẫn giữ nav Chat/Danh bạ/Cài đặt; ẩn brand dài. */
-body.mobile-embed .chat-shell-brand h1 {
+/* Nhúng trong app mobile: ẩn header web (nav + tên user); 1 panel; ẩn tên công ty. */
+body.mobile-embed .chat-shell-header {
   display: none;
+}
+
+body.mobile-embed .chat-body {
+  grid-template-columns: 1fr;
+}
+
+body.mobile-embed .chat-splitter {
+  display: none;
+}
+
+body.mobile-embed .chat-panel {
+  display: none;
+  border: 0;
+}
+
+body.mobile-embed .chat-app[data-pane='list'] .chat-panel--list,
+body.mobile-embed .chat-app[data-pane='thread'] .chat-panel--thread,
+body.mobile-embed .chat-app[data-pane='info'] .chat-panel--info {
+  display: flex;
+}
+
+body.mobile-embed .chat-only-narrow {
+  display: inline-flex;
+}
+
+body.mobile-embed .chat-company-label {
+  display: none;
+}
+
+body.mobile-embed .chat-page-card {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
 }
 
 .chat-shell--mobile .chat-shell-nav a {

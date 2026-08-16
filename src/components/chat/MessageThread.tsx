@@ -6,11 +6,15 @@ import {
   type ContactRelation,
   type Conversation,
 } from '../../api/chatApi';
+import { useAuth } from '../../auth/AuthContext';
+import { uiCopy } from '../../lib/uiCopy';
 import {
   IconBack,
+  IconCamera,
   IconClose,
   IconDownload,
   IconFile,
+  IconImage,
   IconInfo,
   IconMore,
   IconPaperclip,
@@ -173,6 +177,7 @@ export function MessageThread({
   onAccept,
   onBlock,
 }: Props) {
+  const { mobile } = useAuth();
   const [draft, setDraft] = useState('');
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -193,6 +198,10 @@ export function MessageThread({
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const lastIdRef = useRef<number>(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const imageMenuRef = useRef<HTMLDivElement | null>(null);
+  const [imageMenuOpen, setImageMenuOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const dragDepthRef = useRef(0);
   const loadingMoreRef = useRef(false);
@@ -253,7 +262,17 @@ export function MessageThread({
       return [];
     });
     setAttachmentError(null);
+    setImageMenuOpen(false);
   }, [conversation?.id]);
+
+  useEffect(() => {
+    if (!imageMenuOpen) return;
+    const onDoc = (event: MouseEvent) => {
+      if (!imageMenuRef.current?.contains(event.target as Node)) setImageMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [imageMenuOpen]);
 
   if (!conversation) {
     return (
@@ -365,6 +384,7 @@ export function MessageThread({
       setDraft('');
       setReplyTo(null);
     }
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
     if (queuedFiles.length > 0) {
       setSendingAttachments(true);
       try {
@@ -376,6 +396,7 @@ export function MessageThread({
         setAttachmentError('Không gửi được file. Bạn có thể thử lại.');
       } finally {
         setSendingAttachments(false);
+        window.requestAnimationFrame(() => textareaRef.current?.focus());
       }
     }
   };
@@ -689,7 +710,7 @@ export function MessageThread({
         className="chat-composer"
         onSubmit={(e) => {
           e.preventDefault();
-          void submit();
+          if (!sendingAttachments) void submit();
         }}
       >
         {replyTo && (
@@ -742,6 +763,49 @@ export function MessageThread({
           >
             <IconPaperclip size={20} />
           </button>
+          {mobile ? (
+            <div className="chat-image-attach" ref={imageMenuRef}>
+              <button
+                type="button"
+                className="chat-attach"
+                disabled={!canSend || sendingAttachments}
+                onClick={() => setImageMenuOpen((open) => !open)}
+                title="Đính kèm ảnh"
+                aria-expanded={imageMenuOpen}
+                aria-haspopup="menu"
+              >
+                <IconImage size={20} />
+              </button>
+              {imageMenuOpen ? (
+                <div className="chat-image-menu" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!canSend || sendingAttachments}
+                    onClick={() => {
+                      setImageMenuOpen(false);
+                      cameraInputRef.current?.click();
+                    }}
+                  >
+                    <IconCamera size={18} />
+                    {uiCopy('v', 'takePhoto')}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!canSend || sendingAttachments}
+                    onClick={() => {
+                      setImageMenuOpen(false);
+                      imageInputRef.current?.click();
+                    }}
+                  >
+                    <IconImage size={18} />
+                    {uiCopy('v', 'chooseImage')}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <input
             ref={fileInputRef}
             type="file"
@@ -752,6 +816,32 @@ export function MessageThread({
               e.target.value = '';
             }}
           />
+          {mobile ? (
+            <>
+              <input
+                ref={imageInputRef}
+                type="file"
+                hidden
+                multiple
+                accept="image/*"
+                onChange={(e) => {
+                  addFiles(Array.from(e.target.files ?? []));
+                  e.target.value = '';
+                }}
+              />
+              <input
+                ref={cameraInputRef}
+                type="file"
+                hidden
+                accept="image/*"
+                capture="environment"
+                onChange={(e) => {
+                  addFiles(Array.from(e.target.files ?? []));
+                  e.target.value = '';
+                }}
+              />
+            </>
+          ) : null}
           <textarea
             ref={textareaRef}
             value={draft}
@@ -796,13 +886,13 @@ export function MessageThread({
               }
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                void submit();
+                if (!sendingAttachments) void submit();
               }
             }}
             rows={1}
-            placeholder={canSend ? 'Nhập tin nhắn hoặc Ctrl+V ảnh…' : blockReason || 'Không thể gửi tin…'}
+            placeholder={canSend ? 'Nhập tin nhắn…' : blockReason || 'Không thể gửi tin…'}
             aria-label="Nội dung tin nhắn"
-            disabled={!canSend || sendingAttachments}
+            disabled={!canSend}
           />
           <button
             type="submit"

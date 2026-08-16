@@ -9,6 +9,8 @@ import {
 } from '../api/chatApi';
 import { ChatAvatar } from '../components/chat/ChatAvatar';
 import { IconChat, IconClose, IconUsersAdd } from '../components/AppIcons';
+import { useAuth } from '../auth/AuthContext';
+import { navigateChat } from '../lib/chatNav';
 
 type ShellContext = { me: ChatMe | null };
 
@@ -24,6 +26,7 @@ function relationLabel(item: ContactItem): string {
 
 export function ContactsPage() {
   const { me } = useOutletContext<ShellContext>();
+  const { mobile } = useAuth();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const unitId = me?.unit_id ?? 0;
@@ -104,7 +107,7 @@ export function ContactsPage() {
     setError(null);
     try {
       const conversation = await chatApi.createDirect(userId, lookup);
-      navigate(`/chat/${conversation.id}`);
+      navigateChat(navigate, `/chat/${conversation.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Không mở được chat.');
     } finally {
@@ -131,7 +134,7 @@ export function ContactsPage() {
     try {
       await chatApi.addMembers(groupId, [addToGroupUser.user_id]);
       setAddToGroupUser(null);
-      navigate(`/chat/${groupId}`);
+      navigateChat(navigate, `/chat/${groupId}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Không thêm được vào nhóm.');
     } finally {
@@ -147,7 +150,7 @@ export function ContactsPage() {
     try {
       const conversation = await chatApi.createGroup(title, [addToGroupUser.user_id]);
       setAddToGroupUser(null);
-      navigate(`/chat/${conversation.id}`);
+      navigateChat(navigate, `/chat/${conversation.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Không tạo được nhóm.');
     } finally {
@@ -213,7 +216,9 @@ export function ContactsPage() {
           <h2>Danh bạ</h2>
           <p className="muted">
             {tab === 'company'
-              ? companyName || 'Danh bạ công ty'
+              ? mobile
+                ? 'Đồng nghiệp trong đơn vị của bạn.'
+                : companyName || 'Danh bạ công ty'
               : 'Liên hệ đã kết nối, yêu cầu chờ duyệt và đã chặn.'}
           </p>
         </div>
