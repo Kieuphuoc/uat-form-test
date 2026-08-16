@@ -15,6 +15,11 @@ export function setJwt(token: string, persist = true): void {
   else localStorage.removeItem(JWT_KEY);
 }
 
+/** Chỉ tab hiện tại — không ghi/xóa localStorage (handoff Knowledge → /chat). */
+export function setSessionJwt(token: string): void {
+  sessionStorage.setItem(JWT_KEY, token);
+}
+
 export function clearJwt(): void {
   sessionStorage.removeItem(JWT_KEY);
   localStorage.removeItem(JWT_KEY);

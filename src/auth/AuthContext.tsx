@@ -14,7 +14,7 @@ import {
   fetchAuthMe,
   type AuthUser,
 } from '../api/authApi';
-import { clearJwt, decodeJwtPayload, getJwt, getJwtUserId, isJwtExpired, setJwt } from '../api/client';
+import { clearJwt, decodeJwtPayload, getJwt, getJwtUserId, isJwtExpired, setJwt, setSessionJwt } from '../api/client';
 import { installFormCacheClearListener } from '../lib/formRuntimeCache';
 
 /** Admin/Designer cần isAdmin; Chat chỉ cần đã đăng nhập. */
@@ -52,6 +52,33 @@ function stripQueryKeys(...keys: string[]) {
     {},
     '',
     window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash,
+  );
+}
+
+/** Query `embed_token` (mobile iframe) hoặc hash `#token=` / `#embed_token=` (tab Knowledge). */
+function readEmbedTokenFromLocation(): string | null {
+  const fromQuery = new URLSearchParams(window.location.search).get('embed_token')?.trim();
+  if (fromQuery) return fromQuery;
+
+  const hash = window.location.hash.replace(/^#/, '');
+  if (!hash) return null;
+  const hashParams = new URLSearchParams(hash);
+  return (hashParams.get('token') ?? hashParams.get('embed_token'))?.trim() || null;
+}
+
+function stripEmbedTokenFromUrl() {
+  stripQueryKeys('embed_token');
+  const hash = window.location.hash.replace(/^#/, '');
+  if (!hash) return;
+  const hashParams = new URLSearchParams(hash);
+  if (!hashParams.has('token') && !hashParams.has('embed_token')) return;
+  hashParams.delete('token');
+  hashParams.delete('embed_token');
+  const next = hashParams.toString();
+  window.history.replaceState(
+    {},
+    '',
+    window.location.pathname + window.location.search + (next ? `#${next}` : ''),
   );
 }
 
@@ -126,7 +153,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const embed = params.get('embed_token')?.trim();
     const isMobile = params.get('mobile') === 'true';
     setMobile(isMobile);
     if (isMobile) document.body.classList.add('mobile-embed');
@@ -136,12 +162,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       stripQueryKeys('login_error');
     }
 
+    const embed = readEmbedTokenFromLocation();
+    const embedFromQuery = !!params.get('embed_token')?.trim();
+
     void (async () => {
       if (embed && !isJwtExpired(embed)) {
-        setJwt(embed, true);
+        if (embedFromQuery) setJwt(embed, true);
+        else setSessionJwt(embed);
         setJwtState(embed);
         setUser(userFromJwt(embed));
-        stripQueryKeys('embed_token');
+        stripEmbedTokenFromUrl();
         // Embed: không bắt buộc /me
         setStatus('ready');
         return;

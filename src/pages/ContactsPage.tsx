@@ -9,7 +9,6 @@ import {
 } from '../api/chatApi';
 import { ChatAvatar } from '../components/chat/ChatAvatar';
 import { IconChat, IconClose, IconUsersAdd } from '../components/AppIcons';
-import { useAuth } from '../auth/AuthContext';
 import { navigateChat } from '../lib/chatNav';
 
 type ShellContext = { me: ChatMe | null };
@@ -26,7 +25,6 @@ function relationLabel(item: ContactItem): string {
 
 export function ContactsPage() {
   const { me } = useOutletContext<ShellContext>();
-  const { mobile } = useAuth();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const unitId = me?.unit_id ?? 0;
@@ -216,9 +214,7 @@ export function ContactsPage() {
           <h2>Danh bạ</h2>
           <p className="muted">
             {tab === 'company'
-              ? mobile
-                ? 'Đồng nghiệp trong đơn vị của bạn.'
-                : companyName || 'Danh bạ công ty'
+              ? companyName || 'Danh bạ công ty'
               : 'Liên hệ đã kết nối, yêu cầu chờ duyệt và đã chặn.'}
           </p>
         </div>
