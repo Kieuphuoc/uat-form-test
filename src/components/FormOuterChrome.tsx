@@ -58,7 +58,7 @@ export function FormOuterChrome({ fallbackTitle = 'Arito Form', children }: Prop
     const onMsg = (e: MessageEvent) => apply(e.data);
     const onEvt = (e: Event) => apply((e as CustomEvent<FormChromeState>).detail);
     const onOpen = () => {
-      setToast('Chart / Chat / Files chỉ mở đầy đủ trên ứng dụng mobile.');
+      setToast('Chart / AI Agent / Chat / Files chỉ mở đầy đủ trên ứng dụng mobile.');
       window.setTimeout(() => setToast(null), 2800);
     };
     window.addEventListener('message', onMsg);

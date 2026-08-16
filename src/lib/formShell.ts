@@ -8,6 +8,7 @@ export const FORM_CHROME_REQUEST_MSG = 'arito-form-chrome-request' as const;
 
 export type OpenShellTarget =
   | 'chart'
+  | 'agent'
   | 'chat'
   | 'files'
   | 'docs'
@@ -30,7 +31,8 @@ export type FormChromeState = {
 export function normalizeOpenShellTarget(raw: string): OpenShellTarget | null {
   const v = raw.trim().toLowerCase();
   if (v === 'chart' || v === 'dash' || v === 'canvas') return 'chart';
-  if (v === 'chat' || v === 'ai') return 'chat';
+  if (v === 'agent' || v === 'ai' || v === 'chart-chat' || v === 'chartchat') return 'agent';
+  if (v === 'chat') return 'chat';
   if (v === 'files' || v === 'file') return 'files';
   if (v === 'docs' || v === 'portal' || v === 'document') return 'docs';
   if (v === 'monitor') return 'monitor';

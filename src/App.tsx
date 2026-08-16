@@ -1,7 +1,12 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { RequireAdmin } from './auth/RequireAdmin';
+import { RequireAuth } from './auth/RequireAuth';
+import { ChatAppShell } from './components/chat/ChatAppShell';
 import { AdminAppPage } from './pages/AdminAppPage';
 import { AdminListPage } from './pages/AdminListPage';
+import { ChatPage } from './pages/ChatPage';
+import { ChatSettingsPage } from './pages/ChatSettingsPage';
+import { ContactsPage } from './pages/ContactsPage';
 import { DesignPage } from './pages/DesignPage';
 import { HomePage } from './pages/HomePage';
 import { RedirectPage } from './pages/RedirectPage';
@@ -11,12 +16,34 @@ function AdminGate({ children }: { children: React.ReactNode }) {
   return <RequireAdmin>{children}</RequireAdmin>;
 }
 
+/** Chat cho mọi user đã đăng nhập — không dùng AdminGate. */
+function ChatGate({ children }: { children: React.ReactNode }) {
+  return (
+    <RequireAuth nextPath="/chat" title="Arito Chat">
+      {children}
+    </RequireAuth>
+  );
+}
+
 export function App() {
   return (
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/redirect" element={<RedirectPage />} />
       <Route path="/runtime/:slug" element={<RuntimePage />} />
+      <Route
+        path="/chat"
+        element={
+          <ChatGate>
+            <ChatAppShell />
+          </ChatGate>
+        }
+      >
+        <Route index element={<ChatPage />} />
+        <Route path="contacts" element={<ContactsPage />} />
+        <Route path="settings" element={<ChatSettingsPage />} />
+        <Route path=":conversationId" element={<ChatPage />} />
+      </Route>
       <Route
         path="/admin"
         element={

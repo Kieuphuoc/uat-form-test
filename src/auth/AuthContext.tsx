@@ -14,19 +14,23 @@ import {
   fetchAuthMe,
   type AuthUser,
 } from '../api/authApi';
-import { clearJwt, getJwt, isJwtExpired, setJwt } from '../api/client';
+import { clearJwt, decodeJwtPayload, getJwt, getJwtUserId, isJwtExpired, setJwt } from '../api/client';
 import { installFormCacheClearListener } from '../lib/formRuntimeCache';
+
+/** Admin/Designer cần isAdmin; Chat chỉ cần đã đăng nhập. */
+export type LoginOptions = { requireAdmin?: boolean };
 
 type AuthState = {
   status: 'loading' | 'ready';
   jwt: string | null;
   user: AuthUser | null;
   isAdmin: boolean;
+  userId: number;
   mobile: boolean;
   loginError: string | null;
   setToken: (token: string | null) => void;
   acceptSession: (token: string, user?: AuthUser | null) => void;
-  login: (nextPath?: string) => Promise<void>;
+  login: (nextPath?: string, options?: LoginOptions) => Promise<void>;
   logout: () => void;
   refreshMe: () => Promise<void>;
 };
@@ -52,16 +56,24 @@ function stripQueryKeys(...keys: string[]) {
 }
 
 function decodeIsAdmin(jwt: string): boolean {
-  try {
-    const part = jwt.split('.')[1];
-    if (!part) return false;
-    const json = JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/'))) as {
-      is_admin?: string | boolean;
-    };
-    return json.is_admin === true || json.is_admin === '1' || json.is_admin === 'true';
-  } catch {
-    return false;
-  }
+  const claims = decodeJwtPayload(jwt) as { is_admin?: string | boolean } | null;
+  if (!claims) return false;
+  return claims.is_admin === true || claims.is_admin === '1' || claims.is_admin === 'true';
+}
+
+function decodeNickname(jwt: string): string {
+  const claims = decodeJwtPayload(jwt) as { nickname?: string } | null;
+  return typeof claims?.nickname === 'string' ? claims.nickname : '';
+}
+
+function userFromJwt(jwt: string): AuthUser {
+  return {
+    userId: getJwtUserId(jwt),
+    clientId: '',
+    email: '',
+    nickname: decodeNickname(jwt),
+    isAdmin: decodeIsAdmin(jwt),
+  };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -85,14 +97,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } else {
       setUser((prev) =>
         prev
-          ? { ...prev, isAdmin: decodeIsAdmin(token) || prev.isAdmin }
-          : {
-              userId: 0,
-              clientId: '',
-              email: '',
-              nickname: '',
-              isAdmin: decodeIsAdmin(token),
-            },
+          ? {
+              ...prev,
+              userId: prev.userId > 0 ? prev.userId : getJwtUserId(token),
+              isAdmin: decodeIsAdmin(token) || prev.isAdmin,
+            }
+          : userFromJwt(token),
       );
     }
   }, []);
@@ -109,17 +119,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setJwtState(token);
       return;
     }
-    // JWT còn hạn nhưng /me fail — giữ token (có thể embed), suy isAdmin từ claim
+    // JWT còn hạn nhưng /me fail — giữ token (có thể embed), suy user từ claim
     setJwtState(token);
-    setUser((prev) =>
-      prev ?? {
-        userId: 0,
-        clientId: '',
-        email: '',
-        nickname: '',
-        isAdmin: decodeIsAdmin(token),
-      },
-    );
+    setUser((prev) => prev ?? userFromJwt(token));
   }, [applyToken]);
 
   useEffect(() => {
@@ -138,13 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (embed && !isJwtExpired(embed)) {
         setJwt(embed, true);
         setJwtState(embed);
-        setUser({
-          userId: 0,
-          clientId: '',
-          email: '',
-          nickname: '',
-          isAdmin: decodeIsAdmin(embed),
-        });
+        setUser(userFromJwt(embed));
         stripQueryKeys('embed_token');
         // Embed: không bắt buộc /me
         setStatus('ready');
@@ -166,17 +162,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => installFormCacheClearListener(), []);
 
-  const login = useCallback(async (nextPath = '/admin') => {
+  const login = useCallback(async (nextPath = '/admin', options?: LoginOptions) => {
+    const requireAdmin = options?.requireAdmin ?? true;
     setLoginError(null);
     // Thử đổi cookie sẵn có trước khi nhảy IdP
     const session = await authAritoSession();
     if (session.success && session.data?.jwt) {
       applyToken(session.data.jwt, session.data.user);
-      if (!session.data.user.isAdmin) {
+      if (requireAdmin && !session.data.user.isAdmin) {
         setLoginError('Đã có phiên nhưng tài khoản không phải admin.');
         return;
       }
-      window.location.assign(nextPath.startsWith('/') ? nextPath : '/admin');
+      window.location.assign(nextPath.startsWith('/') ? nextPath : '/');
       return;
     }
 
@@ -203,6 +200,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const isAdmin = !!user?.isAdmin || (!!jwt && decodeIsAdmin(jwt));
+  const userId = user?.userId && user.userId > 0 ? user.userId : jwt ? getJwtUserId(jwt) : 0;
 
   const value = useMemo<AuthState>(
     () => ({
@@ -210,6 +208,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       jwt,
       user,
       isAdmin,
+      userId,
       mobile,
       loginError,
       setToken: (token) => applyToken(token),
@@ -223,6 +222,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       jwt,
       user,
       isAdmin,
+      userId,
       mobile,
       loginError,
       applyToken,

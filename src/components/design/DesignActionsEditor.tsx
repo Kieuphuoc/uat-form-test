@@ -25,6 +25,7 @@ const ACTION_TYPES = [
 
 const OPEN_SHELL_TARGETS = [
   { value: 'chart', label: 'chart — overlay Chart' },
+  { value: 'agent', label: 'agent — overlay AI Agent (chart-chat)' },
   { value: 'chat', label: 'chat — overlay Chat' },
   { value: 'files', label: 'files — overlay Files' },
   { value: 'docs', label: 'docs — overlay Portal/Docs' },
@@ -55,7 +56,7 @@ const ACTION_TYPE_HINTS: Record<string, string> = {
   getGps:
     'getGps: client-only — lấy GPS độ chính xác cao, cập nhật control maps (nếu có), mở formId kết quả (giống Test & Debug).',
   openShell:
-    'openShell: client-only — bảo mobile AppShell đè Chart/Chat/Files/Docs/Monitor/Cấu hình/Log. mode = target. Runtime browser: toast.',
+    'openShell: client-only — bảo mobile AppShell đè Chart/AI Agent/Chat/Files/Docs/Monitor/Cấu hình/Log. mode = target. Runtime browser: toast.',
   closeForm:
     'closeForm: đóng modal/sheet/fullscreen, trả returnValues theo returnMap về form cha.',
   message: 'message: toast thông báo (message + level info|success|error).',

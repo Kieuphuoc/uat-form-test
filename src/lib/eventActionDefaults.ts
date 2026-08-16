@@ -71,20 +71,22 @@ export function defaultActionDefForEvent(
     }
     case 'onClick': {
       if (/picker|open|show/i.test(id)) {
-        if (/chart|chat|files|docs|portal|monitor|settings|logs|shell/i.test(id)) {
-          const mode = /chat/i.test(id)
-            ? 'chat'
-            : /file/i.test(id)
-              ? 'files'
-              : /docs|portal/i.test(id)
-                ? 'docs'
-                : /monitor/i.test(id)
-                  ? 'monitor'
-                  : /settings|config/i.test(id)
-                    ? 'settings'
-                    : /log/i.test(id)
-                      ? 'logs'
-                      : 'chart';
+        if (/chart|agent|chat|files|docs|portal|monitor|settings|logs|shell/i.test(id)) {
+          const mode = /agent|ai[-_]?agent|chart[-_]?chat/i.test(id)
+            ? 'agent'
+            : /chat/i.test(id)
+              ? 'chat'
+              : /file/i.test(id)
+                ? 'files'
+                : /docs|portal/i.test(id)
+                  ? 'docs'
+                  : /monitor/i.test(id)
+                    ? 'monitor'
+                    : /settings|config/i.test(id)
+                      ? 'settings'
+                      : /log/i.test(id)
+                        ? 'logs'
+                        : 'chart';
           return { type: 'openShell', mode };
         }
         return {

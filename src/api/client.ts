@@ -20,17 +20,31 @@ export function clearJwt(): void {
   localStorage.removeItem(JWT_KEY);
 }
 
-export function isJwtExpired(jwt: string): boolean {
+export function decodeJwtPayload(jwt: string): Record<string, unknown> | null {
   try {
     const part = jwt.split('.')[1];
-    if (!part) return true;
-    const json = JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/')));
-    const exp = Number(json.exp);
-    if (!exp) return false;
-    return Date.now() / 1000 >= exp - 30;
+    if (!part) return null;
+    return JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/'))) as Record<string, unknown>;
   } catch {
-    return true;
+    return null;
   }
+}
+
+/** user_id từ claim — chế độ embed_token không gọi /auth/me nên vẫn phải biết mình là ai. */
+export function getJwtUserId(jwt: string): number {
+  const claims = decodeJwtPayload(jwt);
+  if (!claims) return 0;
+  const raw = claims.user_id ?? claims.nameid ?? claims.sub;
+  const id = Number(typeof raw === 'string' ? raw.trim() : raw);
+  return Number.isFinite(id) && id > 0 ? id : 0;
+}
+
+export function isJwtExpired(jwt: string): boolean {
+  const claims = decodeJwtPayload(jwt);
+  if (!claims) return true;
+  const exp = Number(claims.exp);
+  if (!exp) return false;
+  return Date.now() / 1000 >= exp - 30;
 }
 
 export type ApiResult<T> = {
