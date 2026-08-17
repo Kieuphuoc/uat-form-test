@@ -13,6 +13,7 @@ import {
 import { ChatAvatar } from '../components/chat/ChatAvatar';
 import { IconBlock, IconChat, IconClose, IconUsersAdd } from '../components/AppIcons';
 import { navigateChat } from '../lib/chatNav';
+import { subscribeContacts } from '../lib/chatTransport';
 
 type ShellContext = { me: ChatMe | null };
 
@@ -117,6 +118,13 @@ export function ContactsPage() {
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  useEffect(() => {
+    const sub = subscribeContacts(() => {
+      void load();
+    });
+    return () => sub.stop();
   }, [load]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));

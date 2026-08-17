@@ -32,6 +32,26 @@ export const IconChat = (p: IconProps) => (
   </Svg>
 );
 
+export const IconZalo = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3h-5.2L7 20.2V17H7a3 3 0 0 1-3-3z" />
+    <path d="M8.2 9.2h7.6L8.2 14.8h7.6" />
+  </Svg>
+);
+
+export const IconCopy = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="9" y="9" width="11" height="11" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </Svg>
+);
+
+export const IconCheck = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M20 6L9 17l-5-5" />
+  </Svg>
+);
+
 export const IconAdmin = (p: IconProps) => (
   <Svg {...p}>
     <path d="M4 6h16M4 12h16M4 18h16" />

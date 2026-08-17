@@ -8,6 +8,7 @@ import { ChatPage } from './pages/ChatPage';
 import { ChatSettingsPage } from './pages/ChatSettingsPage';
 import { ChatBotCreatePage } from './pages/ChatBotCreatePage';
 import { ContactsPage } from './pages/ContactsPage';
+import { ZaloChatPage } from './pages/ZaloChatPage';
 import { DesignPage } from './pages/DesignPage';
 import { HomePage } from './pages/HomePage';
 import { RedirectPage } from './pages/RedirectPage';
@@ -42,6 +43,7 @@ export function App() {
       >
         <Route index element={<ChatPage />} />
         <Route path="contacts" element={<ContactsPage />} />
+        <Route path="zalo" element={<ZaloChatPage />} />
         <Route path="settings" element={<ChatSettingsPage />} />
         <Route path="settings/bots/new" element={<ChatBotCreatePage />} />
         <Route path="settings/bots/:folderId" element={<ChatBotCreatePage />} />

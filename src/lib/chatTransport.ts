@@ -46,6 +46,7 @@ const notifyModes = new Map<number, ConversationNotifyMode>();
 const desktopModeListeners = new Set<(mode: DesktopNotificationMode) => void>();
 let connection: HubConnection | null = null;
 let startPromise: Promise<void> | null = null;
+let sessionRetain = 0;
 let retryTimer: number | null = null;
 let heartbeatTimer: number | null = null;
 let idleStopTimer: number | null = null;
@@ -61,7 +62,8 @@ let lastListItems: Conversation[] = [];
 
 function hasListeners(): boolean {
   return (
-    messageListeners.size
+    sessionRetain
+    + messageListeners.size
     + conversationListeners.size
     + contactListeners.size
     + conversationReadListeners.size
@@ -473,6 +475,18 @@ export function subscribeContacts(onContactUpdated: () => void): ChatSubscriptio
   return {
     stop: () => {
       contactListeners.delete(listener);
+      scheduleStopIfUnused();
+    },
+  };
+}
+
+/** Giữ hub khi còn trong shell Chat (Chat / Danh bạ / Zalo / Cài đặt) — tránh stop/reconnect 404 lúc đổi tab. */
+export function subscribeChatSession(): ChatSubscription {
+  sessionRetain += 1;
+  void ensureStarted();
+  return {
+    stop: () => {
+      sessionRetain = Math.max(0, sessionRetain - 1);
       scheduleStopIfUnused();
     },
   };

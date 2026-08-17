@@ -225,7 +225,9 @@ export const ChatMarkdownClamped = memo(function ChatMarkdownClamped({
     <div className="chat-md-clip-wrap">
       <div
         ref={clipRef}
-        className={`chat-md-clip${expanded ? '' : ' chat-md-clip--clamp'}`}
+        className={`chat-md-clip${expanded ? '' : ' chat-md-clip--clamp'}${
+          !expanded && overflows ? ' chat-md-clip--fade' : ''
+        }`}
       >
         <ChatMarkdown text={text} />
       </div>

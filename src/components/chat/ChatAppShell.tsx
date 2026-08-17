@@ -3,8 +3,13 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { chatApi, type ChatMe } from '../../api/chatApi';
 import { useAuth } from '../../auth/AuthContext';
 import { navigateChat } from '../../lib/chatNav';
-import { applyDesktopNotificationMode, setChatActorUserId } from '../../lib/chatTransport';
-import { IconChat, IconDatabase, IconLogout, IconSettings, IconUsers } from '../AppIcons';
+import {
+  applyDesktopNotificationMode,
+  setChatActorUserId,
+  setChatPlatform,
+  subscribeChatSession,
+} from '../../lib/chatTransport';
+import { IconChat, IconDatabase, IconLogout, IconSettings, IconUsers, IconZalo } from '../AppIcons';
 import { ChatAvatar } from './ChatAvatar';
 import { DataSelectionDialog } from './DataSelectionDialog';
 
@@ -15,13 +20,14 @@ function navClass({ isActive }: { isActive: boolean }) {
 function headerSelectPath(id: string): string | null {
   const key = id.trim().toLowerCase();
   if (key === 'contacts' || key === 'contact' || key === 'danhba') return '/chat/contacts';
+  if (key === 'zalo' || key === 'zalo-chat' || key === 'zalochat') return '/chat/zalo';
   if (key === 'settings' || key === 'caidat' || key === 'cài đặt') return '/chat/settings';
   if (key === 'chat' || key === 'list' || key === 'conversations') return '/chat';
   return null;
 }
 
 /**
- * Shell kiểu Dash: nền #f5f7fa, header navy #001854, nav Chat / Danh bạ.
+ * Shell kiểu Dash: nền #f5f7fa, header navy #001854, nav Chat / Danh bạ / Zalo.
  * Mobile embed: ẩn header web — menu Chat/Danh bạ/Cài đặt nằm trên header native.
  */
 export function ChatAppShell() {
@@ -31,6 +37,15 @@ export function ChatAppShell() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [dataSelectOpen, setDataSelectOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setChatPlatform(mobile ? 'mobile' : 'web');
+  }, [mobile]);
+
+  useEffect(() => {
+    const sub = subscribeChatSession();
+    return () => sub.stop();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,6 +108,10 @@ export function ChatAppShell() {
             <NavLink to="/chat/contacts" className={navClass}>
               <IconUsers size={17} />
               <span>Danh bạ</span>
+            </NavLink>
+            <NavLink to="/chat/zalo" className={navClass}>
+              <IconZalo size={17} />
+              <span>Zalo</span>
             </NavLink>
           </nav>
 
