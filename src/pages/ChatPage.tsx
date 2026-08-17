@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import {
   chatApi,
+  isEmbedBot,
+  nextNotifyMode,
+  normalizeNotifyMode,
   newClientMsgId,
   type ChatMessage,
   type ChatMe,
@@ -9,19 +12,28 @@ import {
   type ContactRelation,
   type Conversation,
   type ConversationDetail,
+  type ChatAttachmentList,
 } from '../api/chatApi';
+import { BotEmbedThread } from '../components/chat/BotEmbedThread';
 import { ConversationInfo } from '../components/chat/ConversationInfo';
 import { ConversationList } from '../components/chat/ConversationList';
-import { MessageThread, type PendingMessage } from '../components/chat/MessageThread';
+import { MessageThread } from '../components/chat/MessageThread';
 import { UserPickerDialog, type PickerMode } from '../components/chat/UserPickerDialog';
 import { useAuth } from '../auth/AuthContext';
+import { resizeChatImage } from '../lib/chatImageResize';
 import { navigateChat } from '../lib/chatNav';
 import {
   getDesktopNotificationMode,
+  setChatActorUserId,
   setChatPlatform,
+  setConversationNotifyMode,
   subscribeContacts,
+  subscribeConversationRead,
   subscribeConversations,
+  subscribeDesktopNotificationMode,
   subscribeMessages,
+  syncConversationNotifyModes,
+  reloadConversations,
 } from '../lib/chatTransport';
 
 const PAGE_SIZE = 30;
@@ -40,12 +52,34 @@ function storedWidth(key: string, fallback: number): number {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+function compareChatMessages(a: ChatMessage, b: ChatMessage): number {
+  const aLocal = a.id < 0;
+  const bLocal = b.id < 0;
+  if (aLocal !== bLocal) return aLocal ? 1 : -1;
+  if (aLocal) {
+    const byTime = a.created_at.localeCompare(b.created_at);
+    return byTime !== 0 ? byTime : a.id - b.id;
+  }
+  return a.id - b.id;
+}
+
 function mergeMessages(prev: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
   if (incoming.length === 0) return prev;
   const byId = new Map<number, ChatMessage>();
-  for (const m of prev) byId.set(m.id, m);
-  for (const m of incoming) byId.set(m.id, m);
-  return [...byId.values()].sort((a, b) => a.id - b.id);
+  const idByClient = new Map<string, number>();
+  for (const m of prev) {
+    byId.set(m.id, m);
+    if (m.client_msg_id) idByClient.set(m.client_msg_id, m.id);
+  }
+  for (const m of incoming) {
+    if (m.client_msg_id) {
+      const existingId = idByClient.get(m.client_msg_id);
+      if (existingId != null && existingId !== m.id) byId.delete(existingId);
+    }
+    byId.set(m.id, m);
+    if (m.client_msg_id) idByClient.set(m.client_msg_id, m.id);
+  }
+  return [...byId.values()].sort(compareChatMessages);
 }
 
 function errorMessage(e: unknown, fallback: string): string {
@@ -69,6 +103,25 @@ function firstUnreadMessageId(
   return items[Math.max(0, items.length - unreadCount)]?.id ?? 0;
 }
 
+function applySentMessage(conversation: Conversation, message: ChatMessage): Conversation {
+  const mine = message.sender_is_me;
+  const preview =
+    message.msg_type === 'image'
+      ? '[Hình ảnh]'
+      : message.msg_type === 'file'
+        ? '[Tệp đính kèm]'
+        : (message.body ?? '').replace(/\n/g, ' ').trim();
+  const clipped = preview.length > 120 ? preview.slice(0, 120) : preview;
+  return {
+    ...conversation,
+    last_message_id: message.id,
+    last_message_at: message.created_at,
+    last_preview: clipped ? (mine ? `Bạn: ${clipped}` : clipped) : conversation.last_preview,
+    last_read_message_id: message.id,
+    unread_count: 0,
+  };
+}
+
 /**
  * Một trang chat duy nhất cho cả PC và mobile:
  * - rộng: 3 panel như Zalo PC (danh sách | hội thoại | thông tin)
@@ -89,8 +142,9 @@ export function ChatPage() {
   const [conversationSearch, setConversationSearch] = useState('');
   const [listLoading, setListLoading] = useState(true);
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
+  const [openAttachments, setOpenAttachments] = useState<ChatAttachmentList | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [pending, setPending] = useState<PendingMessage[]>([]);
+  const [aiWaiting, setAiWaiting] = useState(false);
   const [threadLoading, setThreadLoading] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -110,13 +164,30 @@ export function ChatPage() {
   const lastIdRef = useRef(0);
   const readIdRef = useRef(0);
   const messagesRef = useRef<ChatMessage[]>([]);
+  const optimisticIdRef = useRef(-1);
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const aiWaitTimer = useRef<number | null>(null);
 
-  const activeConversation = useMemo(
-    () => detail?.conversation ?? conversations.find((c) => c.id === activeId) ?? null,
-    [detail, conversations, activeId],
-  );
-  const relation = detail?.relation ?? null;
+  const stopAiWait = useCallback(() => {
+    setAiWaiting(false);
+    if (aiWaitTimer.current != null) {
+      window.clearTimeout(aiWaitTimer.current);
+      aiWaitTimer.current = null;
+    }
+  }, []);
+
+  const startAiWait = useCallback(() => {
+    setAiWaiting(true);
+    if (aiWaitTimer.current != null) window.clearTimeout(aiWaitTimer.current);
+    aiWaitTimer.current = window.setTimeout(() => setAiWaiting(false), 180_000);
+  }, []);
+
+  const activeConversation = useMemo(() => {
+    if (detail?.conversation.id === activeId) return detail.conversation;
+    return conversations.find((c) => c.id === activeId) ?? null;
+  }, [detail, conversations, activeId]);
+  const relation = detail?.conversation.id === activeId ? detail.relation ?? null : null;
+  const embedConversation = isEmbedBot(activeConversation);
   const companyLabel =
     me?.unit_id && me.unit_id > 0
       ? me.unit?.unit_name || me.unit?.unit_code || `Công ty #${me.unit_id}`
@@ -125,6 +196,14 @@ export function ChatPage() {
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  useEffect(() => {
+    if (me?.user_id) setChatActorUserId(me.user_id);
+  }, [me?.user_id]);
+
+  useEffect(() => {
+    syncConversationNotifyModes(conversations);
+  }, [conversations]);
 
   const beginResize = useCallback(
     (target: 'list' | 'info', event: React.PointerEvent<HTMLDivElement>) => {
@@ -171,29 +250,32 @@ export function ChatPage() {
 
   useEffect(() => {
     if (mobile) return;
-    const mode = getDesktopNotificationMode();
     const baseTitle = document.title.replace(/^\(\d+\)\s*/, '');
-    document.title = mode === 'badge' && totalUnread > 0 ? `(${totalUnread}) ${baseTitle}` : baseTitle;
+    const applyTitle = () => {
+      const mode = getDesktopNotificationMode();
+      document.title = mode === 'badge' && totalUnread > 0 ? `(${totalUnread}) ${baseTitle}` : baseTitle;
+    };
+    applyTitle();
+    const sub = subscribeDesktopNotificationMode(applyTitle);
     return () => {
+      sub.stop();
       document.title = baseTitle;
     };
-  }, [mobile, totalUnread]);
+  }, [mobile, totalUnread, me?.desktop_notification]);
 
   const refreshConversations = useCallback(async () => {
     try {
-      const items = await chatApi.listConversations(conversationSearch);
-      setConversations(items);
-      if (!conversationSearch)
-        setTotalUnread(items.reduce((sum, item) => sum + item.unread_count, 0));
+      await reloadConversations();
     } catch (e) {
       setError(errorMessage(e, 'Không tải được danh sách hội thoại.'));
     }
-  }, [conversationSearch]);
+  }, []);
 
   const refreshDetail = useCallback(async () => {
     if (!activeId) return;
     try {
-      setDetail(await chatApi.getConversation(activeId));
+      const info = await chatApi.getConversation(activeId);
+      setDetail(info);
     } catch {
       /* giữ detail cũ */
     }
@@ -224,20 +306,6 @@ export function ChatPage() {
   );
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const items = await chatApi.listConversations();
-        setConversations(items);
-        setTotalUnread(items.reduce((sum, item) => sum + item.unread_count, 0));
-      } catch (e) {
-        setError(errorMessage(e, 'Không tải được danh sách hội thoại.'));
-      } finally {
-        setListLoading(false);
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
     setListLoading(true);
     const sub = subscribeConversations(conversationSearch, (items) => {
       setConversations(items);
@@ -249,19 +317,46 @@ export function ChatPage() {
   }, [conversationSearch]);
 
   useEffect(() => {
-    const sub = subscribeContacts(() => {
-      void refreshDetail();
-      void refreshConversations();
+    if (activeId || listLoading || conversationSearch || mobile) return;
+    if (conversations.length === 0) return;
+    if (window.matchMedia('(max-width: 1023px)').matches) return;
+    navigateChat(navigate, `/chat/${conversations[0].id}`, { replace: true });
+  }, [activeId, listLoading, conversationSearch, conversations, mobile, navigate]);
+
+  useEffect(() => {
+    const sub = subscribeConversationRead((event) => {
+      if (!me?.user_id || event.user_id !== me.user_id) return;
+      setConversations((prev) => {
+        const next = prev.map((item) =>
+          item.id === event.conversation_id
+            ? {
+                ...item,
+                unread_count: 0,
+                last_read_message_id: event.last_read_message_id,
+              }
+            : item,
+        );
+        if (!conversationSearch)
+          setTotalUnread(next.reduce((sum, item) => sum + item.unread_count, 0));
+        return next;
+      });
     });
     return () => sub.stop();
-  }, [refreshConversations, refreshDetail]);
+  }, [me?.user_id, conversationSearch]);
+
+  useEffect(() => {
+    const sub = subscribeContacts(() => {
+      void refreshDetail();
+    });
+    return () => sub.stop();
+  }, [refreshDetail]);
 
   // Đổi hội thoại → nạp lại chi tiết + lịch sử.
   useEffect(() => {
     if (!activeId) {
       setDetail(null);
+      setOpenAttachments(null);
       setMessages([]);
-      setPending([]);
       setPane('list');
       return;
     }
@@ -270,26 +365,41 @@ export function ChatPage() {
     // -1 khóa polling cho tới khi trang lịch sử đầu tiên nạp xong.
     lastIdRef.current = -1;
     readIdRef.current = 0;
-    setPending([]);
+    stopAiWait();
     setThreadLoading(true);
     setError(null);
     setPane('thread');
+    setOpenAttachments(null);
 
     void (async () => {
       try {
-        const info = await chatApi.getConversation(activeId);
-        const lastReadId = info.conversation.last_read_message_id ?? 0;
-        const unreadCount = Math.max(0, info.conversation.unread_count ?? 0);
-        // 30 tin cũ + phần chưa đọc, gộp trong một lượt để không nạp thừa lịch sử.
-        const preload = unreadCount <= MAX_UNREAD_PRELOAD ? unreadCount : 0;
+        const fromList = conversations.find((item) => item.id === activeId);
+        const unreadCount = Math.max(0, fromList?.unread_count ?? 0);
+        const preload = unreadCount > 0 && unreadCount <= MAX_UNREAD_PRELOAD ? unreadCount : fromList ? 0 : PAGE_SIZE;
         const limit = Math.min(MAX_LIST_LIMIT, PAGE_SIZE + preload);
-        const items = await chatApi.listMessages(activeId, { limit });
+        const opened = await chatApi.openConversation(activeId, { limit, fileLimit: 10 });
         if (cancelled) return;
-        setDetail(info);
+        setDetail(opened);
+        setOpenAttachments(opened.attachments ?? null);
+        if (isEmbedBot(opened.conversation)) {
+          setMessages([]);
+          setHasMore(false);
+          lastIdRef.current = 0;
+          readIdRef.current = 0;
+          stopAiWait();
+          return;
+        }
+        const lastReadId = opened.conversation.last_read_message_id ?? 0;
+        const items = opened.messages ?? [];
+        stopAiWait();
         setMessages(items);
-        setHasMore(items.length >= limit);
+        setHasMore(opened.has_more || items.length >= limit);
         const newest = items.length > 0 ? items[items.length - 1].id : 0;
-        const unreadId = firstUnreadMessageId(items, lastReadId, preload);
+        const unreadId = firstUnreadMessageId(
+          items,
+          lastReadId,
+          Math.max(0, opened.conversation.unread_count ?? unreadCount),
+        );
         setFocusRequest({
           messageId: unreadId || newest,
           atBottom: unreadId === 0,
@@ -301,6 +411,7 @@ export function ChatPage() {
       } catch (e) {
         if (!cancelled) {
           setDetail(null);
+          setOpenAttachments(null);
           setMessages([]);
           setError(errorMessage(e, 'Không mở được hội thoại.'));
         }
@@ -312,10 +423,10 @@ export function ChatPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeId, markRead]);
+  }, [activeId, markRead, stopAiWait]);
 
   useEffect(() => {
-    if (!activeId) return;
+    if (!activeId || embedConversation) return;
     const sub = subscribeMessages(
       activeId,
       () => lastIdRef.current,
@@ -323,21 +434,20 @@ export function ChatPage() {
         setMessages((prev) => mergeMessages(prev, items));
         const newest = items[items.length - 1]?.id ?? 0;
         if (newest > lastIdRef.current) lastIdRef.current = newest;
+        if (items.some((item) => !item.sender_is_me)) stopAiWait();
         if (document.visibilityState === 'visible' && document.hasFocus()) {
           if (newest > 0) {
             setFocusRequest({ messageId: newest, atBottom: true, token: Date.now() });
           }
           void markRead(activeId, newest);
         }
-        void refreshConversations();
-        void refreshDetail();
       },
     );
     return () => sub.stop();
-  }, [activeId, markRead, refreshConversations, refreshDetail]);
+  }, [activeId, embedConversation, markRead, stopAiWait]);
 
   useEffect(() => {
-    if (!activeId) return;
+    if (!activeId || embedConversation) return;
     const focusLatestUnread = () => {
       if (document.visibilityState !== 'visible' || !document.hasFocus()) return;
       const current = messagesRef.current;
@@ -359,68 +469,118 @@ export function ChatPage() {
       window.removeEventListener('focus', focusLatestUnread);
       document.removeEventListener('visibilitychange', focusLatestUnread);
     };
-  }, [activeId, markRead]);
+  }, [activeId, embedConversation, markRead]);
 
   const deliver = useCallback(
     async (clientMsgId: string, body: string, replyToMessageId?: number | null) => {
       if (!activeId) return;
       try {
         const message = await chatApi.sendMessage(activeId, body, clientMsgId, replyToMessageId);
-        setPending((prev) => prev.filter((p) => p.client_msg_id !== clientMsgId));
         setMessages((prev) => mergeMessages(prev, [message]));
         if (message.id > lastIdRef.current) lastIdRef.current = message.id;
         readIdRef.current = message.id;
-        void refreshConversations();
-        void refreshDetail();
+        setDetail((prev) =>
+          prev?.conversation.id === activeId
+            ? { ...prev, conversation: applySentMessage(prev.conversation, message) }
+            : prev,
+        );
+        setConversations((prev) =>
+          prev.map((item) => (item.id === activeId ? applySentMessage(item, message) : item)),
+        );
         setError(null);
       } catch (e) {
-        setPending((prev) =>
-          prev.map((p) => (p.client_msg_id === clientMsgId ? { ...p, failed: true } : p)),
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.client_msg_id === clientMsgId && m.send_status
+              ? { ...m, send_status: 'failed' }
+              : m,
+          ),
         );
         setError(errorMessage(e, 'Không gửi được tin.'));
+        stopAiWait();
         void refreshDetail();
       }
     },
-    [activeId, refreshConversations, refreshDetail],
+    [activeId, refreshDetail, stopAiWait],
   );
 
   const onSend = useCallback(
     (body: string, replyToMessageId?: number | null) => {
+      if (!activeId) return;
       if (relation && !relation.can_send) return;
+      if (isEmbedBot(activeConversation)) return;
+      if (activeConversation?.kind === 'bot' && activeConversation.bot_active === false) return;
       const clientMsgId = newClientMsgId();
-      setPending((prev) => [...prev, { client_msg_id: clientMsgId, body }]);
+      const reply = replyToMessageId
+        ? messagesRef.current.find((m) => m.id === replyToMessageId)
+        : undefined;
+      const optimistic: ChatMessage = {
+        id: optimisticIdRef.current--,
+        conversation_id: activeId,
+        sender_user_id: me?.user_id ?? 0,
+        sender_name: me?.nickname ?? null,
+        sender_avatar_id: me?.avatar_id ?? null,
+        sender_is_me: true,
+        msg_type: 'text',
+        body,
+        client_msg_id: clientMsgId,
+        created_at: new Date().toISOString(),
+        reply_to_message_id: replyToMessageId ?? null,
+        reply_preview: reply?.file_name || reply?.body || null,
+        reply_sender_name: reply?.sender_is_me ? 'Bạn' : reply?.sender_name ?? null,
+        send_status: 'sending',
+      };
+      setMessages((prev) => mergeMessages(prev, [optimistic]));
+      if (activeConversation?.kind === 'bot') startAiWait();
       void deliver(clientMsgId, body, replyToMessageId);
     },
-    [deliver, relation],
+    [activeId, deliver, relation, activeConversation, startAiWait, me],
   );
 
   const onRetry = useCallback(
     (clientMsgId: string) => {
-      const item = pending.find((p) => p.client_msg_id === clientMsgId);
-      if (!item) return;
-      setPending((prev) =>
-        prev.map((p) => (p.client_msg_id === clientMsgId ? { ...p, failed: false } : p)),
+      const item = messagesRef.current.find((m) => m.client_msg_id === clientMsgId);
+      if (!item?.body) return;
+      if (isEmbedBot(activeConversation)) return;
+      if (activeConversation?.kind === 'bot' && activeConversation.bot_active === false) return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.client_msg_id === clientMsgId ? { ...m, send_status: 'sending' } : m,
+        ),
       );
-      void deliver(clientMsgId, item.body);
+      if (activeConversation?.kind === 'bot') startAiWait();
+      void deliver(clientMsgId, item.body, item.reply_to_message_id);
     },
-    [deliver, pending],
+    [deliver, activeConversation, startAiWait],
   );
 
   const onSendAttachments = useCallback(
     async (files: File[]) => {
-      if (!activeId || (relation && !relation.can_send)) return;
+      if (!activeId || isEmbedBot(activeConversation) || activeConversation?.kind === 'bot' || (relation && !relation.can_send)) return;
       try {
         const uploaded = [];
         for (const file of files) {
-          uploaded.push(await chatApi.uploadAttachment(activeId, file));
+          uploaded.push(await chatApi.uploadAttachment(activeId, await resizeChatImage(file)));
         }
+        let last: ChatMessage | undefined;
         for (const attachment of uploaded) {
           const message = await chatApi.sendAttachment(activeId, attachment, newClientMsgId());
           setMessages((prev) => mergeMessages(prev, [message]));
           if (message.id > lastIdRef.current) lastIdRef.current = message.id;
+          last = message;
         }
-        void refreshConversations();
-        void refreshDetail();
+        if (last) {
+          const sent = last;
+          readIdRef.current = sent.id;
+          setDetail((prev) =>
+            prev?.conversation.id === activeId
+              ? { ...prev, conversation: applySentMessage(prev.conversation, sent) }
+              : prev,
+          );
+          setConversations((prev) =>
+            prev.map((item) => (item.id === activeId ? applySentMessage(item, sent) : item)),
+          );
+        }
         setError(null);
       } catch (e) {
         setError(errorMessage(e, 'Không gửi được file đính kèm.'));
@@ -428,7 +588,7 @@ export function ChatPage() {
         throw e;
       }
     },
-    [activeId, relation, refreshConversations, refreshDetail],
+    [activeId, activeConversation?.kind, relation, refreshDetail],
   );
 
   const onLoadMore = useCallback(async () => {
@@ -548,12 +708,36 @@ export function ChatPage() {
     [activeId, refreshConversations],
   );
 
+  const onToggleNotify = useCallback(async () => {
+    if (!activeId || !activeConversation) return;
+    const next = nextNotifyMode(activeConversation.notify_mode);
+    setBusy(true);
+    try {
+      const saved = await chatApi.setNotifyMode(activeId, next);
+      const mode = normalizeNotifyMode(saved.notify_mode);
+      setConversationNotifyMode(activeId, mode);
+      setConversations((prev) =>
+        prev.map((item) => (item.id === activeId ? { ...item, notify_mode: mode } : item)),
+      );
+      setDetail((prev) =>
+        prev && prev.conversation.id === activeId
+          ? { ...prev, conversation: { ...prev.conversation, notify_mode: mode } }
+          : prev,
+      );
+      setError(null);
+    } catch (e) {
+      setError(errorMessage(e, 'Không đổi được cài thông báo.'));
+    } finally {
+      setBusy(false);
+    }
+  }, [activeId, activeConversation]);
+
   const onSetAvatar = useCallback(
     async (file: File) => {
       if (!activeId) return;
       setBusy(true);
       try {
-        await chatApi.setGroupAvatar(activeId, file);
+        await chatApi.setGroupAvatar(activeId, await resizeChatImage(file));
         setDetail(await chatApi.getConversation(activeId));
         await refreshConversations();
         setError(null);
@@ -687,34 +871,53 @@ export function ChatPage() {
         />
 
         <main className="chat-panel chat-panel--thread">
-          <MessageThread
-            conversation={activeConversation}
-            messages={messages}
-            pending={pending}
-            loading={threadLoading}
-            hasMore={hasMore}
-            error={error}
-            focusRequest={focusRequest}
-            relation={relation}
-            members={detail?.members ?? []}
-            busy={busy}
-            onSend={onSend}
-            onSendAttachments={onSendAttachments}
-            onRecall={(messageId) => void onRecall(messageId)}
-            onRetry={onRetry}
-            onLoadMore={onLoadMore}
-            onJumpToMessage={onJumpToMessage}
-            onBack={() => {
-              setPane('list');
-              navigateChat(navigate, '/chat');
-            }}
-            onOpenInfo={() => {
-              if (window.matchMedia('(max-width: 1023px)').matches) setPane('info');
-              else setInfoVisible((value) => !value);
-            }}
-            onAccept={() => void onAccept()}
-            onBlock={() => void onBlock()}
-          />
+          {!activeId && (listLoading || (!mobile && !conversationSearch && conversations.length > 0)) ? (
+            <div className="chat-thread chat-thread--empty">
+              <p className="chat-hint">Đang tải hội thoại…</p>
+            </div>
+          ) : embedConversation && activeConversation ? (
+            <BotEmbedThread
+              conversation={activeConversation}
+              error={error}
+              onBack={() => {
+                setPane('list');
+                navigateChat(navigate, '/chat');
+              }}
+              onOpenInfo={() => {
+                if (window.matchMedia('(max-width: 1023px)').matches) setPane('info');
+                else setInfoVisible((value) => !value);
+              }}
+            />
+          ) : (
+            <MessageThread
+              conversation={activeConversation}
+              messages={messages}
+              aiWaiting={aiWaiting}
+              loading={threadLoading}
+              hasMore={hasMore}
+              error={error}
+              focusRequest={focusRequest}
+              relation={relation}
+              members={detail?.members ?? []}
+              busy={busy}
+              onSend={onSend}
+              onSendAttachments={onSendAttachments}
+              onRecall={(messageId) => void onRecall(messageId)}
+              onRetry={onRetry}
+              onLoadMore={onLoadMore}
+              onJumpToMessage={onJumpToMessage}
+              onBack={() => {
+                setPane('list');
+                navigateChat(navigate, '/chat');
+              }}
+              onOpenInfo={() => {
+                if (window.matchMedia('(max-width: 1023px)').matches) setPane('info');
+                else setInfoVisible((value) => !value);
+              }}
+              onAccept={() => void onAccept()}
+              onBlock={() => void onBlock()}
+            />
+          )}
         </main>
 
         <div
@@ -728,8 +931,10 @@ export function ChatPage() {
         <aside className="chat-panel chat-panel--info" aria-hidden={!infoVisible}>
           <ConversationInfo
             conversation={activeConversation}
-            members={detail?.members ?? []}
+            members={detail?.conversation.id === activeId ? detail.members : []}
             relation={relation}
+            seedAttachments={detail?.conversation.id === activeId ? openAttachments : null}
+            attachmentsPending={threadLoading}
             busy={busy}
             onClose={() => {
               if (window.matchMedia('(max-width: 1023px)').matches) setPane('thread');
@@ -742,6 +947,7 @@ export function ChatPage() {
               setPicker('add-members');
             }}
             onLeave={() => void onLeave()}
+            onToggleNotify={() => void onToggleNotify()}
             onBlock={() => void onBlock()}
             onUnblock={() => void onUnblock()}
             onAccept={() => void onAccept()}

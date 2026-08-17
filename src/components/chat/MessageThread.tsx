@@ -1,41 +1,27 @@
-import { useEffect, useRef, useState } from 'react';
-import {
-  chatApi,
-  type ChatMember,
-  type ChatMessage,
-  type ContactRelation,
-  type Conversation,
-} from '../../api/chatApi';
-import { useAuth } from '../../auth/AuthContext';
-import { uiCopy } from '../../lib/uiCopy';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { botAvatarUrl, type ChatMember, type ChatMessage, type ContactRelation, type Conversation } from '../../api/chatApi';
+import { ChatComposer } from './ChatComposer';
+import { ChatMarkdown, ChatMarkdownClamped, ChatMarkdownViewer } from './ChatMarkdown';
 import {
   IconBack,
-  IconCamera,
-  IconClose,
   IconDownload,
   IconFile,
-  IconImage,
   IconInfo,
   IconMore,
   IconPaperclip,
   IconReply,
-  IconSend,
+  IconRetry,
+  IconWait,
 } from '../AppIcons';
-import { ChatAvatar } from './ChatAvatar';
+import { ChatAvatar, useChatFileUrl } from './ChatAvatar';
 import { ChatConfirmDialog } from './ChatConfirmDialog';
 import { downloadChatFile, FilePreviewModal } from './FilePreviewModal';
-
-export type PendingMessage = {
-  client_msg_id: string;
-  body: string;
-  failed?: boolean;
-};
 
 type Props = {
   conversation: Conversation | null;
   messages: ChatMessage[];
-  pending: PendingMessage[];
   loading: boolean;
+  aiWaiting?: boolean;
   hasMore: boolean;
   error: string | null;
   focusRequest: { messageId: number; atBottom: boolean; token: number } | null;
@@ -54,11 +40,8 @@ type Props = {
   onBlock?: () => void;
 };
 
-type QueuedFile = {
-  id: string;
-  file: File;
-  previewUrl: string | null;
-};
+/** Cạnh ô ảnh trong bubble (px) — khớp bản resize sẵn của File.Api. */
+const IMAGE_THUMB_SIZE = 256;
 
 function formatFileSize(value?: number | null): string {
   if (!value || value < 1024) return `${value ?? 0} B`;
@@ -80,26 +63,6 @@ function timeLabel(iso: string): string {
   return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 }
 
-function renderMessageBody(body: string | null | undefined, members: ChatMember[]) {
-  if (!body || members.length === 0) return body;
-  const names = members
-    .map((member) => (member.nickname || member.email || '').trim())
-    .filter(Boolean)
-    .sort((a, b) => b.length - a.length)
-    .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  if (names.length === 0) return body;
-  const pattern = new RegExp(`(@(?:${names.join('|')}))(?=\\s|$|[.,!?;:])`, 'gi');
-  return body.split(pattern).map((part, index) =>
-    part.startsWith('@') ? (
-      <strong className="chat-mention" key={`${index}-${part}`}>
-        {part}
-      </strong>
-    ) : (
-      part
-    ),
-  );
-}
-
 function AttachmentMessage({
   message,
   onPreview,
@@ -107,32 +70,18 @@ function AttachmentMessage({
   message: ChatMessage;
   onPreview: () => void;
 }) {
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const isImage = message.msg_type === 'image' || message.file_content_type?.startsWith('image/');
-
-  useEffect(() => {
-    if (!isImage || !message.file_id) return;
-    let disposed = false;
-    let url: string | null = null;
-    void chatApi.attachmentBlob(message.conversation_id, message.file_id).then((blob) => {
-      if (disposed) return;
-      url = URL.createObjectURL(blob);
-      setObjectUrl(url);
-    });
-    return () => {
-      disposed = true;
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [isImage, message.conversation_id, message.file_id]);
+  // Ô vuông cố định trước khi ảnh về → chiều cao thread không đổi, không mất vị trí scroll.
+  const thumbUrl = useChatFileUrl(
+    message.conversation_id,
+    isImage ? message.file_id : null,
+    IMAGE_THUMB_SIZE,
+  );
 
   if (isImage) {
     return (
       <button type="button" className="chat-attachment-image" onClick={onPreview} title="Xem ảnh">
-        {objectUrl ? (
-          <img src={objectUrl} alt={message.file_name || 'Ảnh đính kèm'} />
-        ) : (
-          <span>Đang tải ảnh…</span>
-        )}
+        {thumbUrl ? <img src={thumbUrl} alt={message.file_name || 'Ảnh đính kèm'} /> : null}
       </button>
     );
   }
@@ -158,8 +107,8 @@ function AttachmentMessage({
 export function MessageThread({
   conversation,
   messages,
-  pending,
   loading,
+  aiWaiting = false,
   hasMore,
   error,
   focusRequest,
@@ -177,11 +126,6 @@ export function MessageThread({
   onAccept,
   onBlock,
 }: Props) {
-  const { mobile } = useAuth();
-  const [draft, setDraft] = useState('');
-  const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
-  const [attachmentError, setAttachmentError] = useState<string | null>(null);
-  const [sendingAttachments, setSendingAttachments] = useState(false);
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [menuForId, setMenuForId] = useState<number | null>(null);
   const [recallMessageId, setRecallMessageId] = useState<number | null>(null);
@@ -190,32 +134,27 @@ export function MessageThread({
     fileName: string;
     contentType?: string | null;
   } | null>(null);
-  const [mentionOpen, setMentionOpen] = useState(false);
-  const [mentionQuery, setMentionQuery] = useState('');
-  const [mentionStart, setMentionStart] = useState<number | null>(null);
-  const [mentionIndex, setMentionIndex] = useState(0);
   const [draggingFiles, setDraggingFiles] = useState(false);
+  const [mdViewer, setMdViewer] = useState<{ title: string; text: string } | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
-  const lastIdRef = useRef<number>(0);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const imageInputRef = useRef<HTMLInputElement | null>(null);
-  const cameraInputRef = useRef<HTMLInputElement | null>(null);
-  const imageMenuRef = useRef<HTMLDivElement | null>(null);
-  const [imageMenuOpen, setImageMenuOpen] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const lastStampRef = useRef('');
   const dragDepthRef = useRef(0);
   const loadingMoreRef = useRef(false);
   const skipAutoLoadRef = useRef(false);
+  const addFilesRef = useRef<((files: File[]) => void) | null>(null);
 
   useEffect(() => {
     const el = bodyRef.current;
     if (!el) return;
-    const newest = messages.length > 0 ? messages[messages.length - 1].id : 0;
-    const grew = newest > lastIdRef.current;
-    lastIdRef.current = newest;
+    const last = messages[messages.length - 1];
+    const stamp = last
+      ? `${messages.length}:${last.id}:${last.client_msg_id ?? ''}:${last.send_status ?? ''}`
+      : '';
+    const grew = stamp !== lastStampRef.current;
+    lastStampRef.current = stamp;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
     if (grew || nearBottom) el.scrollTop = el.scrollHeight;
-  }, [messages, pending.length]);
+  }, [messages]);
 
   useEffect(() => {
     if (!focusRequest?.messageId) return;
@@ -249,30 +188,19 @@ export function MessageThread({
   }, [focusRequest]);
 
   useEffect(() => {
-    lastIdRef.current = 0;
-    setDraft('');
+    lastStampRef.current = '';
     setReplyTo(null);
     setMenuForId(null);
     setRecallMessageId(null);
-    setMentionOpen(false);
     setDraggingFiles(false);
     dragDepthRef.current = 0;
-    setQueuedFiles((current) => {
-      current.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
-      return [];
-    });
-    setAttachmentError(null);
-    setImageMenuOpen(false);
   }, [conversation?.id]);
 
-  useEffect(() => {
-    if (!imageMenuOpen) return;
-    const onDoc = (event: MouseEvent) => {
-      if (!imageMenuRef.current?.contains(event.target as Node)) setImageMenuOpen(false);
-    };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [imageMenuOpen]);
+  const onOpenBotMarkdown = useCallback((text: string) => {
+    setMdViewer({ title: conversation?.title || 'Nội dung AI', text });
+  }, [conversation?.title]);
+
+  const onClearReply = useCallback(() => setReplyTo(null), []);
 
   if (!conversation) {
     return (
@@ -282,82 +210,20 @@ export function MessageThread({
     );
   }
 
-  const canSend = conversation.kind !== 'direct' || !relation || relation.can_send;
-  const blockReason =
-    conversation.kind === 'direct' && relation && !relation.can_send
+  const isBot = conversation.kind === 'bot';
+  const botDisabled = isBot && conversation.bot_active === false;
+  const canSend =
+    !botDisabled && (conversation.kind !== 'direct' || !relation || relation.can_send);
+  const canAttach = canSend && !isBot;
+  const botSrc = isBot ? botAvatarUrl(conversation.bot_avatar_url) : null;
+  const blockReason = botDisabled
+    ? 'Chatbot đã tắt. Bạn vẫn xem được lịch sử.'
+    : conversation.kind === 'direct' && relation && !relation.can_send
       ? relation.send_block_reason || 'Không thể gửi tin nhắn.'
       : null;
 
   const addFiles = (files: File[]) => {
-    if (!canSend || files.length === 0) return;
-    setQueuedFiles((current) => {
-      const remaining = Math.max(0, 10 - current.length);
-      const accepted = files.slice(0, remaining);
-      if (accepted.length < files.length) setAttachmentError('Mỗi lần gửi tối đa 10 file.');
-      else setAttachmentError(null);
-      return [
-        ...current,
-        ...accepted.map((file, index) => ({
-          id: `${Date.now()}-${index}-${file.name}`,
-          file,
-          previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : null,
-        })),
-      ];
-    });
-  };
-
-  const groupMembers = conversation.kind === 'group' ? members : [];
-  const mentionMatches = groupMembers
-    .filter((member) => {
-      const label = (member.nickname || member.email || '').trim();
-      return (
-        label.length > 0 &&
-        label.toLocaleLowerCase('vi').includes(mentionQuery.toLocaleLowerCase('vi'))
-      );
-    })
-    .slice(0, 8);
-
-  const updateMention = (value: string, caret: number) => {
-    if (conversation.kind !== 'group') {
-      setMentionOpen(false);
-      return;
-    }
-    const beforeCaret = value.slice(0, caret);
-    const match = beforeCaret.match(/(?:^|\s)@([^\s@]*)$/);
-    if (!match) {
-      setMentionOpen(false);
-      setMentionStart(null);
-      return;
-    }
-    const at = beforeCaret.lastIndexOf('@');
-    setMentionStart(at);
-    setMentionQuery(match[1]);
-    setMentionIndex(0);
-    setMentionOpen(true);
-  };
-
-  const chooseMention = (member: ChatMember) => {
-    if (mentionStart == null) return;
-    const textarea = textareaRef.current;
-    const caret = textarea?.selectionStart ?? draft.length;
-    const label = (member.nickname || member.email || '').trim();
-    const next = `${draft.slice(0, mentionStart)}@${label} ${draft.slice(caret)}`;
-    const nextCaret = mentionStart + label.length + 2;
-    setDraft(next);
-    setMentionOpen(false);
-    setMentionStart(null);
-    window.requestAnimationFrame(() => {
-      textarea?.focus();
-      textarea?.setSelectionRange(nextCaret, nextCaret);
-    });
-  };
-
-  const removeQueuedFile = (id: string) => {
-    setQueuedFiles((current) => {
-      const removed = current.find((item) => item.id === id);
-      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
-      return current.filter((item) => item.id !== id);
-    });
+    addFilesRef.current?.(files);
   };
 
   const loadMoreAtTop = async () => {
@@ -373,31 +239,6 @@ export function MessageThread({
       });
     } finally {
       loadingMoreRef.current = false;
-    }
-  };
-
-  const submit = async () => {
-    const body = draft.trim();
-    if ((!body && queuedFiles.length === 0) || !canSend || sendingAttachments) return;
-    if (body) {
-      onSend(body, replyTo?.id ?? null);
-      setDraft('');
-      setReplyTo(null);
-    }
-    window.requestAnimationFrame(() => textareaRef.current?.focus());
-    if (queuedFiles.length > 0) {
-      setSendingAttachments(true);
-      try {
-        await onSendAttachments(queuedFiles.map((item) => item.file));
-        queuedFiles.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
-        setQueuedFiles([]);
-        setAttachmentError(null);
-      } catch {
-        setAttachmentError('Không gửi được file. Bạn có thể thử lại.');
-      } finally {
-        setSendingAttachments(false);
-        window.requestAnimationFrame(() => textareaRef.current?.focus());
-      }
     }
   };
 
@@ -441,13 +282,13 @@ export function MessageThread({
     <div
       className={`chat-thread${draggingFiles ? ' is-dragging-files' : ''}`}
       onDragEnter={(event) => {
-        if (!canSend || !event.dataTransfer.types.includes('Files')) return;
+        if (!canAttach || !event.dataTransfer.types.includes('Files')) return;
         event.preventDefault();
         dragDepthRef.current += 1;
         setDraggingFiles(true);
       }}
       onDragOver={(event) => {
-        if (!canSend || !event.dataTransfer.types.includes('Files')) return;
+        if (!canAttach || !event.dataTransfer.types.includes('Files')) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = 'copy';
       }}
@@ -460,7 +301,7 @@ export function MessageThread({
         event.preventDefault();
         dragDepthRef.current = 0;
         setDraggingFiles(false);
-        if (canSend) addFiles(Array.from(event.dataTransfer.files));
+        if (canAttach) addFiles(Array.from(event.dataTransfer.files));
       }}
     >
       {draggingFiles && (
@@ -475,10 +316,11 @@ export function MessageThread({
         </button>
         <ChatAvatar
           name={conversation.title}
-          avatarId={conversation.kind === 'group' ? null : conversation.peer_avatar_id}
+          avatarId={conversation.kind === 'group' || isBot ? null : conversation.peer_avatar_id}
           group={conversation.kind === 'group'}
           conversationId={conversation.id}
           fileId={conversation.kind === 'group' ? conversation.avatar_file_id : null}
+          imageSrc={botSrc}
           size={36}
         />
         <button type="button" className="chat-thread-title" onClick={onOpenInfo}>
@@ -486,7 +328,11 @@ export function MessageThread({
           <span className="chat-thread-sub">
             {conversation.kind === 'group'
               ? `${conversation.member_count} thành viên`
-              : 'Tin nhắn riêng'}
+              : isBot
+                ? botDisabled
+                  ? 'Chatbot đã tắt — chỉ xem lịch sử'
+                  : conversation.bot_description || 'AI Chatbot'
+                : 'Tin nhắn riêng'}
           </span>
         </button>
         <button type="button" className="chat-icon-btn" onClick={onOpenInfo} title="Thông tin">
@@ -561,10 +407,12 @@ export function MessageThread({
           const day = dayLabel(m.created_at);
           const showDay = day !== lastDay;
           lastDay = day;
+          const sending = m.send_status === 'sending';
+          const failed = m.send_status === 'failed';
 
           if (m.is_recalled || m.msg_type === 'system') {
             return (
-              <div key={m.id} className="chat-msg-system" data-message-id={m.id}>
+              <div key={m.client_msg_id || m.id} className="chat-msg-system" data-message-id={m.id}>
                 {showDay && <div className="chat-day">{day}</div>}
                 <span>{m.body || 'Tin nhắn đã được thu hồi'}</span>
               </div>
@@ -573,363 +421,203 @@ export function MessageThread({
 
           const showSender = !m.sender_is_me && conversation.kind === 'group';
           return (
-            <div key={m.id} data-message-id={m.id}>
+            <div key={m.client_msg_id || m.id} data-message-id={m.id > 0 ? m.id : undefined}>
               {showDay && <div className="chat-day">{day}</div>}
               <div
                 className={`chat-msg${m.sender_is_me ? ' chat-msg--mine' : ''}${
                   menuForId === m.id ? ' is-menu-open' : ''
-                }`}
+                }${sending ? ' is-sending' : ''}${failed ? ' is-failed' : ''}`}
               >
                 {!m.sender_is_me && (
-                  <ChatAvatar name={m.sender_name} avatarId={m.sender_avatar_id} size={30} />
+                  <ChatAvatar
+                    name={m.sender_name || conversation.title}
+                    avatarId={isBot ? null : m.sender_avatar_id}
+                    imageSrc={isBot ? botSrc : null}
+                    size={30}
+                  />
                 )}
                 <div className="chat-msg-main">
                   {showSender && <span className="chat-msg-sender">{m.sender_name}</span>}
-                  <div className="chat-bubble-wrap">
-                    <div className={`chat-bubble${m.file_id ? ' chat-bubble--attachment' : ''}`}>
-                      {m.reply_to_message_id && (
+                  <div className="chat-msg-row">
+                    <div className="chat-bubble-wrap">
+                      <div
+                        className={`chat-bubble${m.file_id ? ' chat-bubble--attachment' : ''}${
+                          sending ? ' is-pending' : ''
+                        }${failed ? ' is-failed' : ''}`}
+                      >
+                        {m.reply_to_message_id && (
+                          <button
+                            type="button"
+                            className="chat-reply-quote"
+                            title="Đi tới tin nhắn gốc"
+                            onClick={() => void jumpToMessage(m.reply_to_message_id!)}
+                          >
+                            <strong>{m.reply_sender_name || 'Tin nhắn'}</strong>
+                            <span>{m.reply_preview}</span>
+                          </button>
+                        )}
+                        {m.file_id ? (
+                          <AttachmentMessage message={m} onPreview={() => openPreview(m)} />
+                        ) : m.body ? (
+                          isBot && !m.sender_is_me ? (
+                            <ChatMarkdownClamped
+                              text={m.body}
+                              onOpenLarge={onOpenBotMarkdown}
+                            />
+                          ) : (
+                            <ChatMarkdown text={m.body} />
+                          )
+                        ) : null}
+                      </div>
+                    </div>
+                    {sending ? (
+                      <div className="chat-msg-actions is-status" aria-label="Đang gửi">
+                        <span className="chat-msg-wait">
+                          <IconWait size={16} />
+                        </span>
+                      </div>
+                    ) : failed ? (
+                      <div className="chat-msg-actions is-status">
                         <button
                           type="button"
-                          className="chat-reply-quote"
-                          title="Đi tới tin nhắn gốc"
-                          onClick={() => void jumpToMessage(m.reply_to_message_id!)}
+                          className="chat-msg-action"
+                          title="Gửi lại"
+                          onClick={() => m.client_msg_id && onRetry(m.client_msg_id)}
                         >
-                          <strong>{m.reply_sender_name || 'Tin nhắn'}</strong>
-                          <span>{m.reply_preview}</span>
+                          <IconRetry size={14} />
                         </button>
-                      )}
-                      {m.file_id ? (
-                        <AttachmentMessage message={m} onPreview={() => openPreview(m)} />
-                      ) : (
-                        renderMessageBody(m.body, groupMembers)
-                      )}
-                    </div>
-                    <div className="chat-msg-actions">
-                      <button
-                        type="button"
-                        className="chat-msg-action"
-                        title="Trả lời"
-                        onClick={() => {
-                          setReplyTo(m);
-                          setMenuForId(null);
-                        }}
-                      >
-                        <IconReply size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        className="chat-msg-action"
-                        title="Thêm"
-                        onClick={() => setMenuForId((id) => (id === m.id ? null : m.id))}
-                      >
-                        <IconMore size={14} />
-                      </button>
-                      {menuForId === m.id && (
-                        <div className="chat-msg-menu" role="menu">
-                          <button type="button" onClick={() => { setReplyTo(m); setMenuForId(null); }}>
-                            Trả lời
-                          </button>
-                          {m.msg_type === 'text' && m.body && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                void navigator.clipboard.writeText(m.body || '');
-                                setMenuForId(null);
-                              }}
-                            >
-                              Sao chép
+                      </div>
+                    ) : (
+                      <div className="chat-msg-actions">
+                        <button
+                          type="button"
+                          className="chat-msg-action"
+                          title="Trả lời"
+                          onClick={() => {
+                            setReplyTo(m);
+                            setMenuForId(null);
+                          }}
+                        >
+                          <IconReply size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="chat-msg-action"
+                          title="Thêm"
+                          onClick={() => setMenuForId((id) => (id === m.id ? null : m.id))}
+                        >
+                          <IconMore size={14} />
+                        </button>
+                        {menuForId === m.id && (
+                          <div className="chat-msg-menu" role="menu">
+                            <button type="button" onClick={() => { setReplyTo(m); setMenuForId(null); }}>
+                              Trả lời
                             </button>
-                          )}
-                          {m.file_id && (
-                            <>
+                            {m.msg_type === 'text' && m.body && (
                               <button
                                 type="button"
                                 onClick={() => {
-                                  openPreview(m);
+                                  void navigator.clipboard.writeText(m.body || '');
                                   setMenuForId(null);
                                 }}
                               >
-                                Xem
+                                Sao chép
                               </button>
+                            )}
+                            {m.file_id && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    openPreview(m);
+                                    setMenuForId(null);
+                                  }}
+                                >
+                                  Xem
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    downloadMessage(m);
+                                    setMenuForId(null);
+                                  }}
+                                >
+                                  <IconDownload size={14} /> Tải về máy
+                                </button>
+                              </>
+                            )}
+                            {m.can_recall && (
                               <button
                                 type="button"
+                                className="danger"
                                 onClick={() => {
-                                  downloadMessage(m);
+                                  setRecallMessageId(m.id);
                                   setMenuForId(null);
                                 }}
                               >
-                                <IconDownload size={14} /> Tải về máy
+                                Thu hồi
                               </button>
-                            </>
-                          )}
-                          {m.can_recall && (
-                            <button
-                              type="button"
-                              className="danger"
-                              onClick={() => {
-                                setRecallMessageId(m.id);
-                                setMenuForId(null);
-                              }}
-                            >
-                              Thu hồi
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <span className="chat-msg-time">{timeLabel(m.created_at)}</span>
+                  <span className="chat-msg-time">
+                    {failed ? (
+                      <button
+                        type="button"
+                        className="chat-retry"
+                        onClick={() => m.client_msg_id && onRetry(m.client_msg_id)}
+                      >
+                        Gửi lại
+                      </button>
+                    ) : (
+                      timeLabel(m.created_at)
+                    )}
+                  </span>
                 </div>
               </div>
             </div>
           );
         })}
 
-        {pending.map((p) => (
-          <div key={p.client_msg_id} className="chat-msg chat-msg--mine">
+
+        {aiWaiting && (
+          <div className="chat-msg">
+            <ChatAvatar name={conversation.title} imageSrc={botSrc} size={30} />
             <div className="chat-msg-main">
-              <div className={`chat-bubble${p.failed ? ' is-failed' : ' is-pending'}`}>{p.body}</div>
-              <span className="chat-msg-time">
-                {p.failed ? (
-                  <button type="button" className="chat-retry" onClick={() => onRetry(p.client_msg_id)}>
-                    Gửi lại
-                  </button>
-                ) : (
-                  'Đang gửi…'
-                )}
-              </span>
+              <div className="chat-bubble chat-bubble--waiting" aria-label="AI đang trả lời">
+                <span className="chat-typing">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+                <span>AI đang soạn…</span>
+              </div>
             </div>
           </div>
-        ))}
+        )}
       </div>
 
       {error && <div className="chat-error">{error}</div>}
       {blockReason && <div className="chat-error">{blockReason}</div>}
 
-      <form
-        className="chat-composer"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!sendingAttachments) void submit();
-        }}
-      >
-        {replyTo && (
-          <div className="chat-reply-bar">
-            <div>
-              <strong>Trả lời {replyTo.sender_name || ''}</strong>
-              <span>{replyTo.file_name || replyTo.body || '[Đính kèm]'}</span>
-            </div>
-            <button type="button" className="chat-icon-btn" onClick={() => setReplyTo(null)}>
-              <IconClose size={14} />
-            </button>
-          </div>
-        )}
-        {mentionOpen && (
-          <div className="chat-mention-menu" role="listbox" aria-label="Nhắc thành viên">
-            {mentionMatches.length > 0 ? (
-              mentionMatches.map((member, index) => (
-                <button
-                  key={member.user_id}
-                  type="button"
-                  className={index === mentionIndex ? 'is-active' : ''}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => chooseMention(member)}
-                  role="option"
-                  aria-selected={index === mentionIndex}
-                >
-                  <ChatAvatar
-                    name={member.nickname || member.email}
-                    avatarId={member.avatar_id}
-                    size={30}
-                  />
-                  <span>
-                    <strong>{member.nickname || member.email}</strong>
-                    {member.nickname && member.email && <small>{member.email}</small>}
-                  </span>
-                </button>
-              ))
-            ) : (
-              <span className="chat-mention-empty">Không có thành viên phù hợp.</span>
-            )}
-          </div>
-        )}
-        <div className="chat-composer-row">
-          <button
-            type="button"
-            className="chat-attach"
-            disabled={!canSend || sendingAttachments}
-            onClick={() => fileInputRef.current?.click()}
-            title="Đính kèm file"
-          >
-            <IconPaperclip size={20} />
-          </button>
-          {mobile ? (
-            <div className="chat-image-attach" ref={imageMenuRef}>
-              <button
-                type="button"
-                className="chat-attach"
-                disabled={!canSend || sendingAttachments}
-                onClick={() => setImageMenuOpen((open) => !open)}
-                title="Đính kèm ảnh"
-                aria-expanded={imageMenuOpen}
-                aria-haspopup="menu"
-              >
-                <IconImage size={20} />
-              </button>
-              {imageMenuOpen ? (
-                <div className="chat-image-menu" role="menu">
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={!canSend || sendingAttachments}
-                    onClick={() => {
-                      setImageMenuOpen(false);
-                      cameraInputRef.current?.click();
-                    }}
-                  >
-                    <IconCamera size={18} />
-                    {uiCopy('v', 'takePhoto')}
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={!canSend || sendingAttachments}
-                    onClick={() => {
-                      setImageMenuOpen(false);
-                      imageInputRef.current?.click();
-                    }}
-                  >
-                    <IconImage size={18} />
-                    {uiCopy('v', 'chooseImage')}
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => {
-              addFiles(Array.from(e.target.files ?? []));
-              e.target.value = '';
-            }}
-          />
-          {mobile ? (
-            <>
-              <input
-                ref={imageInputRef}
-                type="file"
-                hidden
-                multiple
-                accept="image/*"
-                onChange={(e) => {
-                  addFiles(Array.from(e.target.files ?? []));
-                  e.target.value = '';
-                }}
-              />
-              <input
-                ref={cameraInputRef}
-                type="file"
-                hidden
-                accept="image/*"
-                capture="environment"
-                onChange={(e) => {
-                  addFiles(Array.from(e.target.files ?? []));
-                  e.target.value = '';
-                }}
-              />
-            </>
-          ) : null}
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            onChange={(e) => {
-              setDraft(e.target.value);
-              updateMention(e.target.value, e.target.selectionStart);
-            }}
-            onPaste={(e) => {
-              const images = Array.from(e.clipboardData.items)
-                .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
-                .map((item) => item.getAsFile())
-                .filter((file): file is File => file !== null);
-              if (images.length > 0) {
-                e.preventDefault();
-                addFiles(images);
-              }
-            }}
-            onKeyDown={(e) => {
-              if (mentionOpen) {
-                if (e.key === 'ArrowDown' && mentionMatches.length > 0) {
-                  e.preventDefault();
-                  setMentionIndex((index) => (index + 1) % mentionMatches.length);
-                  return;
-                }
-                if (e.key === 'ArrowUp' && mentionMatches.length > 0) {
-                  e.preventDefault();
-                  setMentionIndex(
-                    (index) => (index - 1 + mentionMatches.length) % mentionMatches.length,
-                  );
-                  return;
-                }
-                if ((e.key === 'Enter' || e.key === 'Tab') && mentionMatches.length > 0) {
-                  e.preventDefault();
-                  chooseMention(mentionMatches[mentionIndex] ?? mentionMatches[0]);
-                  return;
-                }
-                if (e.key === 'Escape') {
-                  e.preventDefault();
-                  setMentionOpen(false);
-                  return;
-                }
-              }
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                if (!sendingAttachments) void submit();
-              }
-            }}
-            rows={1}
-            placeholder={canSend ? 'Nhập tin nhắn…' : blockReason || 'Không thể gửi tin…'}
-            aria-label="Nội dung tin nhắn"
-            disabled={!canSend}
-          />
-          <button
-            type="submit"
-            className="chat-send"
-            disabled={!canSend || sendingAttachments || (!draft.trim() && queuedFiles.length === 0)}
-            title="Gửi (Enter)"
-          >
-            <IconSend size={18} />
-          </button>
-        </div>
-        {queuedFiles.length > 0 && (
-          <div className="chat-attachment-tray" aria-label="File đang chờ gửi">
-            {queuedFiles.map((item) => (
-              <div key={item.id} className="chat-queued-file">
-                {item.previewUrl ? (
-                  <img src={item.previewUrl} alt={item.file.name} />
-                ) : (
-                  <span className="chat-queued-file-doc">
-                    <IconFile size={26} />
-                  </span>
-                )}
-                <span className="chat-queued-file-name">{item.file.name}</span>
-                <button
-                  type="button"
-                  onClick={() => removeQueuedFile(item.id)}
-                  disabled={sendingAttachments}
-                  aria-label={`Bỏ ${item.file.name}`}
-                >
-                  <IconClose size={14} />
-                </button>
-              </div>
-            ))}
-            {sendingAttachments && <span className="chat-attachment-uploading">Đang tải lên…</span>}
-          </div>
-        )}
-        {attachmentError && <div className="chat-attachment-error">{attachmentError}</div>}
-      </form>
+      <ChatComposer
+        key={conversation.id}
+        conversationKind={conversation.kind}
+        canSend={canSend}
+        canAttach={canAttach}
+        isBot={isBot}
+        aiWaiting={aiWaiting}
+        blockReason={blockReason}
+        replyTo={replyTo}
+        members={members}
+        onClearReply={onClearReply}
+        onSend={onSend}
+        onSendAttachments={onSendAttachments}
+        addFilesRef={addFilesRef}
+      />
 
       {preview && (
         <FilePreviewModal
@@ -938,6 +626,14 @@ export function MessageThread({
           fileName={preview.fileName}
           contentType={preview.contentType}
           onClose={() => setPreview(null)}
+        />
+      )}
+
+      {mdViewer && (
+        <ChatMarkdownViewer
+          title={mdViewer.title}
+          text={mdViewer.text}
+          onClose={() => setMdViewer(null)}
         />
       )}
       <ChatConfirmDialog

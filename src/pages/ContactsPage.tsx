@@ -1,19 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import {
+  botAvatarUrl,
   chatApi,
+  isEmbedBot,
+  type ChatBotCatalogItem,
   type ChatMe,
   type ChatUser,
   type ContactItem,
   type Conversation,
 } from '../api/chatApi';
 import { ChatAvatar } from '../components/chat/ChatAvatar';
-import { IconChat, IconClose, IconUsersAdd } from '../components/AppIcons';
+import { IconBlock, IconChat, IconClose, IconUsersAdd } from '../components/AppIcons';
 import { navigateChat } from '../lib/chatNav';
 
 type ShellContext = { me: ChatMe | null };
 
-type Tab = 'company' | 'personal';
+type Tab = 'company' | 'personal' | 'bots';
 
 function relationLabel(item: ContactItem): string {
   if (item.is_blocked || item.relation === 'blocked') return 'Đã chặn';
@@ -30,15 +33,18 @@ export function ContactsPage() {
   const unitId = me?.unit_id ?? 0;
   const companyName =
     me?.unit?.unit_name || me?.unit?.unit_code || (unitId > 0 ? `Công ty #${unitId}` : null);
+  const showBots = !!me?.ai_chatbot_enabled;
   const requested = (params.get('tab') as Tab | null) ?? null;
   const tab: Tab =
-    requested === 'company' && unitId > 0
-      ? 'company'
-      : requested === 'personal'
-        ? 'personal'
-        : unitId > 0
-          ? 'company'
-          : 'personal';
+    requested === 'bots' && showBots
+      ? 'bots'
+      : requested === 'company' && unitId > 0
+        ? 'company'
+        : requested === 'personal'
+          ? 'personal'
+          : unitId > 0
+            ? 'company'
+            : 'personal';
 
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
@@ -49,7 +55,9 @@ export function ContactsPage() {
   const [error, setError] = useState<string | null>(null);
   const [companyItems, setCompanyItems] = useState<ChatUser[]>([]);
   const [personalItems, setPersonalItems] = useState<ContactItem[]>([]);
+  const [botItems, setBotItems] = useState<ChatBotCatalogItem[]>([]);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [busyFolderId, setBusyFolderId] = useState<string | null>(null);
   const [addToGroupUser, setAddToGroupUser] = useState<ChatUser | ContactItem | null>(null);
   const [groups, setGroups] = useState<Conversation[]>([]);
   const [groupBusy, setGroupBusy] = useState(false);
@@ -68,7 +76,10 @@ export function ContactsPage() {
     if (unitId <= 0 && params.get('tab') === 'company') {
       setParams({ tab: 'personal' }, { replace: true });
     }
-  }, [unitId, params, setParams]);
+    if (!showBots && params.get('tab') === 'bots') {
+      setParams({ tab: unitId > 0 ? 'company' : 'personal' }, { replace: true });
+    }
+  }, [unitId, showBots, params, setParams]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -78,6 +89,20 @@ export function ContactsPage() {
         const result = await chatApi.companyDirectory(search, page, pageSize);
         setCompanyItems(result.items);
         setTotal(result.total_record);
+      } else if (tab === 'bots') {
+        const result = await chatApi.listBots();
+        const q = search.toLowerCase();
+        const items = (result.items ?? []).filter((bot) => {
+          if (!q) return true;
+          return (
+            bot.title.toLowerCase().includes(q) ||
+            (bot.description ?? '').toLowerCase().includes(q) ||
+            bot.folder_id.toLowerCase().includes(q) ||
+            (bot.embed_url ?? '').toLowerCase().includes(q)
+          );
+        });
+        setBotItems(items);
+        setTotal(items.length);
       } else {
         const result = await chatApi.listContacts(search, page, pageSize, 'all');
         setPersonalItems(result.items);
@@ -97,7 +122,20 @@ export function ContactsPage() {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const setTab = (next: Tab) => {
-    setParams(next === 'company' ? { tab: 'company' } : { tab: 'personal' });
+    setParams({ tab: next });
+  };
+
+  const openBot = async (folderId: string) => {
+    setBusyFolderId(folderId);
+    setError(null);
+    try {
+      const conversation = await chatApi.openBot(folderId);
+      navigateChat(navigate, `/chat/${conversation.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Không mở được chatbot.');
+    } finally {
+      setBusyFolderId(null);
+    }
   };
 
   const openChat = async (userId: number, lookup?: string) => {
@@ -178,7 +216,9 @@ export function ContactsPage() {
     () =>
       tab === 'company'
         ? 'Tìm theo tên, email, điện thoại…'
-        : 'Tìm trong danh bạ của bạn…',
+        : tab === 'bots'
+          ? 'Tìm chatbot…'
+          : 'Tìm trong danh bạ của bạn…',
     [tab],
   );
 
@@ -215,7 +255,9 @@ export function ContactsPage() {
           <p className="muted">
             {tab === 'company'
               ? companyName || 'Danh bạ công ty'
-              : 'Liên hệ đã kết nối, yêu cầu chờ duyệt và đã chặn.'}
+              : tab === 'bots'
+                ? 'Chatbot AI của công ty'
+                : 'Liên hệ đã kết nối, yêu cầu chờ duyệt và đã chặn.'}
           </p>
         </div>
       </header>
@@ -241,6 +283,17 @@ export function ContactsPage() {
         >
           Danh bạ của bạn
         </button>
+        {showBots && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'bots'}
+            className={tab === 'bots' ? 'active' : undefined}
+            onClick={() => setTab('bots')}
+          >
+            AI Chatbot
+          </button>
+        )}
       </div>
 
       <div className="chat-page-toolbar chat-page-toolbar--contacts">
@@ -262,6 +315,9 @@ export function ContactsPage() {
         )}
         {!loading && tab === 'personal' && personalItems.length === 0 && (
           <p className="chat-hint">Chưa có liên hệ trong danh bạ của bạn.</p>
+        )}
+        {!loading && tab === 'bots' && botItems.length === 0 && (
+          <p className="chat-hint">Chưa có chatbot nào được khai báo.</p>
         )}
 
         {tab === 'company' &&
@@ -309,11 +365,12 @@ export function ContactsPage() {
                     </button>
                     <button
                       type="button"
-                      className="secondary"
+                      className="chat-icon-btn is-danger"
+                      title="Chặn"
                       disabled={busyId === item.user_id}
                       onClick={() => void runContactAction(item.user_id, 'block')}
                     >
-                      Chặn
+                      <IconBlock size={18} />
                     </button>
                   </>
                 )}
@@ -322,30 +379,56 @@ export function ContactsPage() {
                     {renderActionButtons(item, true)}
                     <button
                       type="button"
-                      className="secondary"
+                      className="chat-icon-btn is-danger"
+                      title="Chặn"
                       disabled={busyId === item.user_id}
                       onClick={() => void runContactAction(item.user_id, 'block')}
                     >
-                      Chặn
+                      <IconBlock size={18} />
                     </button>
                   </>
                 )}
                 {(item.is_blocked || item.relation === 'blocked') && (
                   <button
                     type="button"
-                    className="secondary"
+                    className="chat-icon-btn"
+                    title="Bỏ chặn"
                     disabled={busyId === item.user_id}
                     onClick={() => void runContactAction(item.user_id, 'unblock')}
                   >
-                    Bỏ chặn
+                    <IconBlock size={18} />
                   </button>
                 )}
               </div>
             </div>
           ))}
+
+        {tab === 'bots' &&
+          botItems.map((bot) => (
+            <div key={bot.folder_id} className="chat-contact-row">
+              <ChatAvatar name={bot.title} size={40} imageSrc={botAvatarUrl(bot.avatar_url)} />
+              <div className="chat-contact-main">
+                <strong>{bot.title}</strong>
+                <span className="muted">
+                  {bot.description || (isEmbedBot(bot) ? 'AI nhúng' : 'Chatbot AI')}
+                </span>
+              </div>
+              <div className="chat-contact-actions">
+                <button
+                  type="button"
+                  className="chat-icon-btn"
+                  disabled={busyFolderId === bot.folder_id}
+                  onClick={() => void openBot(bot.folder_id)}
+                  title="Chat"
+                >
+                  <IconChat size={18} />
+                </button>
+              </div>
+            </div>
+          ))}
       </div>
 
-      {totalPages > 1 && (
+      {tab !== 'bots' && totalPages > 1 && (
         <div className="chat-modal-pagination">
           <button
             type="button"

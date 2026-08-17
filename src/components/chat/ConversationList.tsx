@@ -1,5 +1,6 @@
 import type { Conversation } from '../../api/chatApi';
-import { IconPlus, IconSearch, IconUsers } from '../AppIcons';
+import { botAvatarUrl, isEmbedBot, normalizeNotifyMode, notifyModeLabel } from '../../api/chatApi';
+import { IconBellMention, IconBellOff, IconPlus, IconSearch, IconUsers } from '../AppIcons';
 import { ChatAvatar } from './ChatAvatar';
 
 type Props = {
@@ -75,6 +76,7 @@ export function ConversationList({
 
         {items.map((c) => {
           const isGroup = c.kind === 'group';
+          const isBot = c.kind === 'bot';
           return (
             <button
               type="button"
@@ -84,19 +86,34 @@ export function ConversationList({
             >
               <ChatAvatar
                 name={c.title}
-                avatarId={isGroup ? null : c.peer_avatar_id}
+                avatarId={isGroup || isBot ? null : c.peer_avatar_id}
                 group={isGroup}
                 conversationId={c.id}
                 fileId={isGroup ? c.avatar_file_id : null}
+                imageSrc={isBot ? botAvatarUrl(c.bot_avatar_url) : null}
               />
               <span className="chat-list-main">
                 <span className="chat-list-title">
-                  <span className="chat-list-name">{c.title}</span>
+                  <span className="chat-list-name-row">
+                    <span className="chat-list-name">{c.title}</span>
+                    {normalizeNotifyMode(c.notify_mode) !== 'all' && (
+                      <span className="chat-list-notify" title={notifyModeLabel(c.notify_mode)}>
+                        {normalizeNotifyMode(c.notify_mode) === 'mute' ? (
+                          <IconBellOff size={13} />
+                        ) : (
+                          <IconBellMention size={13} />
+                        )}
+                      </span>
+                    )}
+                  </span>
                   <span className="chat-list-time">{timeLabel(c.last_message_at)}</span>
                 </span>
                 <span className="chat-list-preview">
-                  {c.last_sender_name ? `${c.last_sender_name}: ` : ''}
-                  {c.last_preview || 'Chưa có tin nhắn'}
+                  {isBot && c.bot_active === false
+                    ? 'Chatbot đã tắt'
+                    : isEmbedBot(c)
+                      ? c.last_preview || c.bot_description || 'AI nhúng'
+                      : `${c.last_sender_name ? `${c.last_sender_name}: ` : ''}${c.last_preview || 'Chưa có tin nhắn'}`}
                 </span>
               </span>
               {c.unread_count > 0 && (

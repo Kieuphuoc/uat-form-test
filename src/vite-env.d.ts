@@ -10,6 +10,8 @@ interface ImportMetaEnv {
   readonly VITE_CHAT_API_URL?: string;
   /** Base Arito.Notification.Api cho preference CHAT / Firebase. */
   readonly VITE_NOTI_API_URL?: string;
+  /** Cạnh dài tối đa (px) khi resize ảnh chat ở client trước khi upload. */
+  readonly VITE_CHAT_IMAGE_MAX_SIZE?: string;
 }
 
 interface ImportMeta {

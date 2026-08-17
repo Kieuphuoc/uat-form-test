@@ -1,13 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  botAvatarUrl,
   chatApi,
   chatFolderUrl,
+  isEmbedBot,
+  normalizeNotifyMode,
+  notifyModeLabel,
   type ChatAttachmentItem,
+  type ChatAttachmentList,
   type ChatMember,
   type ContactRelation,
   type Conversation,
 } from '../../api/chatApi';
 import {
+  IconBell,
+  IconBellMention,
+  IconBellOff,
   IconBlock,
   IconClose,
   IconEdit,
@@ -26,12 +34,15 @@ type Props = {
   conversation: Conversation | null;
   members: ChatMember[];
   relation?: ContactRelation | null;
+  seedAttachments?: ChatAttachmentList | null;
+  attachmentsPending?: boolean;
   busy: boolean;
   onClose: () => void;
   onRename: (title: string) => void;
   onSetAvatar: (file: File) => Promise<void>;
   onAddMembers: () => void;
   onLeave: () => void;
+  onToggleNotify?: () => void;
   onBlock?: () => void;
   onUnblock?: () => void;
   onAccept?: () => void;
@@ -46,7 +57,7 @@ function FileTile({
   item: ChatAttachmentItem;
   onOpen: () => void;
 }) {
-  const imageUrl = useChatFileUrl(conversationId, item.is_image ? item.file_id : null);
+  const imageUrl = useChatFileUrl(conversationId, item.is_image ? item.file_id : null, 256);
 
   return (
     <button type="button" className="chat-file-tile" onClick={onOpen} title={item.file_name}>
@@ -66,17 +77,21 @@ export function ConversationInfo({
   conversation,
   members,
   relation,
+  seedAttachments,
+  attachmentsPending = false,
   busy,
   onClose,
   onRename,
   onSetAvatar,
   onAddMembers,
   onLeave,
+  onToggleNotify,
   onBlock,
   onUnblock,
   onAccept,
 }: Props) {
   const isGroup = conversation?.kind === 'group';
+  const isBot = conversation?.kind === 'bot';
   const [title, setTitle] = useState(conversation?.title ?? '');
   const [renaming, setRenaming] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
@@ -97,14 +112,39 @@ export function ConversationInfo({
 
   const conversationId = conversation?.id ?? null;
   const lastMessageId = conversation?.last_message_id ?? 0;
+  const isBotConversation = conversation?.kind === 'bot';
+  const appliedSeedRef = useRef<{ id: number; lastMsg: number } | null>(null);
 
   useEffect(() => {
-    if (!conversationId) {
+    if (!conversationId || isBotConversation) {
+      appliedSeedRef.current = null;
       setFiles([]);
       setFilesTotal(0);
       setFolderUrl(null);
       return;
     }
+    if (appliedSeedRef.current?.id !== conversationId) {
+      setFiles([]);
+      setFilesTotal(0);
+      setFolderUrl(null);
+    }
+    if (attachmentsPending) return;
+
+    const already =
+      appliedSeedRef.current?.id === conversationId
+      && appliedSeedRef.current.lastMsg === lastMessageId;
+    if (already) return;
+
+    const firstOpen = appliedSeedRef.current?.id !== conversationId;
+    if (firstOpen && seedAttachments) {
+      appliedSeedRef.current = { id: conversationId, lastMsg: lastMessageId };
+      setFiles(seedAttachments.items ?? []);
+      setFilesTotal(seedAttachments.total ?? seedAttachments.items?.length ?? 0);
+      setFolderUrl(chatFolderUrl(seedAttachments.folder_id, seedAttachments.folder_name));
+      return;
+    }
+
+    appliedSeedRef.current = { id: conversationId, lastMsg: lastMessageId };
     let disposed = false;
     void chatApi.listAttachments(conversationId, FILES_PREVIEW_LIMIT).then(
       (result) => {
@@ -124,7 +164,7 @@ export function ConversationInfo({
     return () => {
       disposed = true;
     };
-  }, [conversationId, lastMessageId]);
+  }, [conversationId, lastMessageId, isBotConversation, seedAttachments, attachmentsPending]);
 
   if (!conversation) {
     return (
@@ -150,6 +190,23 @@ export function ConversationInfo({
               <IconTrash size={18} />
             </button>
           )}
+          {onToggleNotify && (
+            <button
+              type="button"
+              className={`chat-icon-btn${normalizeNotifyMode(conversation.notify_mode) === 'mute' ? ' is-muted' : ''}`}
+              title={notifyModeLabel(conversation.notify_mode)}
+              disabled={busy}
+              onClick={onToggleNotify}
+            >
+              {normalizeNotifyMode(conversation.notify_mode) === 'mute' ? (
+                <IconBellOff size={18} />
+              ) : normalizeNotifyMode(conversation.notify_mode) === 'mention' ? (
+                <IconBellMention size={18} />
+              ) : (
+                <IconBell size={18} />
+              )}
+            </button>
+          )}
           <button type="button" className="chat-icon-btn" onClick={onClose} title="Đóng">
             <IconClose size={18} />
           </button>
@@ -161,10 +218,11 @@ export function ConversationInfo({
           <div className="chat-info-avatar-wrap">
             <ChatAvatar
               name={conversation.title}
-              avatarId={isGroup ? null : conversation.peer_avatar_id}
+              avatarId={isGroup || isBot ? null : conversation.peer_avatar_id}
               group={isGroup}
               conversationId={conversation.id}
               fileId={isGroup ? conversation.avatar_file_id : null}
+              imageSrc={isBot ? botAvatarUrl(conversation.bot_avatar_url) : null}
               size={64}
             />
             {isGroup && (
@@ -191,7 +249,7 @@ export function ConversationInfo({
                 />
               </>
             )}
-            {!isGroup && relation && (
+            {!isGroup && !isBot && relation && (
               <button
                 type="button"
                 className={`chat-icon-btn chat-info-avatar-btn${
@@ -244,7 +302,12 @@ export function ConversationInfo({
                 )}
               </div>
               <span className="muted">
-                {isGroup ? `Nhóm · ${conversation.member_count} thành viên` : 'Tin nhắn riêng'}
+                {isGroup
+                  ? `Nhóm · ${conversation.member_count} thành viên`
+                  : isBot
+                    ? conversation.bot_description ||
+                      (isEmbedBot(conversation) ? 'AI nhúng — không lưu lịch sử' : 'AI Chatbot')
+                    : 'Tin nhắn riêng'}
               </span>
             </>
           )}
@@ -299,37 +362,39 @@ export function ConversationInfo({
           </div>
         )}
 
-        <div className="chat-info-section">
-          <div className="chat-info-section-head">
-            <span>Files{filesTotal > 0 ? ` (${filesTotal})` : ''}</span>
-            {folderUrl && (
-              <a
-                className="chat-info-link"
-                href={folderUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Tất cả
-              </a>
+        {!isBot && (
+          <div className="chat-info-section">
+            <div className="chat-info-section-head">
+              <span>Files{filesTotal > 0 ? ` (${filesTotal})` : ''}</span>
+              {folderUrl && (
+                <a
+                  className="chat-info-link"
+                  href={folderUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Tất cả
+                </a>
+              )}
+            </div>
+            {files.length === 0 ? (
+              <p className="muted" style={{ margin: 0 }}>
+                Chưa có file nào.
+              </p>
+            ) : (
+              <div className="chat-file-grid">
+                {files.map((item) => (
+                  <FileTile
+                    key={item.file_id}
+                    conversationId={conversation.id}
+                    item={item}
+                    onOpen={() => setPreview(item)}
+                  />
+                ))}
+              </div>
             )}
           </div>
-          {files.length === 0 ? (
-            <p className="muted" style={{ margin: 0 }}>
-              Chưa có file nào.
-            </p>
-          ) : (
-            <div className="chat-file-grid">
-              {files.map((item) => (
-                <FileTile
-                  key={item.file_id}
-                  conversationId={conversation.id}
-                  item={item}
-                  onOpen={() => setPreview(item)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+        )}
       </div>
 
       {preview && (

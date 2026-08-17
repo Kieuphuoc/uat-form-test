@@ -1,165 +1,205 @@
-import { useCallback, useEffect, useState } from 'react';
-import {
-  notificationApi,
-  type NotificationDevice,
-  type NotificationPreference,
-} from '../api/notificationApi';
-import { chatApi, type ChatAppSettings, type ChatMe } from '../api/chatApi';
-import {
-  getDesktopNotificationMode,
-  setDesktopNotificationMode,
-  type DesktopNotificationMode,
-} from '../lib/chatTransport';
-import { useAuth } from '../auth/AuthContext';
-import { useOutletContext } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { Navigate, useNavigate, useOutletContext } from 'react-router-dom';
+import { notificationApi, type NotificationDevice } from '../api/notificationApi';
+import { botAvatarUrl, chatApi, isEmbedBot, type ChatAppSettings, type ChatMe, type DesktopNotificationMode } from '../api/chatApi';
+import { applyDesktopNotificationMode } from '../lib/chatTransport';
+import { navigateChat } from '../lib/chatNav';
+import { CHAT_THEMES, normalizeChatTheme } from '../lib/chatThemes';
+import { IconInfo } from '../components/AppIcons';
+import { ChatAvatar } from '../components/chat/ChatAvatar';
 
-type ShellContext = { me: ChatMe | null };
+type ShellContext = {
+  me: ChatMe | null;
+  setMe?: Dispatch<SetStateAction<ChatMe | null>>;
+};
+
+const DESKTOP_HELP =
+  'Badge trên tab — hiện số tin chưa đọc trên tiêu đề tab.\nThông báo hệ thống — hiện khi tab không focus (cần cấp quyền trình duyệt).\nTắt — không hiện badge hay thông báo desktop.';
+
+const emptySettings = (unitId = 0): ChatAppSettings => ({
+  unit_id: unitId,
+  exempt_email_domains: '',
+  message_recall_minutes: 30,
+  file_recall_minutes: 10,
+  desktop_notification: 'badge',
+  device_push_enabled: true,
+  ai_chatbot_enabled: false,
+  ai_chatbots: [],
+  chat_theme: 'default',
+});
+
+function snapshot(settings: ChatAppSettings): string {
+  return JSON.stringify({
+    unit_id: settings.unit_id,
+    exempt_email_domains: settings.exempt_email_domains,
+    message_recall_minutes: settings.message_recall_minutes,
+    file_recall_minutes: settings.file_recall_minutes,
+    desktop_notification: settings.desktop_notification,
+    device_push_enabled: settings.device_push_enabled,
+    ai_chatbot_enabled: settings.ai_chatbot_enabled,
+    ai_chatbots: settings.ai_chatbots,
+    chat_theme: settings.chat_theme,
+  });
+}
 
 export function ChatSettingsPage() {
-  const { mobile } = useAuth();
-  const { me } = useOutletContext<ShellContext>();
+  const { me, setMe } = useOutletContext<ShellContext>();
+  const navigate = useNavigate();
   const isAdmin = !!me?.is_admin;
-  const [mode, setMode] = useState<DesktopNotificationMode>(getDesktopNotificationMode);
+  const unitId = me?.unit_id ?? 0;
+  const hasCompany = unitId > 0;
+  const companyName =
+    me?.unit?.unit_name || me?.unit?.unit_code || (unitId > 0 ? `Công ty #${unitId}` : '');
+
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [preference, setPreference] = useState<NotificationPreference | null>(null);
   const [devices, setDevices] = useState<NotificationDevice[]>([]);
   const [serverLoading, setServerLoading] = useState(true);
-  const [adminSettings, setAdminSettings] = useState<ChatAppSettings | null>(null);
-  const [adminDraft, setAdminDraft] = useState<ChatAppSettings>({
-    exempt_email_domains: '',
-    message_recall_minutes: 30,
-    file_recall_minutes: 10,
-  });
+  const [draft, setDraft] = useState<ChatAppSettings>(() => emptySettings());
+  const lastSaved = useRef('');
+  const lastSavedSettings = useRef<ChatAppSettings | null>(null);
+
+  const persist = useCallback(
+    async (next: ChatAppSettings) => {
+      if (!hasCompany) return;
+      const key = snapshot(next);
+      if (key === lastSaved.current) return;
+      const previousKey = lastSaved.current;
+      const previous = lastSavedSettings.current;
+      lastSaved.current = key;
+      setSaving(true);
+      setMessage(null);
+      setError(null);
+      try {
+        const saved = await chatApi.saveAdminSettings(next);
+        lastSaved.current = snapshot(saved);
+        lastSavedSettings.current = saved;
+        setDraft(saved);
+        const effective = await applyDesktopNotificationMode(saved.desktop_notification);
+        setMe?.((prev) =>
+          prev
+            ? {
+                ...prev,
+                desktop_notification: saved.desktop_notification,
+                ai_chatbot_enabled: saved.ai_chatbot_enabled,
+                chat_theme: saved.chat_theme,
+              }
+            : prev,
+        );
+        if (saved.desktop_notification === 'chrome' && effective !== 'chrome') {
+          setMessage('Đã lưu. Trình duyệt chưa cho phép thông báo — tab này dùng badge.');
+        } else {
+          setMessage('Đã lưu cài đặt.');
+        }
+      } catch (e) {
+        lastSaved.current = previousKey;
+        lastSavedSettings.current = previous;
+        if (previous) setDraft(previous);
+        setError(e instanceof Error ? e.message : 'Không lưu được cấu hình.');
+      } finally {
+        setSaving(false);
+      }
+    },
+    [hasCompany, setMe],
+  );
 
   const loadServerSettings = useCallback(async () => {
     setServerLoading(true);
     setError(null);
     try {
-      const [chatPreference, registeredDevices] = await Promise.all([
-        notificationApi.getChatPreference(),
-        notificationApi.listDevices(),
+      const [settings, registeredDevices] = await Promise.all([
+        chatApi.getAdminSettings(),
+        notificationApi.listDevices().catch(() => [] as NotificationDevice[]),
       ]);
-      setPreference(chatPreference);
+      lastSaved.current = snapshot(settings);
+      lastSavedSettings.current = settings;
+      setDraft(settings);
       setDevices(registeredDevices);
-      if (isAdmin) {
-        const settings = await chatApi.getAdminSettings();
-        setAdminSettings(settings);
-        setAdminDraft(settings);
-      }
+      await applyDesktopNotificationMode(settings.desktop_notification);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Không tải được cài đặt.');
     } finally {
       setServerLoading(false);
     }
-  }, [isAdmin]);
+  }, []);
 
   useEffect(() => {
+    if (!isAdmin) return;
     void loadServerSettings();
-  }, [loadServerSettings]);
+  }, [isAdmin, loadServerSettings, unitId]);
 
-  const onChange = async (value: DesktopNotificationMode) => {
-    setSaving(true);
-    setMessage(null);
-    setError(null);
-    try {
-      const resolved = await setDesktopNotificationMode(value);
-      setMode(resolved);
-      if (value === 'chrome' && resolved !== 'chrome') {
-        setMessage('Trình duyệt chưa cho phép thông báo — đã giữ Badge trên tab.');
-      } else {
-        setMessage('Đã lưu cài đặt.');
-      }
-    } finally {
-      setSaving(false);
-    }
+  const saveNow = (next: ChatAppSettings) => {
+    setDraft(next);
+    void persist(next);
   };
 
-  const saveServerPreference = async (
-    patch: Partial<Pick<NotificationPreference, 'in_app' | 'firebase'>>,
-  ) => {
-    if (!preference || preference.user_can_toggle !== 1) return;
-    setSaving(true);
-    setMessage(null);
-    setError(null);
-    try {
-      const saved = await notificationApi.setChatPreference({
-        in_app: (patch.in_app ?? preference.in_app) === 1,
-        mail: preference.mail === 1,
-        firebase: (patch.firebase ?? preference.firebase) === 1,
-      });
-      // Response PUT chỉ trả các channel, không trả user_can_toggle/name; giữ metadata
-      // hiện tại để checkbox không bị khóa sau lần thay đổi đầu tiên.
-      setPreference({
-        ...preference,
-        ...saved,
-        user_can_toggle: preference.user_can_toggle,
-        name: preference.name,
-      });
-      setMessage('Đã lưu cấu hình thông báo Chat.');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Không lưu được cấu hình.');
-    } finally {
-      setSaving(false);
+  const commitMinutes = (field: 'message_recall_minutes' | 'file_recall_minutes', fallback: number) => {
+    const raw = draft[field];
+    const valid = Number.isInteger(raw) && raw >= 1 && raw <= 1440;
+    if (!valid) {
+      const restored = lastSavedSettings.current?.[field] ?? fallback;
+      setDraft((prev) => ({ ...prev, [field]: restored }));
+      return;
     }
+    void persist({ ...draft, [field]: raw });
   };
 
-  const resetServerPreference = async () => {
-    setSaving(true);
-    setMessage(null);
-    setError(null);
-    try {
-      await notificationApi.resetChatPreference();
-      await loadServerSettings();
-      setMessage('Đã khôi phục cấu hình mặc định.');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Không khôi phục được cấu hình.');
-      setSaving(false);
-    }
+  const toggleBotActive = (index: number, active: boolean) => {
+    const nextBots = draft.ai_chatbots.map((bot, i) => (i === index ? { ...bot, active } : bot));
+    saveNow({
+      ...draft,
+      ai_chatbots: nextBots,
+      ai_chatbot_enabled: nextBots.some((bot) => bot.active !== false),
+    });
   };
 
-  const saveAdminSettings = async () => {
-    setSaving(true);
-    setMessage(null);
-    setError(null);
-    try {
-      const saved = await chatApi.saveAdminSettings(adminDraft);
-      setAdminSettings(saved);
-      setAdminDraft(saved);
-      setMessage('Đã lưu cấu hình quản trị.');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Không lưu được cấu hình quản trị.');
-    } finally {
-      setSaving(false);
-    }
-  };
+  if (!me) {
+    return (
+      <div className="chat-page-card chat-settings">
+        <p className="chat-hint">Đang tải cấu hình…</p>
+      </div>
+    );
+  }
+  if (!isAdmin) return <Navigate to="/chat" replace />;
+
+  const disabled = saving || serverLoading || !hasCompany;
 
   return (
     <div className="chat-page-card chat-settings">
       <header className="chat-page-card-head">
         <div>
           <h2>Cài đặt</h2>
-          <p className="muted">Thông báo Chat trên trình duyệt và thiết bị của bạn.</p>
+          <p className="muted">
+            {hasCompany ? `Thông báo của: ${companyName}` : '(Chưa chọn công ty)'}
+          </p>
         </div>
       </header>
 
-      {mobile ? (
-        <p className="chat-hint">
-          Trên app mobile, thông báo đẩy dùng FCM theo tùy chọn của thiết bị. Cài đặt bên dưới chỉ
-          áp dụng khi mở Chat trên trình duyệt.
-        </p>
-      ) : null}
+      {!hasCompany && (
+        <p className="chat-hint">Đổi công ty rồi quay lại để sửa cấu hình Chat.</p>
+      )}
 
       <section className="chat-settings-section">
-        <h3>Hiển thị trên trình duyệt</h3>
-        <p className="muted">Lưu trên trình duyệt hiện tại.</p>
+        <h3>Thông báo Chat</h3>
+        {serverLoading && <p className="chat-hint">Đang tải cấu hình…</p>}
         <label className="chat-settings-field">
-          <span>Thông báo desktop</span>
+          <span className="chat-settings-label-row">
+            Thông báo desktop
+            <span className="chat-settings-info" tabIndex={0} aria-label="Giải thích thông báo desktop">
+              <IconInfo size={16} />
+              <span className="chat-settings-info-tip">{DESKTOP_HELP}</span>
+            </span>
+          </span>
           <select
-            value={mode}
-            disabled={saving}
-            onChange={(event) => void onChange(event.target.value as DesktopNotificationMode)}
+            value={draft.desktop_notification}
+            disabled={disabled}
+            onChange={(event) =>
+              saveNow({
+                ...draft,
+                desktop_notification: event.target.value as DesktopNotificationMode,
+              })
+            }
           >
             <option value="badge">Badge trên tab</option>
             <option value="chrome">Thông báo hệ thống</option>
@@ -167,169 +207,191 @@ export function ChatSettingsPage() {
           </select>
         </label>
 
-        <ul className="chat-settings-help">
-          <li>
-            <strong>Badge trên tab</strong> — hiện số tin chưa đọc trên tiêu đề tab.
-          </li>
-          <li>
-            <strong>Thông báo hệ thống</strong> — hiện khi tab không focus (cần cấp quyền trình
-            duyệt).
-          </li>
-          <li>
-            <strong>Tắt</strong> — không hiện badge hay thông báo desktop.
-          </li>
-        </ul>
-      </section>
+        <label className="chat-settings-toggle">
+          <input
+            type="checkbox"
+            checked={draft.device_push_enabled}
+            disabled={disabled}
+            onChange={(e) => saveNow({ ...draft, device_push_enabled: e.target.checked })}
+          />
+          <span>
+            <strong>Thông báo trên thiết bị</strong>
+            <small>Gửi push tới thiết bị đã đăng ký.</small>
+          </span>
+        </label>
 
-      <section className="chat-settings-section">
-        <div className="chat-settings-section-head">
-          <div>
-            <h3>Thông báo Chat</h3>
-            <p className="muted">Chọn kênh nhận thông báo tin nhắn mới.</p>
-          </div>
-          {preference?.has_override === 1 && (
-            <button
-              type="button"
-              className="secondary"
-              disabled={saving}
-              onClick={() => void resetServerPreference()}
-            >
-              Dùng mặc định
-            </button>
-          )}
-        </div>
-
-        {serverLoading && <p className="chat-hint">Đang tải cấu hình…</p>}
-        {!serverLoading && !preference && !error && (
-          <p className="chat-hint">Chưa có cấu hình thông báo Chat.</p>
-        )}
-        {preference && (
-          <div className="chat-settings-toggles">
-            <label>
-              <input
-                type="checkbox"
-                checked={preference.in_app === 1}
-                disabled={saving || preference.user_can_toggle !== 1}
-                onChange={(e) => void saveServerPreference({ in_app: e.target.checked ? 1 : 0 })}
-              />
-              <span>
-                <strong>Hộp thư</strong>
-                <small>Lưu thông báo Chat trong hộp thư của bạn.</small>
-              </span>
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={preference.firebase === 1}
-                disabled={saving || preference.user_can_toggle !== 1}
-                onChange={(e) =>
-                  void saveServerPreference({ firebase: e.target.checked ? 1 : 0 })
-                }
-              />
-              <span>
-                <strong>Push mobile</strong>
-                <small>Gửi push tới thiết bị đã đăng ký.</small>
-              </span>
-            </label>
+        {draft.device_push_enabled && (
+          <div className="chat-settings-devices">
+            {!serverLoading && devices.length === 0 && (
+              <p className="chat-hint">Chưa có thiết bị nào được đăng ký.</p>
+            )}
+            {devices.map((device) => (
+              <div key={device.id}>
+                <span>
+                  <strong>{device.platform || 'Thiết bị'}</strong>
+                  <small>{device.device_id}</small>
+                </span>
+                <span
+                  className={`chat-device-state${
+                    device.enabled === 1 && device.status === 1 ? ' is-active' : ''
+                  }`}
+                >
+                  {device.enabled === 1 && device.status === 1 ? 'Đang nhận' : 'Đã tắt'}
+                </span>
+              </div>
+            ))}
           </div>
         )}
       </section>
 
       <section className="chat-settings-section">
-        <h3>Thiết bị</h3>
-        <p className="muted">Thiết bị mobile đã đăng ký nhận push.</p>
-        {!serverLoading && devices.length === 0 && (
-          <p className="chat-hint">Chưa có thiết bị nào được đăng ký.</p>
-        )}
-        <div className="chat-settings-devices">
-          {devices.map((device) => (
-            <div key={device.id}>
-              <span>
-                <strong>{device.platform || 'Thiết bị'}</strong>
-                <small>{device.device_id}</small>
-              </span>
-              <span
-                className={`chat-device-state${
-                  device.enabled === 1 && device.status === 1 ? ' is-active' : ''
-                }`}
-              >
-                {device.enabled === 1 && device.status === 1 ? 'Đang nhận' : 'Đã tắt'}
-              </span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {isAdmin && (
-        <section className="chat-settings-section">
-          <h3>Cấu hình quản trị</h3>
-          <p className="muted">
-            Domain được khai báo sẽ chat không bị giới hạn 3 tin lần đầu. Thời hạn thu hồi tính bằng
-            phút.
-          </p>
+        <h3>Cấu hình quản trị</h3>
+        <p className="muted">
+          Domain được khai báo sẽ chat không bị giới hạn 3 tin lần đầu. Thời hạn thu hồi tính bằng phút.
+        </p>
+        <label className="chat-settings-field">
+          <span>Domain email không bị chặn</span>
+          <textarea
+            rows={3}
+            value={draft.exempt_email_domains}
+            disabled={disabled}
+            placeholder="arito.vn; arito.net"
+            onChange={(e) => setDraft({ ...draft, exempt_email_domains: e.target.value })}
+            onBlur={() => void persist({ ...draft, exempt_email_domains: draft.exempt_email_domains })}
+          />
+        </label>
+        <div className="chat-settings-admin-grid">
           <label className="chat-settings-field">
-            <span>Domain email không bị chặn</span>
-            <textarea
-              rows={3}
-              value={adminDraft.exempt_email_domains}
-              disabled={saving || serverLoading}
-              placeholder="arito.vn; arito.net"
+            <span>Thu hồi tin nhắn (phút)</span>
+            <input
+              type="number"
+              min={1}
+              max={1440}
+              value={Number.isFinite(draft.message_recall_minutes) ? draft.message_recall_minutes : ''}
+              disabled={disabled}
               onChange={(e) =>
-                setAdminDraft((prev) => ({ ...prev, exempt_email_domains: e.target.value }))
+                setDraft({
+                  ...draft,
+                  message_recall_minutes: e.target.value === '' ? Number.NaN : Number(e.target.value),
+                })
               }
+              onBlur={() => commitMinutes('message_recall_minutes', 30)}
             />
           </label>
-          <div className="chat-settings-admin-grid">
-            <label className="chat-settings-field">
-              <span>Thu hồi tin nhắn (phút)</span>
-              <input
-                type="number"
-                min={1}
-                max={1440}
-                value={adminDraft.message_recall_minutes}
-                disabled={saving || serverLoading}
-                onChange={(e) =>
-                  setAdminDraft((prev) => ({
-                    ...prev,
-                    message_recall_minutes: Number(e.target.value) || 30,
-                  }))
-                }
-              />
-            </label>
-            <label className="chat-settings-field">
-              <span>Thu hồi file (phút)</span>
-              <input
-                type="number"
-                min={1}
-                max={1440}
-                value={adminDraft.file_recall_minutes}
-                disabled={saving || serverLoading}
-                onChange={(e) =>
-                  setAdminDraft((prev) => ({
-                    ...prev,
-                    file_recall_minutes: Number(e.target.value) || 10,
-                  }))
-                }
-              />
-            </label>
-          </div>
-          <div className="row" style={{ marginTop: 12 }}>
-            <button type="button" disabled={saving || serverLoading} onClick={() => void saveAdminSettings()}>
-              Lưu cấu hình
-            </button>
-            {adminSettings && (
+          <label className="chat-settings-field">
+            <span>Thu hồi file (phút)</span>
+            <input
+              type="number"
+              min={1}
+              max={1440}
+              value={Number.isFinite(draft.file_recall_minutes) ? draft.file_recall_minutes : ''}
+              disabled={disabled}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  file_recall_minutes: e.target.value === '' ? Number.NaN : Number(e.target.value),
+                })
+              }
+              onBlur={() => commitMinutes('file_recall_minutes', 10)}
+            />
+          </label>
+        </div>
+      </section>
+
+      <section className="chat-settings-section">
+        <h3>AI Chatbot</h3>
+        <p className="muted">
+          Bấm bot để sửa tên, link, mô tả. Chỉ checkbox mới bật/tắt. Bot tắt ẩn khỏi Danh bạ; hội
+          thoại cũ vẫn mở được. AI nhúng chỉ iframe, không lưu tin.
+        </p>
+
+        {draft.ai_chatbots.length === 0 && (
+          <p className="chat-hint">Chưa có chatbot. Bấm Thêm chatbot để khai báo FolderId.</p>
+        )}
+
+        <div className="chat-bot-list">
+          {draft.ai_chatbots.map((bot, index) => {
+            const active = bot.active !== false;
+            const embed = isEmbedBot(bot);
+            const id = bot.folder_id || String(index);
+            return (
+              <div key={id} className="chat-bot-row">
+                <button
+                  type="button"
+                  className="chat-bot-row-main"
+                  disabled={disabled}
+                  onClick={() => navigateChat(navigate, `/chat/settings/bots/${encodeURIComponent(id)}`)}
+                  title="Sửa chatbot"
+                >
+                  <ChatAvatar
+                    name={bot.title || 'AI'}
+                    imageSrc={botAvatarUrl(bot.avatar_url)}
+                    size={36}
+                  />
+                  <span className="chat-bot-row-meta">
+                    <strong>
+                      {bot.title || bot.folder_id || 'Chatbot'}
+                      <span className="chat-bot-type-tag">{embed ? 'AI nhúng' : 'AI thư mục'}</span>
+                    </strong>
+                    <small>
+                      {embed
+                        ? bot.embed_url || bot.description || 'Chưa có link'
+                        : bot.description || bot.folder_id}
+                    </small>
+                  </span>
+                </button>
+                <label className="chat-bot-row-check" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={active}
+                    disabled={disabled}
+                    onChange={(e) => toggleBotActive(index, e.target.checked)}
+                    aria-label={active ? 'Đang bật' : 'Đã tắt'}
+                  />
+                  <span>{active ? 'Bật' : 'Tắt'}</span>
+                </label>
+              </div>
+            );
+          })}
+        </div>
+
+        <button
+          type="button"
+          className="secondary"
+          disabled={disabled}
+          onClick={() => navigateChat(navigate, '/chat/settings/bots/new')}
+        >
+          Thêm chatbot
+        </button>
+      </section>
+
+      <section className="chat-settings-section">
+        <h3>Giao diện tin nhắn</h3>
+        <p className="muted">
+          Áp dụng cho cả công ty: màu tin của bạn, tin người khác, nền khung chat.
+        </p>
+        <div className="chat-theme-grid">
+          {CHAT_THEMES.map((theme) => {
+            const selected = normalizeChatTheme(draft.chat_theme) === theme.id;
+            return (
               <button
+                key={theme.id}
                 type="button"
-                className="secondary"
-                disabled={saving}
-                onClick={() => setAdminDraft(adminSettings)}
+                className={`chat-theme-card${selected ? ' is-selected' : ''}`}
+                disabled={disabled}
+                onClick={() => saveNow({ ...draft, chat_theme: theme.id })}
               >
-                Hoàn tác
+                <span className="chat-theme-preview" style={{ background: theme.threadBg }}>
+                  <span style={{ background: theme.theirsBg, color: theme.theirsFg }}>Xin chào</span>
+                  <span style={{ background: theme.mineBg, color: theme.mineFg }}>Ok nhé</span>
+                </span>
+                <strong>{theme.name}</strong>
+                <small>{theme.hint}</small>
               </button>
-            )}
-          </div>
-        </section>
-      )}
+            );
+          })}
+        </div>
+      </section>
 
       {error && <div className="chat-error">{error}</div>}
       {message && <div className="chat-hint">{message}</div>}

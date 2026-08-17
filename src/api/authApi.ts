@@ -10,13 +10,33 @@ export type AuthUser = {
   lan?: 'v' | 'e' | 'o' | string;
 };
 
+export type AuthConfiguredClient = {
+  clientId: string;
+  name: string;
+};
+
 export type AuthConfig = {
   enabled: boolean;
   loginUrl?: string;
   loginSlug?: string;
   mockEnabled?: boolean;
   aritoClientId?: string;
+  dataSelectionEnabled?: boolean;
+  clientSelectionEnabled?: boolean;
+  clients?: AuthConfiguredClient[];
 };
+
+export function mapAuthUser(raw: Record<string, unknown>): AuthUser {
+  const isAdminRaw = raw.isAdmin ?? raw.is_admin;
+  return {
+    userId: Number(raw.userId ?? raw.user_id ?? 0),
+    clientId: String(raw.clientId ?? raw.client_id ?? ''),
+    email: String(raw.email ?? ''),
+    nickname: String(raw.nickname ?? ''),
+    isAdmin: isAdminRaw === true || isAdminRaw === 1 || isAdminRaw === '1',
+    lan: String(raw.lan ?? 'v'),
+  };
+}
 
 export type SsoLoginResponse = {
   jwt: string;

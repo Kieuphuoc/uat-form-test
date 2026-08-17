@@ -4,14 +4,13 @@ import {
   HubConnectionState,
   LogLevel,
 } from '@microsoft/signalr';
-import { chatApi, getChatApiBase, type ChatMessage, type Conversation } from '../api/chatApi';
+import { chatApi, getChatApiBase, type ChatMessage, type Conversation, type ConversationNotifyMode } from '../api/chatApi';
 import { getJwt } from '../api/client';
 
 export type ChatSubscription = { stop: () => void };
 export type ChatPlatform = 'web' | 'mobile';
 export type DesktopNotificationMode = 'badge' | 'chrome' | 'off';
 
-const NOTIFICATION_MODE_KEY = 'arito-chat:desktop-notification';
 const HEARTBEAT_MS = 30_000;
 
 type MessageListener = {
@@ -29,8 +28,22 @@ type ContactListener = {
   callback: () => void;
 };
 
+export type ConversationReadEvent = {
+  conversation_id: number;
+  user_id: number;
+  last_read_message_id: number;
+};
+
+type ConversationReadListener = {
+  callback: (event: ConversationReadEvent) => void;
+};
+
 let platform: ChatPlatform = 'web';
 let shellVisible = true;
+let desktopNotificationMode: DesktopNotificationMode = 'badge';
+let actorUserId = 0;
+const notifyModes = new Map<number, ConversationNotifyMode>();
+const desktopModeListeners = new Set<(mode: DesktopNotificationMode) => void>();
 let connection: HubConnection | null = null;
 let startPromise: Promise<void> | null = null;
 let retryTimer: number | null = null;
@@ -39,9 +52,21 @@ let idleStopTimer: number | null = null;
 const messageListeners = new Set<MessageListener>();
 const conversationListeners = new Set<ConversationListener>();
 const contactListeners = new Set<ContactListener>();
+const conversationReadListeners = new Set<ConversationReadListener>();
+const listInflight = new Map<string, Promise<Conversation[]>>();
+let listDebounceTimer: number | null = null;
+let lastListKey = '';
+let lastListAt = 0;
+let lastListItems: Conversation[] = [];
 
 function hasListeners(): boolean {
-  return messageListeners.size + conversationListeners.size + contactListeners.size > 0;
+  return (
+    messageListeners.size
+    + conversationListeners.size
+    + contactListeners.size
+    + conversationReadListeners.size
+    > 0
+  );
 }
 
 function isActive(): boolean {
@@ -60,25 +85,69 @@ export function setChatPlatform(value: ChatPlatform): void {
   }
 }
 
-export function getDesktopNotificationMode(): DesktopNotificationMode {
-  const value = window.localStorage.getItem(NOTIFICATION_MODE_KEY);
+function normalizeDesktopMode(value?: string | null): DesktopNotificationMode {
   return value === 'chrome' || value === 'off' ? value : 'badge';
 }
 
-export async function setDesktopNotificationMode(
-  value: DesktopNotificationMode,
-): Promise<DesktopNotificationMode> {
-  let resolved = value;
-  if (value === 'chrome') {
-    if (!('Notification' in window)) {
-      resolved = 'badge';
-    } else if (Notification.permission !== 'granted') {
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') resolved = 'badge';
-    }
+function normalizeNotifyMode(value?: string | null): ConversationNotifyMode {
+  return value === 'mention' || value === 'mute' ? value : 'all';
+}
+
+export function setChatActorUserId(userId: number): void {
+  actorUserId = userId > 0 ? userId : 0;
+}
+
+export function syncConversationNotifyModes(items: Conversation[]): void {
+  for (const item of items) {
+    notifyModes.set(item.id, normalizeNotifyMode(item.notify_mode));
   }
-  window.localStorage.setItem(NOTIFICATION_MODE_KEY, resolved);
-  return resolved;
+}
+
+export function setConversationNotifyMode(conversationId: number, mode: ConversationNotifyMode): void {
+  notifyModes.set(conversationId, normalizeNotifyMode(mode));
+}
+
+function notifyDesktopMode(): void {
+  for (const listener of desktopModeListeners) listener(desktopNotificationMode);
+}
+
+async function resolveDesktopMode(companyMode: DesktopNotificationMode): Promise<DesktopNotificationMode> {
+  if (companyMode !== 'chrome') return companyMode;
+  if (!('Notification' in window)) return 'badge';
+  if (Notification.permission === 'granted') return 'chrome';
+  if (Notification.permission === 'denied') return 'badge';
+  const permission = await Notification.requestPermission();
+  return permission === 'granted' ? 'chrome' : 'badge';
+}
+
+/** Mode hiệu lực trên tab này (chrome có thể hạ thành badge nếu chưa có quyền). */
+export function getDesktopNotificationMode(): DesktopNotificationMode {
+  return desktopNotificationMode;
+}
+
+/** Áp dụng cấu hình công ty; không ghi localStorage. */
+export async function applyDesktopNotificationMode(
+  companyMode?: string | null,
+): Promise<DesktopNotificationMode> {
+  const resolved = await resolveDesktopMode(normalizeDesktopMode(companyMode));
+  if (desktopNotificationMode !== resolved) {
+    desktopNotificationMode = resolved;
+    notifyDesktopMode();
+  } else {
+    desktopNotificationMode = resolved;
+  }
+  return desktopNotificationMode;
+}
+
+export function subscribeDesktopNotificationMode(
+  onMode: (mode: DesktopNotificationMode) => void,
+): ChatSubscription {
+  desktopModeListeners.add(onMode);
+  return {
+    stop: () => {
+      desktopModeListeners.delete(onMode);
+    },
+  };
 }
 
 function buildConnection(): HubConnection {
@@ -95,11 +164,13 @@ function buildConnection(): HubConnection {
 
   hub.on('message.created', (message: ChatMessage) => {
     void showDesktopNotification(message);
+    if (!patchConversationsFromMessage(message)) scheduleRefreshAllConversations();
     for (const listener of messageListeners) {
       if (listener.conversationId === message.conversation_id) void refreshMessages(listener);
     }
   });
   hub.on('message.recalled', (message: ChatMessage) => {
+    if (!patchConversationsFromMessage(message)) scheduleRefreshAllConversations();
     for (const listener of messageListeners) {
       if (listener.conversationId === message.conversation_id) {
         listener.callback([message]);
@@ -107,11 +178,17 @@ function buildConnection(): HubConnection {
       }
     }
   });
-  hub.on('conversation.updated', () => void refreshAllConversations());
-  hub.on('conversation.read', () => void refreshAllConversations());
+  hub.on('conversation.updated', (payload?: { conversation_id?: number; message_id?: number }) => {
+    // message.created / recalled đã kèm conversation.updated — không list lại.
+    if (payload?.message_id) return;
+    scheduleRefreshAllConversations();
+  });
+  hub.on('conversation.read', (payload: ConversationReadEvent) => {
+    for (const listener of conversationReadListeners) listener.callback(payload);
+  });
   hub.on('contact.updated', () => {
     for (const listener of contactListeners) listener.callback();
-    void refreshAllConversations();
+    scheduleRefreshAllConversations();
   });
   hub.onreconnecting(() => stopHeartbeat());
   hub.onreconnected(() => {
@@ -207,23 +284,106 @@ async function refreshMessages(listener: MessageListener): Promise<void> {
   }
 }
 
-async function refreshConversation(listener: ConversationListener): Promise<void> {
+function conversationPreview(message: ChatMessage, mine: boolean): string | null {
+  const text =
+    message.msg_type === 'image'
+      ? '[Hình ảnh]'
+      : message.msg_type === 'file'
+        ? '[Tệp đính kèm]'
+        : (message.body ?? '').replace(/\n/g, ' ').trim();
+  if (!text) return null;
+  const clipped = text.length > 120 ? text.slice(0, 120) : text;
+  return mine ? `Bạn: ${clipped}` : clipped;
+}
+
+/** Cập nhật preview/unread tại chỗ — tránh gọi lại ss_Chat_conversation_list mỗi tin mới. */
+function patchConversationsFromMessage(message: ChatMessage): boolean {
+  if (lastListItems.length === 0) return false;
+  const idx = lastListItems.findIndex((item) => item.id === message.conversation_id);
+  if (idx < 0) return false;
+
+  const mine = actorUserId > 0 && message.sender_user_id === actorUserId;
+  const viewing = [...messageListeners].some((listener) => listener.conversationId === message.conversation_id);
+  const current = lastListItems[idx];
+  const next: Conversation = {
+    ...current,
+    last_message_id: Math.max(current.last_message_id, message.id),
+    last_message_at: message.created_at,
+    last_preview: conversationPreview(message, mine) ?? current.last_preview,
+    last_sender_name:
+      mine || current.kind === 'direct'
+        ? current.last_sender_name
+        : (message.sender_name ?? current.last_sender_name),
+    unread_count: mine || viewing ? 0 : current.unread_count + 1,
+  };
+  lastListItems = [next, ...lastListItems.filter((item) => item.id !== message.conversation_id)];
+  lastListAt = Date.now();
+  for (const listener of conversationListeners) {
+    const query = listener.search.trim().toLowerCase();
+    listener.callback(
+      query
+        ? lastListItems.filter((item) => (item.title ?? '').toLowerCase().includes(query))
+        : lastListItems,
+    );
+  }
+  return true;
+}
+
+async function loadConversations(search: string, force = false): Promise<Conversation[]> {
+  const key = search.trim();
+  const existing = listInflight.get(key);
+  if (existing) return existing;
+  if (!force && key === lastListKey && Date.now() - lastListAt < 1000) return lastListItems;
+
+  const pending = chatApi.listConversations(key).then((items) => {
+    lastListKey = key;
+    lastListAt = Date.now();
+    lastListItems = items;
+    return items;
+  });
+  listInflight.set(key, pending);
   try {
-    listener.callback(await chatApi.listConversations(listener.search));
+    return await pending;
+  } finally {
+    if (listInflight.get(key) === pending) listInflight.delete(key);
+  }
+}
+
+async function refreshConversation(listener: ConversationListener, force = false): Promise<void> {
+  try {
+    listener.callback(await loadConversations(listener.search, force));
   } catch {
     // Giữ state hiện tại, reconnect sau sẽ thử lại.
   }
 }
 
-async function refreshAllConversations(): Promise<void> {
-  await Promise.all([...conversationListeners].map(refreshConversation));
+function scheduleRefreshAllConversations(): void {
+  if (listDebounceTimer !== null) window.clearTimeout(listDebounceTimer);
+  listDebounceTimer = window.setTimeout(() => {
+    listDebounceTimer = null;
+    void refreshAllConversations(true);
+  }, 300);
+}
+
+async function refreshAllConversations(force = false): Promise<void> {
+  await Promise.all([...conversationListeners].map((listener) => refreshConversation(listener, force)));
+}
+
+function shouldSkipListCatchUp(): boolean {
+  return listInflight.size > 0 || (lastListAt > 0 && Date.now() - lastListAt < 2000);
 }
 
 async function catchUpAll(): Promise<void> {
+  const skipList = shouldSkipListCatchUp();
   await Promise.all([
     ...[...messageListeners].map(refreshMessages),
-    ...[...conversationListeners].map(refreshConversation),
+    ...(skipList ? [] : [...conversationListeners].map((listener) => refreshConversation(listener))),
   ]);
+}
+
+/** Mutation phía client (đổi tên, rời nhóm, …) — force, vẫn gộp in-flight. */
+export function reloadConversations(): Promise<void> {
+  return refreshAllConversations(true);
 }
 
 async function showDesktopNotification(message: ChatMessage): Promise<void> {
@@ -233,9 +393,13 @@ async function showDesktopNotification(message: ChatMessage): Promise<void> {
     || getDesktopNotificationMode() !== 'chrome'
     || !('Notification' in window)
     || Notification.permission !== 'granted'
+    || (actorUserId > 0 && message.sender_user_id === actorUserId)
   ) {
     return;
   }
+  const mode = notifyModes.get(message.conversation_id) ?? 'all';
+  if (mode === 'mute') return;
+  if (mode === 'mention' && !(message.mentioned_user_ids ?? []).includes(actorUserId)) return;
   const allowed =
     connection?.state === HubConnectionState.Connected
       ? await connection.invoke<boolean>('CanNotify', 'web').catch(() => false)
@@ -283,6 +447,20 @@ export function subscribeConversations(
   return {
     stop: () => {
       conversationListeners.delete(listener);
+      scheduleStopIfUnused();
+    },
+  };
+}
+
+export function subscribeConversationRead(
+  onRead: (event: ConversationReadEvent) => void,
+): ChatSubscription {
+  const listener: ConversationReadListener = { callback: onRead };
+  conversationReadListeners.add(listener);
+  void ensureStarted();
+  return {
+    stop: () => {
+      conversationReadListeners.delete(listener);
       scheduleStopIfUnused();
     },
   };

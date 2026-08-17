@@ -10,6 +10,13 @@ type Props = {
   onClose: () => void;
 };
 
+/** Padding (10*2) + gap (8) + header (32) của .chat-preview-modal. */
+const CHROME_HEIGHT = 60;
+/** Chừa lề quanh modal trên desktop để thấy được backdrop. */
+const VIEWPORT_MARGIN = 32;
+/** Đủ chỗ cho tên file + 3 nút trên header. */
+const MIN_MODAL_WIDTH = 300;
+
 export async function downloadChatFile(conversationId: number, fileId: string, fileName: string) {
   const blob = await chatApi.attachmentBlob(conversationId, fileId);
   const url = URL.createObjectURL(blob);
@@ -25,7 +32,10 @@ function isImageFile(contentType: string | null | undefined, fileName: string): 
   return /\.(avif|bmp|gif|jpe?g|png|svg|webp)$/i.test(fileName);
 }
 
-/** Xem file trong iframe; ảnh dùng kích thước tự nhiên, tài liệu chiếm gần toàn màn hình. */
+/**
+ * Xem file: ảnh tải bản đầy đủ từ server và khung vừa khít ảnh (không vượt màn hình,
+ * mobile phủ 100% theo CSS); tài liệu preview bằng iframe files-web.
+ */
 export function FilePreviewModal({
   conversationId,
   fileId,
@@ -33,27 +43,38 @@ export function FilePreviewModal({
   contentType,
   onClose,
 }: Props) {
-  const [src, setSrc] = useState<string | null>(() => chatFilePreviewUrl(fileId));
-  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
   const isImage = isImageFile(contentType, fileName);
+  const [documentSrc, setDocumentSrc] = useState<string | null>(() =>
+    isImage ? null : chatFilePreviewUrl(fileId),
+  );
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
+  const [viewport, setViewport] = useState(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }));
 
   useEffect(() => {
-    const filesWeb = chatFilePreviewUrl(fileId);
-    setSrc(filesWeb);
+    setImageUrl(null);
     setImageSize(null);
+    setDocumentSrc(isImage ? null : chatFilePreviewUrl(fileId));
+
     let disposed = false;
     let objectUrl: string | null = null;
+    // Không truyền size → bản gốc (upload đã hạ về tối đa 1024 nên vẫn nhẹ).
     void chatApi.attachmentBlob(conversationId, fileId).then(
       (blob) => {
         if (disposed) return;
         objectUrl = URL.createObjectURL(blob);
-        if (!filesWeb) setSrc(objectUrl);
         if (isImage) {
+          setImageUrl(objectUrl);
           const image = new Image();
           image.onload = () => {
             if (!disposed) setImageSize({ width: image.naturalWidth, height: image.naturalHeight });
           };
           image.src = objectUrl;
+        } else {
+          setDocumentSrc((current) => current ?? objectUrl);
         }
       },
       () => {
@@ -66,12 +87,24 @@ export function FilePreviewModal({
     };
   }, [conversationId, fileId, isImage]);
 
-  const imageModalStyle = imageSize
-    ? {
-        width: `${Math.min(window.innerWidth * 0.9, Math.max(280, imageSize.width))}px`,
-        height: `${Math.min(window.innerHeight * 0.9, Math.max(240, imageSize.height + 52))}px`,
-      }
-    : undefined;
+  useEffect(() => {
+    const onResize = () =>
+      setViewport({ width: window.innerWidth, height: window.innerHeight });
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  // Thu nhỏ theo tỉ lệ để ảnh nằm trọn trong màn hình; ảnh nhỏ giữ nguyên, không phóng to.
+  let imageModalStyle: { width: string; height: string } | undefined;
+  if (isImage && imageSize) {
+    const maxWidth = Math.max(MIN_MODAL_WIDTH, viewport.width - VIEWPORT_MARGIN);
+    const maxHeight = Math.max(200, viewport.height - VIEWPORT_MARGIN - CHROME_HEIGHT);
+    const scale = Math.min(1, maxWidth / imageSize.width, maxHeight / imageSize.height);
+    imageModalStyle = {
+      width: `${Math.max(MIN_MODAL_WIDTH, Math.round(imageSize.width * scale))}px`,
+      height: `${Math.round(imageSize.height * scale) + CHROME_HEIGHT}px`,
+    };
+  }
 
   return (
     <div
@@ -117,8 +150,14 @@ export function FilePreviewModal({
           </div>
         </header>
         <div className="chat-preview-frame-wrap">
-          {src ? (
-            <iframe title={fileName} src={src} className="chat-preview-frame" />
+          {isImage ? (
+            imageUrl ? (
+              <img className="chat-preview-image" src={imageUrl} alt={fileName} />
+            ) : (
+              <p className="chat-hint">Đang tải ảnh…</p>
+            )
+          ) : documentSrc ? (
+            <iframe title={fileName} src={documentSrc} className="chat-preview-frame" />
           ) : (
             <p className="chat-hint">Đang tải file…</p>
           )}

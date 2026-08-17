@@ -3,8 +3,10 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { chatApi, type ChatMe } from '../../api/chatApi';
 import { useAuth } from '../../auth/AuthContext';
 import { navigateChat } from '../../lib/chatNav';
-import { IconChat, IconUsers } from '../AppIcons';
+import { applyDesktopNotificationMode, setChatActorUserId } from '../../lib/chatTransport';
+import { IconChat, IconDatabase, IconLogout, IconSettings, IconUsers } from '../AppIcons';
 import { ChatAvatar } from './ChatAvatar';
+import { DataSelectionDialog } from './DataSelectionDialog';
 
 function navClass({ isActive }: { isActive: boolean }) {
   return isActive ? 'active' : undefined;
@@ -27,6 +29,7 @@ export function ChatAppShell() {
   const navigate = useNavigate();
   const [me, setMe] = useState<ChatMe | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [dataSelectOpen, setDataSelectOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -34,7 +37,10 @@ export function ChatAppShell() {
     void chatApi
       .me()
       .then((value) => {
-        if (!cancelled) setMe(value);
+        if (cancelled) return;
+        setMe(value);
+        setChatActorUserId(value.user_id);
+        void applyDesktopNotificationMode(value.desktop_notification);
       })
       .catch(() => {
         /* JWT vẫn dùng được; thiếu snapshot không chặn shell */
@@ -58,18 +64,20 @@ export function ChatAppShell() {
       const raw = event.data as { type?: string; id?: unknown } | null;
       if (!raw || typeof raw !== 'object' || raw.type !== 'arito-header-select') return;
       const path = headerSelectPath(typeof raw.id === 'string' ? raw.id : '');
-      if (path) navigateChat(navigate, path);
+      if (!path) return;
+      if (path === '/chat/settings' && !me?.is_admin) return;
+      navigateChat(navigate, path);
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
-  }, [navigate]);
+  }, [navigate, me?.is_admin]);
 
   const displayName =
     me?.nickname || user?.nickname || me?.email || user?.email || 'Bạn';
   const avatarId = me?.avatar_id ?? null;
 
   return (
-    <div className={`chat-shell${mobile ? ' chat-shell--mobile' : ''}`}>
+    <div className={`chat-shell${mobile ? ' chat-shell--mobile' : ''}`} data-chat-theme={me?.chat_theme || 'default'}>
       {!mobile && (
         <header className="chat-shell-header">
           <Link to="/chat" className="chat-shell-brand" title="Arito Chat">
@@ -115,11 +123,25 @@ export function ChatAppShell() {
                   role="menuitem"
                   onClick={() => {
                     setMenuOpen(false);
-                    navigate('/chat/settings');
+                    setDataSelectOpen(true);
                   }}
                 >
-                  Cài đặt
+                  <IconDatabase size={16} />
+                  Thay đổi công ty và dữ liệu
                 </button>
+                {me?.is_admin ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      navigateChat(navigate, '/chat/settings');
+                    }}
+                  >
+                    <IconSettings size={16} />
+                    Cài đặt
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   role="menuitem"
@@ -129,6 +151,7 @@ export function ChatAppShell() {
                     logout();
                   }}
                 >
+                  <IconLogout size={16} />
                   Đăng xuất
                 </button>
               </div>
@@ -140,6 +163,8 @@ export function ChatAppShell() {
       <div className="chat-shell-body">
         <Outlet context={{ me, setMe }} />
       </div>
+
+      {dataSelectOpen && <DataSelectionDialog onClose={() => setDataSelectOpen(false)} />}
     </div>
   );
 }

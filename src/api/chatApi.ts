@@ -79,6 +79,8 @@ export function chatAttachmentContentUrl(conversationId: number, fileId: string)
   return `${getChatApiBase()}/api/chat/conversations/${conversationId}/attachments/${encodeURIComponent(fileId)}/content`;
 }
 
+export type DesktopNotificationMode = 'badge' | 'chrome' | 'off';
+
 export type ChatMe = {
   user_id: number;
   is_admin: boolean;
@@ -86,7 +88,10 @@ export type ChatMe = {
   nickname?: string | null;
   email?: string | null;
   avatar_id?: string | null;
-    unit?: {
+  desktop_notification?: DesktopNotificationMode | null;
+  ai_chatbot_enabled?: boolean;
+  chat_theme?: string | null;
+  unit?: {
     unit_id: number;
     unit_code?: string | null;
     unit_name?: string | null;
@@ -97,7 +102,40 @@ export type ChatMe = {
   } | null;
 };
 
+export const DEFAULT_BOT_AVATAR = '/AritoMascotsAI.png';
+
+export function botAvatarUrl(url?: string | null): string {
+  const value = url?.trim();
+  if (!value) return DEFAULT_BOT_AVATAR;
+  if (/^https?:\/\//i.test(value)) return value;
+  const id = value.toLowerCase().startsWith('file:') ? value.slice(5).trim() : value;
+  if (/^[a-zA-Z0-9_-]{8,64}$/.test(id)) {
+    return `${getChatApiBase()}/api/chat/bots/avatar/${encodeURIComponent(id)}`;
+  }
+  return DEFAULT_BOT_AVATAR;
+}
+
+export type ConversationNotifyMode = 'all' | 'mention' | 'mute';
+
+export function normalizeNotifyMode(value?: string | null): ConversationNotifyMode {
+  return value === 'mention' || value === 'mute' ? value : 'all';
+}
+
+export function nextNotifyMode(current?: string | null): ConversationNotifyMode {
+  const order: ConversationNotifyMode[] = ['all', 'mention', 'mute'];
+  const mode = normalizeNotifyMode(current);
+  return order[(order.indexOf(mode) + 1) % order.length];
+}
+
+export function notifyModeLabel(mode?: string | null): string {
+  if (mode === 'mute') return 'Tắt thông báo';
+  if (mode === 'mention') return 'Thông báo khi tag';
+  return 'Mở thông báo';
+}
+
 export type ConversationKind = 'direct' | 'group' | 'bot';
+export type ChatBotType = 'rag' | 'embed';
+export type ChatBotAuthMode = 'none' | 'embed_token';
 
 export type Conversation = {
   id: number;
@@ -107,6 +145,13 @@ export type Conversation = {
   peer_user_id?: number | null;
   peer_avatar_id?: string | null;
   avatar_file_id?: string | null;
+  bot_folder_id?: string | null;
+  bot_avatar_url?: string | null;
+  bot_description?: string | null;
+  bot_active?: boolean;
+  bot_type?: ChatBotType | string | null;
+  bot_embed_url?: string | null;
+  bot_auth_mode?: ChatBotAuthMode | string | null;
   last_message_id: number;
   last_read_message_id: number;
   last_message_at?: string | null;
@@ -114,6 +159,7 @@ export type Conversation = {
   last_sender_name?: string | null;
   unread_count: number;
   member_count: number;
+  notify_mode?: ConversationNotifyMode | string | null;
 };
 
 export type ChatMessage = {
@@ -139,12 +185,65 @@ export type ChatMessage = {
   recalled_by_user_id?: number | null;
   is_recalled?: boolean;
   can_recall?: boolean;
+  mentioned_user_ids?: number[];
+  /** Chỉ phía client: tin vừa gửi, chưa có id server. */
+  send_status?: 'sending' | 'failed';
 };
 
 export type ChatAppSettings = {
+  unit_id: number;
   exempt_email_domains: string;
   message_recall_minutes: number;
   file_recall_minutes: number;
+  desktop_notification: DesktopNotificationMode;
+  device_push_enabled: boolean;
+  ai_chatbot_enabled: boolean;
+  ai_chatbots: ChatBotCatalogItem[];
+  chat_theme: string;
+};
+
+export type ChatBotCatalogItem = {
+  folder_id: string;
+  title: string;
+  description?: string | null;
+  avatar_url?: string | null;
+  active?: boolean | null;
+  type?: ChatBotType | string | null;
+  embed_url?: string | null;
+  auth_mode?: ChatBotAuthMode | string | null;
+};
+
+export function isEmbedBot(
+  bot: { type?: string | null; bot_type?: string | null } | null | undefined,
+): boolean {
+  const value = (bot?.type ?? bot?.bot_type ?? 'rag').trim().toLowerCase();
+  return value === 'embed';
+}
+
+/** Gắn hidden_login + embed_token (nếu chọn) vào URL iframe chatbot. */
+export function buildBotEmbedSrc(
+  embedUrl: string,
+  authMode?: string | null,
+  mobile = false,
+): string {
+  const jwt = getJwt();
+  try {
+    const url = new URL(embedUrl);
+    if (!url.searchParams.has('hidden_login')) url.searchParams.set('hidden_login', 'true');
+    if (mobile && !url.searchParams.has('mobile')) url.searchParams.set('mobile', 'true');
+    const mode = (authMode ?? 'embed_token').trim().toLowerCase();
+    if (mode === 'embed_token' && jwt && !isJwtExpired(jwt) && !url.searchParams.has('embed_token')) {
+      url.searchParams.set('embed_token', jwt);
+    }
+    return url.toString();
+  } catch {
+    return embedUrl;
+  }
+}
+
+export type ChatBotList = {
+  enabled: boolean;
+  items: ChatBotCatalogItem[];
 };
 
 export type ChatMember = {
@@ -192,6 +291,12 @@ export type ConversationDetail = {
   conversation: Conversation;
   members: ChatMember[];
   relation?: ContactRelation | null;
+};
+
+export type ConversationOpen = ConversationDetail & {
+  messages: ChatMessage[];
+  has_more: boolean;
+  attachments: ChatAttachmentList;
 };
 
 export type ChatUser = {
@@ -292,6 +397,14 @@ export const chatApi = {
   getConversation: (id: number) =>
     chatFetch<ConversationDetail>(`/api/chat/conversations/${id}`),
 
+  openConversation: (id: number, opts?: { limit?: number; fileLimit?: number }) => {
+    const qs = new URLSearchParams();
+    if (opts?.limit) qs.set('limit', String(opts.limit));
+    if (opts?.fileLimit) qs.set('file_limit', String(opts.fileLimit));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return chatFetch<ConversationOpen>(`/api/chat/conversations/${id}/open${suffix}`);
+  },
+
   createDirect: (peerUserId: number, lookup?: string) =>
     chatFetch<Conversation>('/api/chat/conversations/direct', {
       method: 'POST',
@@ -302,6 +415,14 @@ export const chatApi = {
     chatFetch<Conversation>('/api/chat/conversations/group', {
       method: 'POST',
       body: JSON.stringify({ title, member_ids: memberIds }),
+    }),
+
+  listBots: () => chatFetch<ChatBotList>('/api/chat/bots'),
+
+  openBot: (folderId: string) =>
+    chatFetch<Conversation>('/api/chat/conversations/bot', {
+      method: 'POST',
+      body: JSON.stringify({ folder_id: folderId }),
     }),
 
   rename: (id: number, title: string) =>
@@ -321,6 +442,12 @@ export const chatApi = {
       `/api/chat/conversations/${id}/leave`,
       { method: 'POST' },
     ),
+
+  setNotifyMode: (id: number, notifyMode: ConversationNotifyMode) =>
+    chatFetch<{ notify_mode: ConversationNotifyMode }>(`/api/chat/conversations/${id}/notify`, {
+      method: 'PUT',
+      body: JSON.stringify({ notify_mode: notifyMode }),
+    }),
 
   listMessages: (
     id: number,
@@ -369,6 +496,15 @@ export const chatApi = {
       body: JSON.stringify(settings),
     }),
 
+  uploadBotAvatar: (file: File) => {
+    const body = new FormData();
+    body.append('file', file, file.name);
+    return chatFetch<{ file_id: string; avatar_url: string }>('/api/chat/admin/bots/avatar', {
+      method: 'POST',
+      body,
+    });
+  },
+
   uploadAttachment: (id: number, file: File) => {
     const body = new FormData();
     body.append('file', file, file.name);
@@ -394,9 +530,12 @@ export const chatApi = {
       `/api/chat/conversations/${conversationId}/attachments?limit=${limit}`,
     ),
 
-  attachmentBlob: (conversationId: number, fileId: string) =>
+  /** size &gt; 0 → bản resize sẵn của File.Api (thumbnail 256 / avatar 64). */
+  attachmentBlob: (conversationId: number, fileId: string, size = 0) =>
     chatFetchBlob(
-      `/api/chat/conversations/${conversationId}/attachments/${encodeURIComponent(fileId)}/content`,
+      `/api/chat/conversations/${conversationId}/attachments/${encodeURIComponent(fileId)}/content${
+        size > 0 ? `?size=${size}` : ''
+      }`,
     ),
 
   markRead: (id: number, messageId?: number) =>

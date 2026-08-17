@@ -6,6 +6,7 @@ import { AdminAppPage } from './pages/AdminAppPage';
 import { AdminListPage } from './pages/AdminListPage';
 import { ChatPage } from './pages/ChatPage';
 import { ChatSettingsPage } from './pages/ChatSettingsPage';
+import { ChatBotCreatePage } from './pages/ChatBotCreatePage';
 import { ContactsPage } from './pages/ContactsPage';
 import { DesignPage } from './pages/DesignPage';
 import { HomePage } from './pages/HomePage';
@@ -42,6 +43,8 @@ export function App() {
         <Route index element={<ChatPage />} />
         <Route path="contacts" element={<ContactsPage />} />
         <Route path="settings" element={<ChatSettingsPage />} />
+        <Route path="settings/bots/new" element={<ChatBotCreatePage />} />
+        <Route path="settings/bots/:folderId" element={<ChatBotCreatePage />} />
         <Route path=":conversationId" element={<ChatPage />} />
       </Route>
       <Route
