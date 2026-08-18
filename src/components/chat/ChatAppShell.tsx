@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { chatApi, type ChatMe } from '../../api/chatApi';
 import { zaloApi } from '../../api/zaloApi';
@@ -6,6 +6,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { navigateChat } from '../../lib/chatNav';
 import {
   applyDesktopNotificationMode,
+  reloadConversations,
   seedZaloUnread,
   setChatActorUserId,
   setChatPlatform,
@@ -22,6 +23,8 @@ import { DataSelectionDialog } from './DataSelectionDialog';
 function navClass({ isActive }: { isActive: boolean }) {
   return isActive ? 'active' : undefined;
 }
+
+const JWT_STORAGE_KEY = 'arito_form_jwt';
 
 function headerSelectPath(id: string): string | null {
   const key = id.trim().toLowerCase();
@@ -40,7 +43,7 @@ function headerSelectPath(id: string): string | null {
  * Mobile embed: ẩn header web — menu Chat/Danh bạ/Cài đặt nằm trên header native.
  */
 export function ChatAppShell() {
-  const { mobile, user, logout } = useAuth();
+  const { mobile, user, logout, jwt } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [me, setMe] = useState<ChatMe | null>(null);
@@ -51,7 +54,27 @@ export function ChatAppShell() {
   const [zaloToast, setZaloToast] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
   const zaloToastTimer = useRef<number | null>(null);
+  const unitIdRef = useRef<number | null>(null);
   const zaloEnabled = !!me?.zalo_enabled;
+
+  const refreshChatMe = useCallback(async () => {
+    try {
+      const value = await chatApi.me();
+      const prevUnitId = unitIdRef.current;
+      unitIdRef.current = value.unit_id ?? 0;
+      setMe(value);
+      setChatActorUserId(value.user_id);
+      void applyDesktopNotificationMode(value.desktop_notification);
+      if (prevUnitId != null && prevUnitId !== (value.unit_id ?? 0)) {
+        void reloadConversations();
+        if (/\/chat\/\d+/.test(location.pathname)) {
+          navigateChat(navigate, '/chat', { replace: true });
+        }
+      }
+    } catch {
+      /* JWT vẫn dùng được; thiếu snapshot không chặn shell */
+    }
+  }, [location.pathname, navigate]);
 
   useEffect(() => {
     setChatPlatform(mobile ? 'mobile' : 'web');
@@ -106,22 +129,25 @@ export function ChatAppShell() {
   }, [zaloEnabled]);
 
   useEffect(() => {
-    let cancelled = false;
-    void chatApi
-      .me()
-      .then((value) => {
-        if (cancelled) return;
-        setMe(value);
-        setChatActorUserId(value.user_id);
-        void applyDesktopNotificationMode(value.desktop_notification);
-      })
-      .catch(() => {
-        /* JWT vẫn dùng được; thiếu snapshot không chặn shell */
-      });
-    return () => {
-      cancelled = true;
+    void refreshChatMe();
+  }, [jwt, refreshChatMe]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refreshChatMe();
     };
-  }, []);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === JWT_STORAGE_KEY) void refreshChatMe();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [refreshChatMe]);
 
   useEffect(() => {
     if (!menuOpen) return;
