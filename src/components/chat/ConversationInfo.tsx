@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   botAvatarUrl,
+  botTypeLabel,
   chatApi,
   chatFolderUrl,
   isEmbedBot,
@@ -306,7 +307,9 @@ export function ConversationInfo({
                   ? `Nhóm · ${conversation.member_count} thành viên`
                   : isBot
                     ? conversation.bot_description ||
-                      (isEmbedBot(conversation) ? 'AI nhúng — không lưu lịch sử' : 'AI Chatbot')
+                      (isEmbedBot(conversation)
+                        ? 'AI nhúng — không lưu lịch sử'
+                        : botTypeLabel(conversation))
                     : 'Tin nhắn riêng'}
               </span>
             </>

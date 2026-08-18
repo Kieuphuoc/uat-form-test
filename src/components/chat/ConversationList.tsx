@@ -1,6 +1,6 @@
 import type { Conversation } from '../../api/chatApi';
 import { botAvatarUrl, isEmbedBot, normalizeNotifyMode, notifyModeLabel } from '../../api/chatApi';
-import { IconBellMention, IconBellOff, IconPlus, IconSearch, IconUsers } from '../AppIcons';
+import { IconBellMention, IconBellOff, IconBot, IconPlus, IconSearch, IconUsers } from '../AppIcons';
 import { ChatAvatar } from './ChatAvatar';
 
 type Props = {
@@ -12,9 +12,6 @@ type Props = {
   onSelect: (id: number) => void;
   onNewDirect: () => void;
   onNewGroup: () => void;
-  /** Tên công ty khi unit_id > 0 — hiện góc dưới panel hội thoại. */
-  companyLabel?: string | null;
-  companyTitle?: string | null;
 };
 
 function timeLabel(iso?: string | null): string {
@@ -40,8 +37,6 @@ export function ConversationList({
   onSelect,
   onNewDirect,
   onNewGroup,
-  companyLabel,
-  companyTitle,
 }: Props) {
   return (
     <div className="chat-list">
@@ -84,14 +79,26 @@ export function ConversationList({
               className={`chat-list-item${c.id === activeId ? ' is-active' : ''}`}
               onClick={() => onSelect(c.id)}
             >
-              <ChatAvatar
-                name={c.title}
-                avatarId={isGroup || isBot ? null : c.peer_avatar_id}
-                group={isGroup}
-                conversationId={c.id}
-                fileId={isGroup ? c.avatar_file_id : null}
-                imageSrc={isBot ? botAvatarUrl(c.bot_avatar_url) : null}
-              />
+              <span className="chat-list-avatar-wrap">
+                <ChatAvatar
+                  name={c.title}
+                  avatarId={isGroup || isBot ? null : c.peer_avatar_id}
+                  group={isGroup}
+                  conversationId={c.id}
+                  fileId={isGroup ? c.avatar_file_id : null}
+                  imageSrc={isBot ? botAvatarUrl(c.bot_avatar_url) : null}
+                />
+                {isBot && (
+                  <span className="chat-list-kind-badge chat-list-kind-badge--bot" title="AI Chatbot">
+                    <IconBot size={10} />
+                  </span>
+                )}
+                {isGroup && (
+                  <span className="chat-list-kind-badge chat-list-kind-badge--group" title="Nhóm chat">
+                    <IconUsers size={10} />
+                  </span>
+                )}
+              </span>
               <span className="chat-list-main">
                 <span className="chat-list-title">
                   <span className="chat-list-name-row">
@@ -123,12 +130,6 @@ export function ConversationList({
           );
         })}
       </div>
-
-      {companyLabel ? (
-        <div className="chat-company-label" title={companyTitle || undefined}>
-          {companyLabel}
-        </div>
-      ) : null}
     </div>
   );
 }

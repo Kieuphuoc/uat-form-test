@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { Navigate, useNavigate, useOutletContext } from 'react-router-dom';
 import { notificationApi, type NotificationDevice } from '../api/notificationApi';
-import { botAvatarUrl, chatApi, isEmbedBot, type ChatAppSettings, type ChatMe, type DesktopNotificationMode } from '../api/chatApi';
+import { botAvatarUrl, botTypeLabel, chatApi, isEmbedBot, normalizeBotType, type ChatAppSettings, type ChatMe, type DesktopNotificationMode } from '../api/chatApi';
 import { applyDesktopNotificationMode } from '../lib/chatTransport';
 import { navigateChat } from '../lib/chatNav';
 import { CHAT_THEMES, normalizeChatTheme } from '../lib/chatThemes';
-import { IconInfo } from '../components/AppIcons';
+import { IconDatabase, IconInfo, IconZalo } from '../components/AppIcons';
 import { ChatAvatar } from '../components/chat/ChatAvatar';
+import { DataSelectionDialog } from '../components/chat/DataSelectionDialog';
 
 type ShellContext = {
   me: ChatMe | null;
@@ -25,6 +26,8 @@ const emptySettings = (unitId = 0): ChatAppSettings => ({
   device_push_enabled: true,
   ai_chatbot_enabled: false,
   ai_chatbots: [],
+  zalo_enabled: false,
+  zalo_accounts: [],
   chat_theme: 'default',
 });
 
@@ -37,7 +40,9 @@ function snapshot(settings: ChatAppSettings): string {
     desktop_notification: settings.desktop_notification,
     device_push_enabled: settings.device_push_enabled,
     ai_chatbot_enabled: settings.ai_chatbot_enabled,
-    ai_chatbots: settings.ai_chatbots,
+    ai_chatbots: settings.ai_chatbots ?? [],
+    zalo_enabled: !!settings.zalo_enabled,
+    zalo_accounts: settings.zalo_accounts ?? [],
     chat_theme: settings.chat_theme,
   });
 }
@@ -57,6 +62,7 @@ export function ChatSettingsPage() {
   const [devices, setDevices] = useState<NotificationDevice[]>([]);
   const [serverLoading, setServerLoading] = useState(true);
   const [draft, setDraft] = useState<ChatAppSettings>(() => emptySettings());
+  const [dataSelectOpen, setDataSelectOpen] = useState(false);
   const lastSaved = useRef('');
   const lastSavedSettings = useRef<ChatAppSettings | null>(null);
 
@@ -72,7 +78,7 @@ export function ChatSettingsPage() {
       setMessage(null);
       setError(null);
       try {
-        const saved = await chatApi.saveAdminSettings(next);
+        const saved = await chatApi.saveAdminSettings({ ...next, unit_id: unitId });
         lastSaved.current = snapshot(saved);
         lastSavedSettings.current = saved;
         setDraft(saved);
@@ -83,6 +89,7 @@ export function ChatSettingsPage() {
                 ...prev,
                 desktop_notification: saved.desktop_notification,
                 ai_chatbot_enabled: saved.ai_chatbot_enabled,
+                zalo_enabled: saved.zalo_enabled,
                 chat_theme: saved.chat_theme,
               }
             : prev,
@@ -101,20 +108,31 @@ export function ChatSettingsPage() {
         setSaving(false);
       }
     },
-    [hasCompany, setMe],
+    [hasCompany, setMe, unitId],
   );
 
   const loadServerSettings = useCallback(async () => {
     setServerLoading(true);
     setError(null);
+    setDraft(emptySettings(unitId));
     try {
       const [settings, registeredDevices] = await Promise.all([
         chatApi.getAdminSettings(),
         notificationApi.listDevices().catch(() => [] as NotificationDevice[]),
       ]);
+      if (settings.unit_id > 0 && settings.unit_id !== unitId) {
+        setError(
+          `Cấu hình trả về công ty #${settings.unit_id} khác công ty đang chọn (#${unitId}). Hãy đổi lại công ty rồi tải lại trang.`,
+        );
+      }
       lastSaved.current = snapshot(settings);
-      lastSavedSettings.current = settings;
-      setDraft(settings);
+      lastSavedSettings.current = {
+        ...settings,
+        ai_chatbots: settings.ai_chatbots ?? [],
+        zalo_accounts: settings.zalo_accounts ?? [],
+        zalo_enabled: !!settings.zalo_enabled,
+      };
+      setDraft(lastSavedSettings.current);
       setDevices(registeredDevices);
       await applyDesktopNotificationMode(settings.desktop_notification);
     } catch (e) {
@@ -122,7 +140,7 @@ export function ChatSettingsPage() {
     } finally {
       setServerLoading(false);
     }
-  }, []);
+  }, [unitId]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -154,6 +172,17 @@ export function ChatSettingsPage() {
     });
   };
 
+  const toggleZaloActive = (index: number, active: boolean) => {
+    const nextAccounts = draft.zalo_accounts.map((item, i) =>
+      i === index ? { ...item, active } : item,
+    );
+    saveNow({
+      ...draft,
+      zalo_accounts: nextAccounts,
+      zalo_enabled: nextAccounts.some((item) => item.active),
+    });
+  };
+
   if (!me) {
     return (
       <div className="chat-page-card chat-settings">
@@ -174,10 +203,18 @@ export function ChatSettingsPage() {
             {hasCompany ? `Thông báo của: ${companyName}` : '(Chưa chọn công ty)'}
           </p>
         </div>
+        <button
+          type="button"
+          className="chat-icon-btn chat-page-card-head-action"
+          title="Thay đổi công ty và dữ liệu"
+          onClick={() => setDataSelectOpen(true)}
+        >
+          <IconDatabase size={18} />
+        </button>
       </header>
 
       {!hasCompany && (
-        <p className="chat-hint">Đổi công ty rồi quay lại để sửa cấu hình Chat.</p>
+        <p className="chat-hint">Bấm icon bên phải tiêu đề để đổi công ty rồi cấu hình Chat.</p>
       )}
 
       <section className="chat-settings-section">
@@ -302,11 +339,12 @@ export function ChatSettingsPage() {
         <h3>AI Chatbot</h3>
         <p className="muted">
           Bấm bot để sửa tên, link, mô tả. Chỉ checkbox mới bật/tắt. Bot tắt ẩn khỏi Danh bạ; hội
-          thoại cũ vẫn mở được. AI nhúng chỉ iframe, không lưu tin.
+          thoại cũ vẫn mở được. AI RAG / Files / FAQ hỏi qua FolderId trên File.Api. AI nhúng chỉ
+          iframe, không lưu tin.
         </p>
 
         {draft.ai_chatbots.length === 0 && (
-          <p className="chat-hint">Chưa có chatbot. Bấm Thêm chatbot để khai báo FolderId.</p>
+          <p className="chat-hint">Chưa có chatbot. Bấm Thêm chatbot để khai báo RAG, Files, FAQ hoặc AI nhúng.</p>
         )}
 
         <div className="chat-bot-list">
@@ -331,7 +369,9 @@ export function ChatSettingsPage() {
                   <span className="chat-bot-row-meta">
                     <strong>
                       {bot.title || bot.folder_id || 'Chatbot'}
-                      <span className="chat-bot-type-tag">{embed ? 'AI nhúng' : 'AI thư mục'}</span>
+                      <span className={`chat-bot-type-tag chat-bot-type-tag--${normalizeBotType(bot.type)}`}>
+                        {botTypeLabel(bot)}
+                      </span>
                     </strong>
                     <small>
                       {embed
@@ -366,6 +406,47 @@ export function ChatSettingsPage() {
       </section>
 
       <section className="chat-settings-section">
+        <h3>Tài khoản Zalo</h3>
+        <p className="muted">
+          Danh sách lấy từ cấu hình server. Bật theo từng công ty thì hiện trang Zalo trên header.
+          Công ty chưa khai báo mặc định tắt.
+        </p>
+
+        {draft.zalo_accounts.length === 0 && (
+          <p className="chat-hint">Chưa khai báo tài khoản Zalo trên Chat.Api (Zalo:Sources).</p>
+        )}
+
+        <div className="chat-bot-list">
+          {draft.zalo_accounts.map((account, index) => {
+            const active = !!account.active;
+            return (
+              <div key={account.id} className="chat-bot-row">
+                <div className="chat-bot-row-main chat-bot-row-main--static">
+                  <span className="chat-zalo-account-icon" aria-hidden>
+                    <IconZalo size={20} />
+                  </span>
+                  <span className="chat-bot-row-meta">
+                    <strong>{account.name || account.id}</strong>
+                    <small>{account.id}</small>
+                  </span>
+                </div>
+                <label className="chat-bot-row-check">
+                  <input
+                    type="checkbox"
+                    checked={active}
+                    disabled={disabled}
+                    onChange={(e) => toggleZaloActive(index, e.target.checked)}
+                    aria-label={active ? 'Đang bật' : 'Đã tắt'}
+                  />
+                  <span>{active ? 'Bật' : 'Tắt'}</span>
+                </label>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="chat-settings-section">
         <h3>Giao diện tin nhắn</h3>
         <p className="muted">
           Áp dụng cho cả công ty: màu tin của bạn, tin người khác, nền khung chat.
@@ -395,6 +476,7 @@ export function ChatSettingsPage() {
 
       {error && <div className="chat-error">{error}</div>}
       {message && <div className="chat-hint">{message}</div>}
+      {dataSelectOpen && <DataSelectionDialog onClose={() => setDataSelectOpen(false)} />}
     </div>
   );
 }

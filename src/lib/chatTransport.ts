@@ -34,6 +34,19 @@ export type ConversationReadEvent = {
   last_read_message_id: number;
 };
 
+export type ZaloInboxEvent = {
+  source_id: string;
+  source_name?: string;
+  conversation_id: string;
+  conversation_name?: string;
+  unread_count: number;
+  has_external_unread?: boolean;
+  preview?: string;
+  last_message_at?: string;
+  sender_type?: string;
+  notify?: boolean;
+};
+
 type ConversationReadListener = {
   callback: (event: ConversationReadEvent) => void;
 };
@@ -54,6 +67,11 @@ const messageListeners = new Set<MessageListener>();
 const conversationListeners = new Set<ConversationListener>();
 const contactListeners = new Set<ContactListener>();
 const conversationReadListeners = new Set<ConversationReadListener>();
+const zaloInboxListeners = new Set<(event: ZaloInboxEvent) => void>();
+const zaloBadgeListeners = new Set<(count: number) => void>();
+const zaloUnread = new Map<string, number>();
+let zaloWatchSource = '';
+let zaloBadge = 0;
 const listInflight = new Map<string, Promise<Conversation[]>>();
 let listDebounceTimer: number | null = null;
 let lastListKey = '';
@@ -67,6 +85,8 @@ function hasListeners(): boolean {
     + conversationListeners.size
     + contactListeners.size
     + conversationReadListeners.size
+    + zaloInboxListeners.size
+    + zaloBadgeListeners.size
     > 0
   );
 }
@@ -192,10 +212,15 @@ function buildConnection(): HubConnection {
     for (const listener of contactListeners) listener.callback();
     scheduleRefreshAllConversations();
   });
+  hub.on('zalo.inbox.updated', (event: ZaloInboxEvent) => {
+    applyZaloInboxEvent(event);
+    if (event?.notify) void showZaloDesktopNotification(event);
+  });
   hub.onreconnecting(() => stopHeartbeat());
   hub.onreconnected(() => {
     startHeartbeat();
     void syncActive();
+    void invokeWatchZalo();
     void catchUpAll();
   });
   hub.onclose(() => {
@@ -221,6 +246,7 @@ async function ensureStarted(): Promise<void> {
       retryTimer = null;
       startHeartbeat();
       await syncActive();
+      await invokeWatchZalo();
       await catchUpAll();
     })
     .catch(() => {
@@ -415,6 +441,104 @@ async function showDesktopNotification(message: ChatMessage): Promise<void> {
     window.focus();
     window.location.assign(`/chat/${message.conversation_id}`);
     notification.close();
+  };
+}
+
+function zaloUnreadKey(sourceId: string, conversationId: string): string {
+  return `${sourceId}:${conversationId}`;
+}
+
+function emitZaloBadge(): void {
+  let count = 0;
+  for (const unread of zaloUnread.values()) {
+    if (unread > 0) count += 1;
+  }
+  zaloBadge = count;
+  for (const listener of zaloBadgeListeners) listener(count);
+}
+
+function applyZaloInboxEvent(event: ZaloInboxEvent): void {
+  if (event?.source_id && event.conversation_id) {
+    if (!zaloWatchSource || event.source_id === zaloWatchSource) {
+      zaloUnread.set(zaloUnreadKey(event.source_id, event.conversation_id), Number(event.unread_count) || 0);
+      emitZaloBadge();
+    }
+  }
+  for (const listener of zaloInboxListeners) listener(event);
+}
+
+async function invokeWatchZalo(): Promise<void> {
+  if (connection?.state !== HubConnectionState.Connected) return;
+  await connection.invoke('WatchZalo', zaloWatchSource || '').catch(() => undefined);
+}
+
+async function showZaloDesktopNotification(event: ZaloInboxEvent): Promise<void> {
+  if (
+    platform !== 'web'
+    || isActive()
+    || getDesktopNotificationMode() !== 'chrome'
+    || !('Notification' in window)
+    || Notification.permission !== 'granted'
+  ) {
+    return;
+  }
+  const allowed =
+    connection?.state === HubConnectionState.Connected
+      ? await connection.invoke<boolean>('CanNotify', 'web').catch(() => false)
+      : false;
+  if (!allowed) return;
+  const notification = new Notification(event.conversation_name || event.source_name || 'Zalo', {
+    body: event.preview || 'Tin nhắn Zalo mới',
+    tag: `zalo:${event.source_id}:${event.conversation_id}`,
+  });
+  notification.onclick = () => {
+    window.focus();
+    window.location.assign('/chat/zalo');
+    notification.close();
+  };
+}
+
+/** Nguồn Zalo đang chọn — Chat.Api dùng để FCM khi tab ẩn. */
+export function watchZaloSource(sourceId: string): void {
+  zaloWatchSource = (sourceId || '').trim().toLowerCase();
+  void ensureStarted().then(() => invokeWatchZalo());
+}
+
+export function getZaloBadgeCount(): number {
+  return zaloBadge;
+}
+
+export function seedZaloUnread(
+  sourceId: string,
+  items: Array<{ id: string; unread_count?: number }>,
+): void {
+  zaloUnread.clear();
+  for (const item of items) {
+    zaloUnread.set(zaloUnreadKey(sourceId, item.id), Number(item.unread_count) || 0);
+  }
+  emitZaloBadge();
+}
+
+export function subscribeZaloInbox(onEvent: (event: ZaloInboxEvent) => void): ChatSubscription {
+  zaloInboxListeners.add(onEvent);
+  void ensureStarted();
+  return {
+    stop: () => {
+      zaloInboxListeners.delete(onEvent);
+      scheduleStopIfUnused();
+    },
+  };
+}
+
+export function subscribeZaloBadge(onCount: (count: number) => void): ChatSubscription {
+  zaloBadgeListeners.add(onCount);
+  onCount(zaloBadge);
+  void ensureStarted();
+  return {
+    stop: () => {
+      zaloBadgeListeners.delete(onCount);
+      scheduleStopIfUnused();
+    },
   };
 }
 

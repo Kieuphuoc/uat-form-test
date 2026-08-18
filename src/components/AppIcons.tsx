@@ -277,6 +277,16 @@ export const IconMaximize = (p: IconProps) => (
   </Svg>
 );
 
+export const IconBot = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="5" y="8" width="14" height="10" rx="3" />
+    <path d="M9 8V6a3 3 0 0 1 6 0v2" />
+    <circle cx="9.5" cy="13" r="1" fill="currentColor" stroke="none" />
+    <circle cx="14.5" cy="13" r="1" fill="currentColor" stroke="none" />
+    <path d="M10 16h4" />
+  </Svg>
+);
+
 export const IconBell = (p: IconProps) => (
   <Svg {...p}>
     <path d="M6 9a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8" />

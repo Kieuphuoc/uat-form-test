@@ -1,8 +1,3 @@
-/**
- * Kiểu dữ liệu hội thoại Zalo — khớp mockup / tài liệu API sẽ gửi sau.
- * Trang /chat/zalo hiện chỉ dùng mock; không gọi Chat.Api hay SignalR.
- */
-
 export type ZaloSenderType = 'user' | 'bot' | 'operator' | 'system';
 
 export type ZaloLabel = {
@@ -18,37 +13,81 @@ export type ZaloFolderConfig = {
   label?: string;
 };
 
-export type ZaloMention = { pos: number; len: number };
+export type ZaloMention = { uid?: string; pos: number; len: number; type?: string };
 
-export type ZaloQuote = { from: string; msg: string };
+export type ZaloAttachment = {
+  kind?: string;
+  href?: string;
+  thumb?: string;
+  title?: string;
+  fileName?: string;
+};
+
+export type ZaloQuote = {
+  from: string;
+  msg: string;
+  attach?: ZaloAttachment | null;
+  globalMsgId?: string;
+};
 
 export type ZaloMessage = {
   id: string;
+  zalo_msg_id?: string;
   sender_type: ZaloSenderType;
   sender_display_name?: string;
+  operator_display_name?: string;
+  sender_avatar_url?: string;
+  sender_zalo_uid?: string;
   content: string;
+  msg_type?: string;
   mentions?: ZaloMention[];
   quote?: ZaloQuote | null;
-  files?: string[];
+  files?: ZaloAttachment[];
   zalo_created_at: string;
+};
+
+export type ZaloStaffUser = {
+  id: string;
+  zalo_uid: string;
+  display_name: string;
+  avatar_url?: string;
+  is_bot_account?: boolean;
+  user_group_ids?: string[];
+};
+
+export type ZaloUserGroup = {
+  id: string;
+  name: string;
+  group_type: 'internal' | 'external';
+  description?: string;
+  member_count?: number;
 };
 
 export type ZaloMember = {
   id: string;
   zalo_uid: string;
   display_name: string;
+  avatar_url?: string;
 };
 
 export type ZaloConversation = {
   id: string;
   zalo_thread_id: string;
   name: string;
+  avatar_url?: string;
   is_group: boolean;
   ai_enabled: boolean;
   unread_count: number;
   has_external_unread?: boolean;
+  notify_grace_minutes?: number;
   last_message_at: string;
+  last_preview?: string;
   zalo_labels: ZaloLabel[];
+};
+
+export type ZaloSource = {
+  id: string;
+  name: string;
 };
 
 export type ZaloInboxData = {
@@ -57,8 +96,11 @@ export type ZaloInboxData = {
   conversations: ZaloConversation[];
   members: Record<string, ZaloMember[]>;
   messages: Record<string, ZaloMessage[]>;
-  older: Record<string, ZaloMessage[]>;
 };
+
+export function emptyZaloInbox(): ZaloInboxData {
+  return { folderMap: {}, labels: [], conversations: [], members: {}, messages: {} };
+}
 
 export function zaloLabelName(label: Pick<ZaloLabel, 'name' | 'emoji'>): string {
   const emoji = (label.emoji || '').trim();
@@ -110,184 +152,150 @@ export function zaloDayLabel(value?: string | null): string {
   return date.toLocaleDateString('vi-VN', { weekday: 'long', day: '2-digit', month: '2-digit' });
 }
 
-export function zaloUid(prefix = 'm'): string {
-  return prefix + Math.random().toString(36).slice(2, 9);
+export function mergeZaloMessages(current: ZaloMessage[], incoming: ZaloMessage[]): ZaloMessage[] {
+  const map = new Map<string, ZaloMessage>();
+  for (const msg of current) map.set(msg.id, msg);
+  for (const msg of incoming) {
+    const prev = map.get(msg.id);
+    if (prev && !(msg.files && msg.files.length) && prev.files?.length) {
+      map.set(msg.id, { ...msg, files: prev.files });
+    } else {
+      map.set(msg.id, msg);
+    }
+  }
+  return [...map.values()].sort(
+    (a, b) => new Date(a.zalo_created_at).getTime() - new Date(b.zalo_created_at).getTime(),
+  );
 }
 
-export function zaloNowIso(): string {
-  return new Date().toISOString();
+const IMAGE_EXT = /\.(jpg|jpeg|png|gif|webp|bmp|jfif)(\?|#|$)/i;
+
+export function zaloIsImageUrl(url?: string | null): boolean {
+  if (!url || !/^https?:\/\//i.test(url.trim())) return false;
+  const href = url.trim();
+  if (IMAGE_EXT.test(href)) return true;
+  if (/zdn\.vn/i.test(href) && /\/(jpg|jpeg|png|gif|webp|photo)/i.test(href)) return true;
+  return false;
 }
 
-export function createZaloMockData(): ZaloInboxData {
-  return structuredClone(ZALO_MOCK_SEED);
+export function zaloIsImageAttachment(file: ZaloAttachment): boolean {
+  const kind = (file.kind || '').toLowerCase();
+  if (kind.includes('photo') || kind.includes('image') || kind === 'img') return true;
+  return zaloIsImageUrl(file.thumb || file.href);
 }
 
-/** Dữ liệu mẫu — thay bằng API khi có tài liệu. */
-const ZALO_MOCK_SEED: ZaloInboxData = {
-  folderMap: {
-    '6759761246345926212': {
-      ragFolderId: '588eaec654224a17a19f93a0d321c2ee',
-      faqFolderId: '6ab1fd74c284477eb9416567ba23e486',
-      label: 'PTSP test',
-    },
-  },
-  labels: [
-    { id: 'l1', name: 'VIP', color: '#FF3656', emoji: '' },
-    { id: 'l2', name: 'Đang xử lý', color: '#FFB020', emoji: '' },
-    { id: 'l3', name: 'Đã xong', color: '#28C76F', emoji: '' },
-  ],
-  conversations: [
-    {
-      id: 'c1',
-      zalo_thread_id: '6759761246345926212',
-      name: 'PTSP test',
-      is_group: true,
-      ai_enabled: true,
-      unread_count: 2,
-      has_external_unread: true,
-      last_message_at: '2026-08-17T06:18:00.000Z',
-      zalo_labels: [{ id: 'l1', name: 'VIP', color: '#FF3656' }],
-    },
-    {
-      id: 'c2',
-      zalo_thread_id: '7453815299673592570',
-      name: 'CSKH miền Nam',
-      is_group: true,
-      ai_enabled: true,
-      unread_count: 0,
-      last_message_at: '2026-08-17T04:02:00.000Z',
-      zalo_labels: [{ id: 'l2', name: 'Đang xử lý', color: '#FFB020' }],
-    },
-    {
-      id: 'c3',
-      zalo_thread_id: '3613312928662407048',
-      name: 'Nhóm nội bộ Arito',
-      is_group: true,
-      ai_enabled: false,
-      unread_count: 0,
-      last_message_at: '2026-08-16T10:40:00.000Z',
-      zalo_labels: [],
-    },
-    {
-      id: 'c4',
-      zalo_thread_id: '620136081189487414',
-      name: 'Minh — chat cá nhân',
-      is_group: false,
-      ai_enabled: true,
-      unread_count: 1,
-      last_message_at: '2026-08-17T01:08:00.000Z',
-      zalo_labels: [],
-    },
-  ],
-  members: {
-    c1: [
-      { id: 'u1', zalo_uid: '111', display_name: 'Hoa' },
-      { id: 'u2', zalo_uid: '222', display_name: 'Minh' },
-      { id: 'u3', zalo_uid: '333', display_name: 'Lan' },
-    ],
-    c2: [
-      { id: 'u4', zalo_uid: '444', display_name: 'Phúc' },
-      { id: 'u5', zalo_uid: '555', display_name: 'Trang' },
-    ],
-    c3: [
-      { id: 'u6', zalo_uid: '666', display_name: 'Bảo' },
-      { id: 'u7', zalo_uid: '777', display_name: 'An' },
-    ],
-    c4: [{ id: 'u2', zalo_uid: '222', display_name: 'Minh' }],
-  },
-  messages: {
-    c1: [
-      {
-        id: 'old1',
-        sender_type: 'user',
-        sender_display_name: 'Hoa',
-        content: 'Shop ơi đơn hôm qua giao chưa ạ?',
-        zalo_created_at: '2026-08-16T08:10:00.000Z',
-      },
-      {
-        id: 's1',
-        sender_type: 'system',
-        content: '✓ AI đã bật cho hội thoại này',
-        zalo_created_at: '2026-08-17T05:00:00.000Z',
-      },
-      {
-        id: 'm1',
-        sender_type: 'user',
-        sender_display_name: 'Hoa',
-        content: 'Shop ơi, đơn hôm nay giao lúc mấy giờ ạ?',
-        zalo_created_at: '2026-08-17T06:10:00.000Z',
-      },
-      {
-        id: 'm2',
-        sender_type: 'bot',
-        content: 'Đơn của bạn dự kiến giao trong khung 14:00–16:00 hôm nay ạ.',
-        zalo_created_at: '2026-08-17T06:11:00.000Z',
-      },
-      {
-        id: 'm3',
-        sender_type: 'user',
-        sender_display_name: 'Lan',
-        content: '@Minh kiểm tra giúp đơn #A102 nhé',
-        mentions: [{ pos: 0, len: 5 }],
-        zalo_created_at: '2026-08-17T06:15:00.000Z',
-      },
-      {
-        id: 'm4',
-        sender_type: 'operator',
-        sender_display_name: 'Bạn (Thủ công)',
-        content: 'Mình đã kiểm tra, tài xế đang trên đường.',
-        zalo_created_at: '2026-08-17T06:18:00.000Z',
-      },
-    ],
-    c2: [
-      {
-        id: 'n1',
-        sender_type: 'user',
-        sender_display_name: 'Phúc',
-        content: 'Khách hỏi chính sách đổi trả 7 ngày còn áp dụng không?',
-        zalo_created_at: '2026-08-17T03:50:00.000Z',
-      },
-      {
-        id: 'n2',
-        sender_type: 'bot',
-        content: 'Chính sách đổi trả 7 ngày vẫn áp dụng với sản phẩm còn tem, chưa qua sử dụng.',
-        zalo_created_at: '2026-08-17T03:51:00.000Z',
-      },
-    ],
-    c3: [
-      {
-        id: 'o1',
-        sender_type: 'user',
-        sender_display_name: 'Bảo',
-        content: 'Nhóm này tạm tắt AI, mình trả lời tay.',
-        zalo_created_at: '2026-08-16T10:40:00.000Z',
-      },
-      {
-        id: 'o2',
-        sender_type: 'system',
-        content: 'AI đã tắt cho hội thoại này',
-        zalo_created_at: '2026-08-16T10:40:10.000Z',
-      },
-    ],
-    c4: [
-      {
-        id: 'p1',
-        sender_type: 'user',
-        sender_display_name: 'Minh',
-        content: 'Cho mình xin báo giá gói PTSP tháng 8.',
-        zalo_created_at: '2026-08-17T01:08:00.000Z',
-      },
-    ],
-  },
-  older: {
-    c1: [
-      {
-        id: 'older1',
-        sender_type: 'user',
-        sender_display_name: 'Minh',
-        content: 'Mình gửi ảnh bill đây.',
-        zalo_created_at: '2026-08-15T09:00:00.000Z',
-      },
-    ],
-  },
-};
+export function zaloAttachmentName(file: ZaloAttachment): string {
+  const named = (file.fileName || file.title || '').trim();
+  if (named) return named.split(/[\\/]/).pop() || named;
+  const href = (file.href || '').trim();
+  if (/^https?:\/\//i.test(href)) {
+    try {
+      const base = decodeURIComponent(new URL(href).pathname.split('/').pop() || '');
+      if (base && !/^[a-f0-9]{12,}$/i.test(base)) return base;
+    } catch {
+      /* ignore */
+    }
+  }
+  return 'Tệp đính kèm';
+}
+
+export function zaloMessageAttachments(msg: ZaloMessage): ZaloAttachment[] {
+  const listed = [...(msg.files || [])];
+  const text = (msg.content || '').trim();
+  if (listed.length === 0 && (text.startsWith('{') || text.startsWith('['))) {
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      const items = Array.isArray(parsed) ? parsed : [parsed];
+      for (const item of items) {
+        if (!item || typeof item !== 'object') continue;
+        const rec = item as Record<string, unknown>;
+        const href = String(rec.href ?? rec.url ?? rec.oriUrl ?? rec.thumb ?? '');
+        const fileName = String(rec.fileName ?? rec.file_name ?? rec.name ?? rec.title ?? '');
+        if (href || fileName) {
+          listed.push({
+            href: href || undefined,
+            fileName: fileName || undefined,
+            thumb: String(rec.thumb ?? rec.thumbnail ?? '') || undefined,
+            kind: String(rec.kind ?? rec.type ?? rec.fileExt ?? '') || undefined,
+          });
+        }
+      }
+    } catch {
+      /* not json */
+    }
+  }
+  if (listed.length === 0 && /^https?:\/\//i.test(text)) {
+    listed.push({
+      href: text,
+      kind: zaloIsImageUrl(text) ? 'photo' : 'file',
+      fileName: text.split('/').pop() || text,
+    });
+  }
+  const type = (msg.msg_type || '').toLowerCase();
+  if (type.includes('photo') || type.includes('image')) {
+    return listed.map((file) => ({ ...file, kind: file.kind || 'photo' }));
+  }
+  if ((type.includes('file') || type.includes('attach')) && listed.length === 0 && text && !/^https?:/i.test(text)) {
+    listed.push({ fileName: text, kind: 'file' });
+  }
+  return listed;
+}
+
+export function zaloContentIsAttachmentOnly(msg: ZaloMessage): boolean {
+  const text = (msg.content || '').trim();
+  if (!text) return true;
+  const files = zaloMessageAttachments(msg);
+  if (!files.length) return false;
+  if (text.startsWith('{') || text.startsWith('[')) return true;
+  if (!/^https?:\/\//i.test(text)) return false;
+  return files.some((file) => file.href === text || file.thumb === text);
+}
+
+export function zaloDownloadHref(url: string, fileName: string) {
+  void (async () => {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('download');
+      const blob = await res.blob();
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = href;
+      link.download = fileName || 'download';
+      link.click();
+      URL.revokeObjectURL(href);
+    } catch {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  })();
+}
+
+export function zaloQuotePreview(msg: ZaloMessage): string {
+  const text = (msg.content || '').replace(/\n/g, ' ').trim();
+  if (text && !zaloContentIsAttachmentOnly(msg)) return text;
+  const files = zaloMessageAttachments(msg);
+  if (files.some(zaloIsImageAttachment)) return '[Hình ảnh]';
+  if (files.length) return files[0].fileName || files[0].title || '[Tệp đính kèm]';
+  return 'Tin nhắn';
+}
+
+export function zaloQuoteHasContent(quote?: ZaloQuote | null): boolean {
+  if (!quote) return false;
+  return !!(quote.from || quote.msg.trim() || quote.attach?.href);
+}
+
+export function zaloQuoteText(quote: ZaloQuote): string {
+  const msg = (quote.msg || '').replace(/\n/g, ' ').trim();
+  if (msg && !zaloIsImageUrl(msg)) return msg;
+  if (quote.attach && zaloIsImageAttachment(quote.attach)) return '[Hình ảnh]';
+  if (quote.attach) return quote.attach.fileName || quote.attach.title || '[Tệp đính kèm]';
+  if (msg) return '[Hình ảnh]';
+  return 'Tin nhắn';
+}
+
+export function zaloQuoteThumb(quote: ZaloQuote): string | null {
+  if (quote.attach && zaloIsImageAttachment(quote.attach)) {
+    return quote.attach.thumb || quote.attach.href || null;
+  }
+  if (quote.msg && zaloIsImageUrl(quote.msg)) return quote.msg;
+  return null;
+}

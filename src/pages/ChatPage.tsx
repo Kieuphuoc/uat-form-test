@@ -188,11 +188,6 @@ export function ChatPage() {
   }, [detail, conversations, activeId]);
   const relation = detail?.conversation.id === activeId ? detail.relation ?? null : null;
   const embedConversation = isEmbedBot(activeConversation);
-  const companyLabel =
-    me?.unit_id && me.unit_id > 0
-      ? me.unit?.unit_name || me.unit?.unit_code || `Công ty #${me.unit_id}`
-      : null;
-
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
@@ -857,8 +852,6 @@ export function ChatPage() {
               setPickerError(null);
               setPicker('group');
             }}
-            companyLabel={mobile ? null : companyLabel}
-            companyTitle={mobile ? null : me?.unit?.address || companyLabel}
           />
         </aside>
 

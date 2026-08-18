@@ -1,15 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { chatApi, type ChatMe } from '../../api/chatApi';
+import { zaloApi } from '../../api/zaloApi';
 import { useAuth } from '../../auth/AuthContext';
 import { navigateChat } from '../../lib/chatNav';
 import {
   applyDesktopNotificationMode,
+  seedZaloUnread,
   setChatActorUserId,
   setChatPlatform,
   subscribeChatSession,
+  subscribeConversations,
+  subscribeZaloBadge,
+  subscribeZaloInbox,
+  watchZaloSource,
 } from '../../lib/chatTransport';
-import { IconChat, IconDatabase, IconLogout, IconSettings, IconUsers, IconZalo } from '../AppIcons';
+import { IconBell, IconChat, IconDatabase, IconLogout, IconSettings, IconUsers, IconZalo } from '../AppIcons';
 import { ChatAvatar } from './ChatAvatar';
 import { DataSelectionDialog } from './DataSelectionDialog';
 
@@ -21,6 +27,9 @@ function headerSelectPath(id: string): string | null {
   const key = id.trim().toLowerCase();
   if (key === 'contacts' || key === 'contact' || key === 'danhba') return '/chat/contacts';
   if (key === 'zalo' || key === 'zalo-chat' || key === 'zalochat') return '/chat/zalo';
+  if (key === 'zalo-users' || key === 'zalousers' || key === 'nhomzalo' || key === 'zalogroups') {
+    return '/chat/zalo/users';
+  }
   if (key === 'settings' || key === 'caidat' || key === 'cài đặt') return '/chat/settings';
   if (key === 'chat' || key === 'list' || key === 'conversations') return '/chat';
   return null;
@@ -33,10 +42,16 @@ function headerSelectPath(id: string): string | null {
 export function ChatAppShell() {
   const { mobile, user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [me, setMe] = useState<ChatMe | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [dataSelectOpen, setDataSelectOpen] = useState(false);
+  const [zaloBadge, setZaloBadge] = useState(0);
+  const [chatUnread, setChatUnread] = useState(0);
+  const [zaloToast, setZaloToast] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
+  const zaloToastTimer = useRef<number | null>(null);
+  const zaloEnabled = !!me?.zalo_enabled;
 
   useEffect(() => {
     setChatPlatform(mobile ? 'mobile' : 'web');
@@ -46,6 +61,49 @@ export function ChatAppShell() {
     const sub = subscribeChatSession();
     return () => sub.stop();
   }, []);
+
+  useEffect(() => {
+    const sub = subscribeConversations('', (items) => {
+      setChatUnread(items.reduce((sum, item) => sum + item.unread_count, 0));
+    });
+    return () => sub.stop();
+  }, []);
+
+  useEffect(() => {
+    if (!zaloEnabled) {
+      setZaloBadge(0);
+      setZaloToast('');
+      return;
+    }
+    const SOURCE_KEY = 'arito-zalo:source-id';
+    let cancelled = false;
+    const badgeSub = subscribeZaloBadge(setZaloBadge);
+    const inboxSub = subscribeZaloInbox((event) => {
+      if (!event.notify) return;
+      if (window.location.pathname.startsWith('/chat/zalo')) return;
+      const text = `${event.conversation_name || event.source_name || 'Zalo'}: ${event.preview || 'Tin nhắn mới'}`;
+      setZaloToast(text);
+      if (zaloToastTimer.current) window.clearTimeout(zaloToastTimer.current);
+      zaloToastTimer.current = window.setTimeout(() => setZaloToast(''), 2400);
+    });
+    void zaloApi
+      .listSources()
+      .then(async (items) => {
+        if (cancelled || items.length === 0) return;
+        const saved = window.localStorage.getItem(SOURCE_KEY) || '';
+        const next = items.some((s) => s.id === saved) ? saved : items[0].id;
+        watchZaloSource(next);
+        const conversations = await zaloApi.listConversations(next);
+        if (!cancelled) seedZaloUnread(next, conversations);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      badgeSub.stop();
+      inboxSub.stop();
+      if (zaloToastTimer.current) window.clearTimeout(zaloToastTimer.current);
+    };
+  }, [zaloEnabled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,15 +139,28 @@ export function ChatAppShell() {
       const path = headerSelectPath(typeof raw.id === 'string' ? raw.id : '');
       if (!path) return;
       if (path === '/chat/settings' && !me?.is_admin) return;
+      if ((path === '/chat/zalo' || path === '/chat/zalo/users') && !me?.zalo_enabled) return;
       navigateChat(navigate, path);
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
-  }, [navigate, me?.is_admin]);
+  }, [navigate, me?.is_admin, me?.zalo_enabled]);
+
+  useEffect(() => {
+    if (!me || me.zalo_enabled) return;
+    if (!location.pathname.startsWith('/chat/zalo')) return;
+    navigateChat(navigate, '/chat', { replace: true });
+  }, [me, location.pathname, navigate]);
 
   const displayName =
     me?.nickname || user?.nickname || me?.email || user?.email || 'Bạn';
   const avatarId = me?.avatar_id ?? null;
+  const companyCode = me?.unit?.unit_code?.trim() || null;
+  const companyName =
+    me?.unit_id && me.unit_id > 0
+      ? me.unit?.unit_name || me.unit?.unit_code || `Công ty #${me.unit_id}`
+      : null;
+  const companyTitle = me?.unit?.address || companyName || undefined;
 
   return (
     <div className={`chat-shell${mobile ? ' chat-shell--mobile' : ''}`} data-chat-theme={me?.chat_theme || 'default'}>
@@ -109,13 +180,49 @@ export function ChatAppShell() {
               <IconUsers size={17} />
               <span>Danh bạ</span>
             </NavLink>
-            <NavLink to="/chat/zalo" className={navClass}>
-              <IconZalo size={17} />
-              <span>Zalo</span>
-            </NavLink>
+            {zaloEnabled ? (
+              <NavLink to="/chat/zalo" end className={navClass}>
+                <IconZalo size={17} />
+                <span>Zalo</span>
+                {zaloBadge > 0 && (
+                  <span className="chat-shell-nav-badge">{zaloBadge > 99 ? '99+' : zaloBadge}</span>
+                )}
+              </NavLink>
+            ) : null}
           </nav>
 
-          <div className="chat-shell-user" ref={menuRef}>
+          <div className="chat-shell-header-right">
+            {companyName ? (
+              <>
+                <div className="chat-shell-company" title={companyTitle}>
+                  {companyCode && companyCode !== companyName ? (
+                    <span className="chat-shell-company-code">{companyCode}</span>
+                  ) : null}
+                  <span className="chat-shell-company-name">{companyName}</span>
+                </div>
+                <span className="chat-shell-header-sep" aria-hidden="true">
+                  |
+                </span>
+              </>
+            ) : null}
+
+            <div
+              className="chat-shell-bell"
+              aria-label={chatUnread > 0 ? `${chatUnread} tin chưa đọc` : 'Không có tin chưa đọc'}
+            >
+              <IconBell size={18} />
+              {chatUnread > 0 && (
+                <span className="chat-shell-bell-badge">
+                  {chatUnread > 99 ? '99+' : chatUnread}
+                </span>
+              )}
+            </div>
+
+            <span className="chat-shell-header-sep" aria-hidden="true">
+              |
+            </span>
+
+            <div className="chat-shell-user" ref={menuRef}>
             <button
               type="button"
               className="chat-shell-user-btn"
@@ -175,6 +282,7 @@ export function ChatAppShell() {
                 </button>
               </div>
             )}
+            </div>
           </div>
         </header>
       )}
@@ -184,6 +292,9 @@ export function ChatAppShell() {
       </div>
 
       {dataSelectOpen && <DataSelectionDialog onClose={() => setDataSelectOpen(false)} />}
+      {zaloEnabled && zaloToast && !location.pathname.startsWith('/chat/zalo') && (
+        <div className="zalo-toast">{zaloToast}</div>
+      )}
     </div>
   );
 }

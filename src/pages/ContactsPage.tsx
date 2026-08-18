@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import {
   botAvatarUrl,
+  botTypeLabel,
   chatApi,
-  isEmbedBot,
   type ChatBotCatalogItem,
   type ChatMe,
   type ChatUser,
@@ -11,7 +11,7 @@ import {
   type Conversation,
 } from '../api/chatApi';
 import { ChatAvatar } from '../components/chat/ChatAvatar';
-import { IconBlock, IconChat, IconClose, IconUsersAdd } from '../components/AppIcons';
+import { IconBlock, IconChat, IconClose, IconSettings, IconUsersAdd } from '../components/AppIcons';
 import { navigateChat } from '../lib/chatNav';
 import { subscribeContacts } from '../lib/chatTransport';
 
@@ -268,6 +268,16 @@ export function ContactsPage() {
                 : 'Liên hệ đã kết nối, yêu cầu chờ duyệt và đã chặn.'}
           </p>
         </div>
+        {me?.is_admin ? (
+          <button
+            type="button"
+            className="chat-icon-btn chat-page-card-head-action"
+            title="Cài đặt"
+            onClick={() => navigateChat(navigate, '/chat/settings')}
+          >
+            <IconSettings size={18} />
+          </button>
+        ) : null}
       </header>
 
       <div className="chat-tabs" role="tablist">
@@ -418,7 +428,7 @@ export function ContactsPage() {
               <div className="chat-contact-main">
                 <strong>{bot.title}</strong>
                 <span className="muted">
-                  {bot.description || (isEmbedBot(bot) ? 'AI nhúng' : 'Chatbot AI')}
+                  {bot.description || botTypeLabel(bot)}
                 </span>
               </div>
               <div className="chat-contact-actions">

@@ -3,14 +3,15 @@ import { Navigate, useNavigate, useOutletContext, useParams } from 'react-router
 import {
   botAvatarUrl,
   chatApi,
-  isEmbedBot,
+  normalizeBotType,
   type ChatBotAuthMode,
   type ChatBotCatalogItem,
   type ChatBotType,
   type ChatMe,
 } from '../api/chatApi';
-import { IconBack, IconImage } from '../components/AppIcons';
+import { IconBack, IconImage, IconTrash } from '../components/AppIcons';
 import { ChatAvatar } from '../components/chat/ChatAvatar';
+import { ChatConfirmDialog } from '../components/chat/ChatConfirmDialog';
 import { navigateChat } from '../lib/chatNav';
 import { resizeChatAvatar } from '../lib/chatImageResize';
 
@@ -40,6 +41,8 @@ export function ChatBotCreatePage() {
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [active, setActive] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -59,7 +62,7 @@ export function ChatBotCreatePage() {
           setError('Không tìm thấy chatbot.');
           return;
         }
-        setType(isEmbedBot(bot) ? 'embed' : 'rag');
+        setType(normalizeBotType(bot.type));
         setFolderId(bot.folder_id);
         setEmbedUrl(bot.embed_url ?? '');
         setAuthMode(bot.auth_mode === 'none' ? 'none' : 'embed_token');
@@ -89,9 +92,47 @@ export function ChatBotCreatePage() {
   if (!isAdmin) return <Navigate to="/chat" replace />;
 
   const isEmbed = type === 'embed';
-  const busy = saving || loading || avatarUploading;
+  const busy = saving || loading || avatarUploading || deleting;
 
   const goBack = () => navigateChat(navigate, '/chat/settings');
+
+  const confirmDelete = async () => {
+    if (!isEdit || !hasCompany || deleting) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      const current = await chatApi.getAdminSettings();
+      const nextBots = current.ai_chatbots.filter(
+        (bot) => bot.folder_id.toLowerCase() !== editingId.toLowerCase(),
+      );
+      if (nextBots.length === current.ai_chatbots.length) {
+        setError('Không tìm thấy chatbot.');
+        setDeleteConfirmOpen(false);
+        return;
+      }
+      const saved = await chatApi.saveAdminSettings({
+        ...current,
+        ai_chatbots: nextBots,
+      });
+      setMe?.((prev) =>
+        prev
+          ? {
+              ...prev,
+              ai_chatbot_enabled: saved.ai_chatbot_enabled,
+              zalo_enabled: saved.zalo_enabled,
+              chat_theme: saved.chat_theme,
+            }
+          : prev,
+      );
+      setDeleteConfirmOpen(false);
+      goBack();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Không xóa được chatbot.');
+      setDeleteConfirmOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const onPickAvatar = async (file: File | undefined) => {
     if (!file || busy) return;
@@ -198,7 +239,7 @@ export function ChatBotCreatePage() {
           }
         : {
             folder_id: folderId.trim(),
-            type: 'rag',
+            type,
             title: nextTitle,
             description: description.trim() || null,
             avatar_url: avatarUrl.trim() || null,
@@ -218,6 +259,7 @@ export function ChatBotCreatePage() {
           ? {
               ...prev,
               ai_chatbot_enabled: saved.ai_chatbot_enabled,
+              zalo_enabled: saved.zalo_enabled,
               chat_theme: saved.chat_theme,
             }
           : prev,
@@ -240,10 +282,21 @@ export function ChatBotCreatePage() {
           <h2>{isEdit ? 'Sửa chatbot' : 'Thêm chatbot'}</h2>
           <p className="muted">
             {isEdit
-              ? 'Sửa thông tin rồi bấm Lưu. Loại bot giữ nguyên.'
+              ? 'Sửa thông tin rồi bấm Lưu. Có thể đổi RAG / Files / FAQ; không đổi sang AI nhúng.'
               : 'Chọn loại, nhập thông tin rồi bấm Lưu. Bot mới mặc định đang bật.'}
           </p>
         </div>
+        {isEdit ? (
+          <button
+            type="button"
+            className="chat-icon-btn chat-page-card-head-action is-danger"
+            title="Xóa chatbot"
+            disabled={busy}
+            onClick={() => setDeleteConfirmOpen(true)}
+          >
+            <IconTrash size={18} />
+          </button>
+        ) : null}
       </header>
 
       <section className="chat-settings-section">
@@ -252,11 +305,21 @@ export function ChatBotCreatePage() {
           <span>Loại</span>
           <select
             value={type}
-            disabled={busy || isEdit}
-            onChange={(e) => setType(e.target.value === 'embed' ? 'embed' : 'rag')}
+            disabled={busy || (isEdit && isEmbed)}
+            onChange={(e) => setType(normalizeBotType(e.target.value))}
           >
-            <option value="rag">AI thư mục — FolderId File.Api</option>
-            <option value="embed">AI nhúng — iframe URL, không lưu lịch sử</option>
+            <option value="rag" disabled={isEdit && isEmbed}>
+              AI RAG — hỏi qua vector trong FolderId File.Api
+            </option>
+            <option value="file" disabled={isEdit && isEmbed}>
+              AI Files — hỏi trực tiếp nội dung file trong folder
+            </option>
+            <option value="faq" disabled={isEdit && isEmbed}>
+              AI FAQ — hỏi qua FAQ đã sync trên File.Api
+            </option>
+            <option value="embed" disabled={isEdit && !isEmbed}>
+              AI nhúng — iframe URL, không lưu lịch sử
+            </option>
           </select>
         </label>
 
@@ -286,15 +349,20 @@ export function ChatBotCreatePage() {
             </label>
           </>
         ) : (
-          <label className="chat-settings-field">
-            <span>FolderId</span>
-            <input
-              value={folderId}
-              disabled={busy || isEdit}
-              placeholder="folder id scope=system"
-              onChange={(e) => setFolderId(e.target.value)}
-            />
-          </label>
+          <>
+            <label className="chat-settings-field">
+              <span>FolderId</span>
+              <input
+                value={folderId}
+                disabled={busy || isEdit}
+                placeholder="folder id scope=system"
+                onChange={(e) => setFolderId(e.target.value)}
+              />
+            </label>
+            <p className="muted">
+              Folder trên File.Api cần bật AI đúng mode (RAG / Files / FAQ) thì chatbot mới trả lời được.
+            </p>
+          </>
         )}
 
         <label className="chat-settings-field">
@@ -370,6 +438,22 @@ export function ChatBotCreatePage() {
           </button>
         </div>
       </section>
+
+      <ChatConfirmDialog
+        open={deleteConfirmOpen}
+        title="Xóa chatbot?"
+        message={
+          title.trim()
+            ? `Chatbot "${title.trim()}" sẽ bị gỡ khỏi danh sách công ty. Hội thoại cũ vẫn có thể mở; thao tác này không thể hoàn tác.`
+            : 'Chatbot sẽ bị gỡ khỏi danh sách công ty. Hội thoại cũ vẫn có thể mở; thao tác này không thể hoàn tác.'
+        }
+        confirmLabel="Xóa"
+        busy={deleting}
+        onCancel={() => {
+          if (!deleting) setDeleteConfirmOpen(false);
+        }}
+        onConfirm={() => void confirmDelete()}
+      />
     </div>
   );
 }

@@ -90,6 +90,7 @@ export type ChatMe = {
   avatar_id?: string | null;
   desktop_notification?: DesktopNotificationMode | null;
   ai_chatbot_enabled?: boolean;
+  zalo_enabled?: boolean;
   chat_theme?: string | null;
   unit?: {
     unit_id: number;
@@ -134,7 +135,7 @@ export function notifyModeLabel(mode?: string | null): string {
 }
 
 export type ConversationKind = 'direct' | 'group' | 'bot';
-export type ChatBotType = 'rag' | 'embed';
+export type ChatBotType = 'rag' | 'file' | 'faq' | 'embed';
 export type ChatBotAuthMode = 'none' | 'embed_token';
 
 export type Conversation = {
@@ -199,7 +200,15 @@ export type ChatAppSettings = {
   device_push_enabled: boolean;
   ai_chatbot_enabled: boolean;
   ai_chatbots: ChatBotCatalogItem[];
+  zalo_enabled: boolean;
+  zalo_accounts: ChatZaloAccount[];
   chat_theme: string;
+};
+
+export type ChatZaloAccount = {
+  id: string;
+  name: string;
+  active: boolean;
 };
 
 export type ChatBotCatalogItem = {
@@ -216,8 +225,23 @@ export type ChatBotCatalogItem = {
 export function isEmbedBot(
   bot: { type?: string | null; bot_type?: string | null } | null | undefined,
 ): boolean {
-  const value = (bot?.type ?? bot?.bot_type ?? 'rag').trim().toLowerCase();
-  return value === 'embed';
+  return normalizeBotType(bot?.type ?? bot?.bot_type) === 'embed';
+}
+
+export function normalizeBotType(value?: string | null): ChatBotType {
+  const next = (value ?? 'rag').trim().toLowerCase();
+  if (next === 'embed' || next === 'file' || next === 'faq') return next;
+  return 'rag';
+}
+
+export function botTypeLabel(
+  bot: { type?: string | null; bot_type?: string | null } | null | undefined,
+): string {
+  const type = normalizeBotType(bot?.type ?? bot?.bot_type);
+  if (type === 'embed') return 'AI nhúng';
+  if (type === 'file') return 'AI Files';
+  if (type === 'faq') return 'AI FAQ';
+  return 'AI RAG';
 }
 
 /** Gắn hidden_login + embed_token (nếu chọn) vào URL iframe chatbot. */

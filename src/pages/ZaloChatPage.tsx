@@ -1,71 +1,70 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ChatApiError } from '../api/chatApi';
+import { zaloApi } from '../api/zaloApi';
 import { useAuth } from '../auth/AuthContext';
 import {
   IconBack,
   IconCheck,
   IconClose,
   IconCopy,
-  IconEdit,
+  IconFile,
   IconInfo,
-  IconPaperclip,
   IconReply,
   IconSearch,
-  IconSend,
+  IconSettings,
+  IconUsers,
 } from '../components/AppIcons';
+import { ChatAvatar } from '../components/chat/ChatAvatar';
+import { ZaloComposer, type ZaloSendPayload } from '../components/chat/ZaloComposer';
+import { navigateChat } from '../lib/chatNav';
 import {
-  createZaloMockData,
+  seedZaloUnread,
+  subscribeDesktopNotificationMode,
+  getDesktopNotificationMode,
+  subscribeZaloInbox,
+  watchZaloSource,
+} from '../lib/chatTransport';
+import {
+  emptyZaloInbox,
+  mergeZaloMessages,
   zaloDayLabel,
   zaloFolderText,
   zaloFmtTime,
   zaloHasFolder,
   zaloLabelName,
   zaloListTime,
-  zaloNowIso,
-  zaloUid,
-  type ZaloConversation,
+  zaloQuotePreview,
+  zaloQuoteHasContent,
+  zaloQuoteText,
+  zaloQuoteThumb,
+  zaloDownloadHref,
+  zaloAttachmentName,
+  zaloContentIsAttachmentOnly,
+  zaloIsImageAttachment,
+  zaloMessageAttachments,
   type ZaloFolderConfig,
   type ZaloInboxData,
   type ZaloMessage,
+  type ZaloQuote,
+  type ZaloSource,
 } from '../lib/zaloChat';
 
 type Pane = 'list' | 'thread' | 'info';
 
 const LIST_WIDTH_KEY = 'arito-zalo:list-width';
 const INFO_WIDTH_KEY = 'arito-zalo:info-width';
+const SOURCE_KEY = 'arito-zalo:source-id';
+const PAGE_SIZE = 50;
+const POLL_MS = 15_000;
 
 function storedWidth(key: string, fallback: number): number {
   const value = Number(window.localStorage.getItem(key));
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-function initials(name?: string | null): string {
-  const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
-}
-
-function ZaloAvatar({
-  name,
-  size = 36,
-  group = false,
-}: {
-  name?: string | null;
-  size?: number;
-  group?: boolean;
-}) {
-  return (
-    <span
-      className={`chat-avatar${group ? ' chat-avatar--group' : ''}`}
-      style={{ width: size, height: size, fontSize: Math.max(11, size * 0.36) }}
-    >
-      {initials(name)}
-    </span>
-  );
-}
-
-function lastPreview(messages: ZaloMessage[] | undefined): string {
-  if (!messages?.length) return 'Chưa có tin nhắn';
+function lastPreview(messages: ZaloMessage[] | undefined, fallback?: string): string {
+  if (!messages?.length) return fallback || 'Chưa có tin nhắn';
   const last = [...messages].reverse().find((m) => m.sender_type !== 'system') ?? messages[messages.length - 1];
   const prefix =
     last.sender_type === 'bot'
@@ -75,7 +74,7 @@ function lastPreview(messages: ZaloMessage[] | undefined): string {
         : last.sender_display_name
           ? `${last.sender_display_name}: `
           : '';
-  const text = (last.content || (last.files?.length ? '[Tệp đính kèm]' : '')).replace(/\n/g, ' ').trim();
+  const text = zaloQuotePreview(last).replace(/\n/g, ' ').trim();
   return `${prefix}${text || 'Tin nhắn'}`;
 }
 
@@ -103,32 +102,57 @@ function renderMentionText(msg: ZaloMessage) {
 
 function senderLabel(msg: ZaloMessage): string {
   if (msg.sender_type === 'bot') return 'Bot AI · Tự động';
-  if (msg.sender_type === 'operator') return msg.sender_display_name || 'Bạn (Thủ công)';
+  if (msg.sender_type === 'operator') {
+    return msg.operator_display_name || msg.sender_display_name || 'Bạn (Thủ công)';
+  }
   return msg.sender_display_name || 'Người dùng';
 }
 
+function ZaloQuotedBlock({ quote, onJump }: { quote: ZaloQuote; onJump: () => void }) {
+  const thumb = zaloQuoteThumb(quote);
+  const text = zaloQuoteText(quote);
+  return (
+    <button type="button" className="chat-reply-quote" title="Đi tới tin nhắn gốc" onClick={onJump}>
+      <strong>{quote.from || 'Tin nhắn'}</strong>
+      {text !== '[Hình ảnh]' ? <span>{text}</span> : null}
+      {thumb ? <img src={thumb} alt="" /> : text === '[Hình ảnh]' ? <span>{text}</span> : null}
+    </button>
+  );
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ChatApiError) return error.message;
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+}
+
 /**
- * Hộp thư Zalo — giao diện FE độc lập với /chat (không dùng chatApi / SignalR).
- * Dữ liệu hiện là mock; chỗ gửi / AI / nhãn chỉ cập nhật local để sẵn sàng gắn API sau.
+ * Hộp thư Zalo Arito — dữ liệu từ Chat.Api proxy sang Node.
+ * Setting folder/nhãn ở trang admin Node; trang này luôn hiện hết hội thoại.
  */
 export function ZaloChatPage() {
   const { mobile } = useAuth();
-  const [data, setData] = useState<ZaloInboxData>(() => createZaloMockData());
-  const [activeId, setActiveId] = useState<string | null>('c1');
+  const navigate = useNavigate();
+  const [sources, setSources] = useState<ZaloSource[]>([]);
+  const [sourceId, setSourceId] = useState<string>(() => window.localStorage.getItem(SOURCE_KEY) || '');
+  const [data, setData] = useState<ZaloInboxData>(() => emptyZaloInbox());
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [pane, setPane] = useState<Pane>('list');
-  const [navFilter, setNavFilter] = useState<'all' | 'unassigned'>('all');
   const [labelFilter, setLabelFilter] = useState('');
   const [query, setQuery] = useState('');
-  const [draft, setDraft] = useState('');
   const [pendingQuote, setPendingQuote] = useState<ZaloMessage | null>(null);
-  const [pendingFiles, setPendingFiles] = useState<string[]>([]);
-  const [mentionOpen, setMentionOpen] = useState(false);
-  const [mentionQuery, setMentionQuery] = useState('');
-  const [folderModal, setFolderModal] = useState(false);
-  const [folderDraft, setFolderDraft] = useState<ZaloFolderConfig>({});
   const [copied, setCopied] = useState(false);
+  const [copiedUid, setCopiedUid] = useState<string | null>(null);
   const [toast, setToast] = useState('');
-  const [hasMore, setHasMore] = useState<Record<string, boolean>>({ c1: true });
+  const [hasMore, setHasMore] = useState<Record<string, boolean>>({});
+  const [listLoading, setListLoading] = useState(true);
+  const [threadLoading, setThreadLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [savingFolder, setSavingFolder] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [folderModal, setFolderModal] = useState(false);
+  const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
+  const [folderDraft, setFolderDraft] = useState<ZaloFolderConfig & { minutes?: number }>({});
   const [infoVisible, setInfoVisible] = useState(true);
   const [listWidth, setListWidth] = useState(() => storedWidth(LIST_WIDTH_KEY, 320));
   const [infoWidth, setInfoWidth] = useState(() => storedWidth(INFO_WIDTH_KEY, 300));
@@ -136,9 +160,13 @@ export function ZaloChatPage() {
   const toastTimer = useRef<number | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const threadRef = useRef<HTMLDivElement | null>(null);
-  const composerRef = useRef<HTMLTextAreaElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const skipScrollRef = useRef(false);
+  const sendingRef = useRef(false);
+  const loadingMoreRef = useRef(false);
+  const activeIdRef = useRef<string | null>(null);
+  const sourceIdRef = useRef(sourceId);
+  const messagesRef = useRef(data.messages);
+  const sourceMenuRef = useRef<HTMLDivElement | null>(null);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -147,46 +175,211 @@ export function ZaloChatPage() {
   }, []);
 
   useEffect(() => {
+    activeIdRef.current = activeId;
+  }, [activeId]);
+
+  useEffect(() => {
+    sourceIdRef.current = sourceId;
+    if (sourceId) window.localStorage.setItem(SOURCE_KEY, sourceId);
+    watchZaloSource(sourceId);
+  }, [sourceId]);
+
+  useEffect(() => {
+    messagesRef.current = data.messages;
+  }, [data.messages]);
+
+  useEffect(() => {
+    if (!sourceMenuOpen) return;
+    const onDoc = (event: MouseEvent) => {
+      if (!sourceMenuRef.current?.contains(event.target as Node)) setSourceMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [sourceMenuOpen]);
+
+  useEffect(() => {
     return () => {
       if (toastTimer.current) window.clearTimeout(toastTimer.current);
     };
   }, []);
 
+  const refreshList = useCallback(async (id: string, silent = false) => {
+    if (!silent) setListLoading(true);
+    try {
+      const [conversations, labels, folderMap] = await Promise.all([
+        zaloApi.listConversations(id),
+        zaloApi.listLabels(id).catch(() => []),
+        zaloApi.getFolderMap(id).catch(() => ({})),
+      ]);
+      setData((prev) => ({ ...prev, conversations, labels, folderMap }));
+      seedZaloUnread(id, conversations);
+      setError(null);
+    } catch (e) {
+      setError(errorMessage(e, 'Không tải được hộp thư Zalo.'));
+    } finally {
+      if (!silent) setListLoading(false);
+    }
+  }, []);
+
+  const loadThread = useCallback(async (id: string, conversationId: string, silent = false) => {
+    if (!silent) setThreadLoading(true);
+    try {
+      const [items, members] = await Promise.all([
+        zaloApi.listMessages(id, conversationId, { limit: PAGE_SIZE }),
+        zaloApi.listMembers(id, conversationId).catch(() => []),
+      ]);
+      setData((prev) => ({
+        ...prev,
+        messages: { ...prev.messages, [conversationId]: mergeZaloMessages([], items) },
+        members: { ...prev.members, [conversationId]: members },
+      }));
+      setHasMore((prev) => ({ ...prev, [conversationId]: items.length >= PAGE_SIZE }));
+      void zaloApi.markRead(id, conversationId).catch(() => undefined);
+    } catch (e) {
+      if (!silent) showToast(errorMessage(e, 'Không tải được tin nhắn.'));
+    } finally {
+      if (!silent) setThreadLoading(false);
+    }
+  }, [showToast]);
+
+  const pollThread = useCallback(async (id: string, conversationId: string) => {
+    const current = messagesRef.current[conversationId] || [];
+    const newest = current[current.length - 1]?.id;
+    try {
+      const items = newest
+        ? await zaloApi.listMessages(id, conversationId, { afterId: newest, limit: PAGE_SIZE })
+        : await zaloApi.listMessages(id, conversationId, { limit: PAGE_SIZE });
+      if (items.length === 0) return;
+      skipScrollRef.current = true;
+      setData((prev) => ({
+        ...prev,
+        messages: {
+          ...prev.messages,
+          [conversationId]: mergeZaloMessages(prev.messages[conversationId] || [], items),
+        },
+      }));
+    } catch {
+      // Poll lỗi im lặng; lần sau thử lại.
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void zaloApi
+      .listSources()
+      .then((items) => {
+        if (cancelled) return;
+        setSources(items);
+        const saved = window.localStorage.getItem(SOURCE_KEY) || '';
+        const next = items.some((s) => s.id === saved) ? saved : items[0]?.id || '';
+        setSourceId(next);
+        if (items.length === 0) {
+          setListLoading(false);
+          setError('Công ty chưa bật tài khoản Zalo.');
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setListLoading(false);
+          setError(errorMessage(e, 'Không tải được danh sách nguồn Zalo.'));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!sourceId) return;
+    setActiveId(null);
+    setData(emptyZaloInbox());
+    setHasMore({});
+    setPane('list');
+    void refreshList(sourceId);
+  }, [sourceId, refreshList]);
+
+  useEffect(() => {
+    if (!sourceId) return;
+    const timer = window.setInterval(() => {
+      void refreshList(sourceId, true);
+      const current = activeIdRef.current;
+      if (current) void pollThread(sourceId, current);
+    }, POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [sourceId, refreshList, pollThread]);
+
+  useEffect(() => {
+    const notifyTimer = { id: 0 as number };
+    const sub = subscribeZaloInbox((event) => {
+      const sid = sourceIdRef.current;
+      if (!sid || event.source_id !== sid) return;
+      if (notifyTimer.id) window.clearTimeout(notifyTimer.id);
+      notifyTimer.id = window.setTimeout(() => {
+        void refreshList(sid, true);
+        const current = activeIdRef.current;
+        if (current) void pollThread(sid, current);
+      }, 250);
+      if (event.notify && event.conversation_id !== activeIdRef.current) {
+        const who = event.conversation_name || 'Zalo';
+        showToast(`${who}: ${event.preview || 'Tin nhắn mới'}`);
+      }
+    });
+    return () => {
+      sub.stop();
+      if (notifyTimer.id) window.clearTimeout(notifyTimer.id);
+    };
+  }, [refreshList, pollThread, showToast]);
+
   const unreadConvCount = useMemo(
     () => data.conversations.filter((c) => (c.unread_count || 0) > 0).length,
     [data.conversations],
   );
-  const unassignedCount = useMemo(
-    () => data.conversations.filter((c) => !zaloHasFolder(data.folderMap, c.zalo_thread_id)).length,
-    [data.conversations, data.folderMap],
-  );
+
+  useEffect(() => {
+    const baseTitle = document.title.replace(/^\(\d+\)\s*/, '');
+    const applyTitle = () => {
+      const mode = getDesktopNotificationMode();
+      document.title = mode === 'badge' && unreadConvCount > 0 ? `(${unreadConvCount}) ${baseTitle}` : baseTitle;
+    };
+    applyTitle();
+    const sub = subscribeDesktopNotificationMode(applyTitle);
+    return () => {
+      sub.stop();
+      document.title = baseTitle;
+    };
+  }, [unreadConvCount]);
 
   const filtered = useMemo(() => {
     let list = [...data.conversations];
-    if (navFilter === 'unassigned') {
-      list = list.filter((c) => !zaloHasFolder(data.folderMap, c.zalo_thread_id));
-    }
     if (labelFilter) {
       list = list.filter((c) => (c.zalo_labels || []).some((l) => l.id === labelFilter));
     }
     const q = query.trim().toLowerCase();
     if (q) list = list.filter((c) => (c.name || '').toLowerCase().includes(q));
     return list;
-  }, [data.conversations, data.folderMap, navFilter, labelFilter, query]);
+  }, [data.conversations, labelFilter, query]);
 
   const conv = data.conversations.find((c) => c.id === activeId) ?? null;
   const messages = conv ? data.messages[conv.id] || [] : [];
   const members = conv ? data.members[conv.id] || [] : [];
   const assigned = conv ? zaloHasFolder(data.folderMap, conv.zalo_thread_id) : false;
   const folderLabel = conv ? zaloFolderText(data.folderMap, conv.zalo_thread_id) : null;
+  const sourceName = sources.find((s) => s.id === sourceId)?.name || 'Zalo';
+  const firstConversationId = filtered[0]?.id;
 
-  const mentionMatches = useMemo(() => {
-    if (!mentionOpen) return [];
-    const q = mentionQuery.toLowerCase();
-    return members
-      .filter((m) => `${m.display_name} ${m.zalo_uid}`.toLowerCase().includes(q))
-      .slice(0, 12);
-  }, [mentionOpen, mentionQuery, members]);
+  useEffect(() => {
+    if (activeId || listLoading || !sourceId || !firstConversationId) return;
+    setActiveId(firstConversationId);
+    setPendingQuote(null);
+    setData((prev) => ({
+      ...prev,
+      conversations: prev.conversations.map((c) =>
+        c.id === firstConversationId ? { ...c, unread_count: 0, has_external_unread: false } : c,
+      ),
+    }));
+    if (!mobile) setPane('thread');
+    void loadThread(sourceId, firstConversationId);
+  }, [activeId, firstConversationId, listLoading, loadThread, mobile, sourceId]);
 
   useEffect(() => {
     if (skipScrollRef.current) {
@@ -198,57 +391,115 @@ export function ZaloChatPage() {
     el.scrollTop = el.scrollHeight;
   }, [activeId, messages.length]);
 
-  const patchConv = useCallback((id: string, patch: Partial<ZaloConversation>) => {
-    setData((prev) => ({
-      ...prev,
-      conversations: prev.conversations.map((c) => (c.id === id ? { ...c, ...patch } : c)),
-    }));
-  }, []);
-
-  const pushMessage = useCallback((conversationId: string, msg: ZaloMessage) => {
-    setData((prev) => ({
-      ...prev,
-      messages: {
-        ...prev.messages,
-        [conversationId]: [...(prev.messages[conversationId] || []), msg],
-      },
-    }));
-  }, []);
-
   const selectConversation = (id: string) => {
     setActiveId(id);
-    patchConv(id, { unread_count: 0, has_external_unread: false });
+    setData((prev) => ({
+      ...prev,
+      conversations: prev.conversations.map((c) =>
+        c.id === id ? { ...c, unread_count: 0, has_external_unread: false } : c,
+      ),
+    }));
     setPendingQuote(null);
-    setPendingFiles([]);
-    setDraft('');
-    setMentionOpen(false);
     setPane('thread');
+    if (sourceId) void loadThread(sourceId, id);
   };
 
-  const toggleAi = (id?: string) => {
-    const target = data.conversations.find((c) => c.id === (id || activeId));
-    if (!target) return;
-    const next = target.ai_enabled === false;
-    patchConv(target.id, { ai_enabled: next });
-    pushMessage(target.id, {
-      id: zaloUid(),
-      sender_type: 'system',
-      content: next ? '✓ AI đã bật cho hội thoại này' : 'AI đã tắt cho hội thoại này',
-      zalo_created_at: zaloNowIso(),
-    });
-    showToast(next ? 'Đã bật AI (giao diện mẫu)' : 'Đã tắt AI (giao diện mẫu)');
+  const toggleAi = async () => {
+    if (!conv || !sourceId) return;
+    const next = conv.ai_enabled === false;
+    try {
+      await zaloApi.setAi(sourceId, conv.id, next);
+      setData((prev) => ({
+        ...prev,
+        conversations: prev.conversations.map((c) =>
+          c.id === conv.id ? { ...c, ai_enabled: next } : c,
+        ),
+      }));
+      showToast(next ? 'Đã bật AI' : 'Đã tắt AI');
+    } catch (e) {
+      showToast(errorMessage(e, 'Không đổi được trạng thái AI.'));
+    }
   };
 
-  const toggleLabel = (labelId: string) => {
-    if (!conv) return;
+  const toggleLabel = async (labelId: string) => {
+    if (!conv || !sourceId) return;
     const meta = data.labels.find((l) => l.id === labelId);
     if (!meta) return;
     const on = (conv.zalo_labels || []).some((x) => x.id === labelId);
-    patchConv(conv.id, {
-      zalo_labels: on
-        ? conv.zalo_labels.filter((x) => x.id !== labelId)
-        : [...(conv.zalo_labels || []), { id: meta.id, name: meta.name, color: meta.color }],
+    try {
+      if (on) await zaloApi.removeLabel(sourceId, conv.id, labelId);
+      else await zaloApi.addLabel(sourceId, conv.id, labelId);
+      setData((prev) => ({
+        ...prev,
+        conversations: prev.conversations.map((c) => {
+          if (c.id !== conv.id) return c;
+          const labels = on
+            ? (c.zalo_labels || []).filter((x) => x.id !== labelId)
+            : [...(c.zalo_labels || []), meta];
+          return { ...c, zalo_labels: labels };
+        }),
+      }));
+    } catch (e) {
+      showToast(errorMessage(e, 'Không gắn được nhãn.'));
+    }
+  };
+
+  const openFolderModal = () => {
+    if (!conv) return;
+    const cfg = data.folderMap[String(conv.zalo_thread_id)] || {};
+    setFolderDraft({
+      ragFolderId: cfg.ragFolderId || '',
+      faqFolderId: cfg.faqFolderId || '',
+      label: cfg.label || '',
+      minutes: Number.isFinite(conv.notify_grace_minutes) ? Number(conv.notify_grace_minutes) : 2,
     });
+    setFolderModal(true);
+  };
+
+  const saveFolder = async () => {
+    if (!conv || !sourceId || savingFolder) return;
+    const rag = (folderDraft.ragFolderId || '').trim();
+    const faq = (folderDraft.faqFolderId || '').trim();
+    const label = (folderDraft.label || '').trim();
+    const minutes = Number(folderDraft.minutes);
+    if (!Number.isInteger(minutes) || minutes < 0 || minutes > 1440) {
+      showToast('Số phút phải là số nguyên từ 0 đến 1440.');
+      return;
+    }
+    setSavingFolder(true);
+    try {
+      await zaloApi.setNotifyGrace(sourceId, conv.zalo_thread_id, minutes);
+      if (!rag && !faq) {
+        await zaloApi.deleteFolderMap(sourceId, conv.zalo_thread_id);
+        setData((prev) => {
+          const folderMap = { ...prev.folderMap };
+          delete folderMap[conv.zalo_thread_id];
+          return {
+            ...prev,
+            folderMap,
+            conversations: prev.conversations.map((c) =>
+              c.id === conv.id ? { ...c, notify_grace_minutes: minutes } : c,
+            ),
+          };
+        });
+      } else {
+        const next: ZaloFolderConfig = { ragFolderId: rag, faqFolderId: faq, label };
+        await zaloApi.saveFolderMap(sourceId, conv.zalo_thread_id, next);
+        setData((prev) => ({
+          ...prev,
+          folderMap: { ...prev.folderMap, [conv.zalo_thread_id]: next },
+          conversations: prev.conversations.map((c) =>
+            c.id === conv.id ? { ...c, notify_grace_minutes: minutes } : c,
+          ),
+        }));
+      }
+      setFolderModal(false);
+      showToast('Đã lưu Folder AI');
+    } catch (e) {
+      showToast(errorMessage(e, 'Không lưu được Folder AI.'));
+    } finally {
+      setSavingFolder(false);
+    }
   };
 
   const copyThread = async () => {
@@ -263,100 +514,117 @@ export function ZaloChatPage() {
     }
   };
 
-  const loadMore = () => {
-    if (!conv) return;
-    const extra = data.older[conv.id] || [];
-    skipScrollRef.current = true;
-    setData((prev) => ({
-      ...prev,
-      messages: {
-        ...prev.messages,
-        [conv.id]: [...extra, ...(prev.messages[conv.id] || [])],
-      },
-    }));
-    setHasMore((prev) => ({ ...prev, [conv.id]: false }));
-  };
-
-  const sendMessage = () => {
-    if (!conv) return;
-    const text = draft;
-    if (!text.trim() && pendingFiles.length === 0) return;
-    const mentions: { pos: number; len: number }[] = [];
-    members.forEach((m) => {
-      const token = `@${m.display_name}`;
-      let from = 0;
-      while (from < text.length) {
-        const p = text.indexOf(token, from);
-        if (p < 0) break;
-        mentions.push({ pos: p, len: token.length });
-        from = p + token.length;
-      }
-    });
-    const now = zaloNowIso();
-    pushMessage(conv.id, {
-      id: zaloUid(),
-      sender_type: 'operator',
-      sender_display_name: 'Bạn (Thủ công)',
-      content: text,
-      files: [...pendingFiles],
-      quote: pendingQuote
-        ? { from: pendingQuote.sender_display_name || senderLabel(pendingQuote), msg: pendingQuote.content }
-        : null,
-      mentions,
-      zalo_created_at: now,
-    });
-    patchConv(conv.id, { last_message_at: now, unread_count: 0 });
-    setDraft('');
-    setPendingQuote(null);
-    setPendingFiles([]);
-    setMentionOpen(false);
-    showToast('Đã gửi (giao diện mẫu — chưa lên Zalo)');
-  };
-
-  const onComposerChange = (value: string, caret: number) => {
-    setDraft(value);
-    const before = value.slice(0, caret);
-    const at = before.lastIndexOf('@');
-    if (at >= 0 && !before.slice(at).includes(' ')) {
-      setMentionQuery(before.slice(at + 1));
-      setMentionOpen(true);
-    } else {
-      setMentionOpen(false);
+  const copyUid = async (uid: string) => {
+    if (!uid) return;
+    try {
+      await navigator.clipboard.writeText(uid);
+      setCopiedUid(uid);
+      showToast('Đã copy UID');
+      window.setTimeout(() => setCopiedUid((cur) => (cur === uid ? null : cur)), 1500);
+    } catch {
+      showToast('Không copy được');
     }
   };
 
-  const insertMention = (name: string) => {
-    const el = composerRef.current;
-    const caret = el?.selectionStart ?? draft.length;
-    const before = draft.slice(0, caret);
-    const after = draft.slice(caret);
-    const at = before.lastIndexOf('@');
-    const prefix = at >= 0 && !before.slice(at).includes(' ') ? before.slice(0, at) : before;
-    setDraft(`${prefix}@${name} ${after}`);
-    setMentionOpen(false);
-    window.requestAnimationFrame(() => composerRef.current?.focus());
+  const loadMore = async () => {
+    if (!conv || !sourceId || loadingMoreRef.current) return;
+    if (!hasMore[conv.id]) return;
+    const oldest = messages[0]?.id;
+    if (!oldest) return;
+    const el = threadRef.current;
+    const oldHeight = el?.scrollHeight ?? 0;
+    loadingMoreRef.current = true;
+    skipScrollRef.current = true;
+    try {
+      const extra = await zaloApi.listMessages(sourceId, conv.id, { beforeId: oldest, limit: PAGE_SIZE });
+      setData((prev) => ({
+        ...prev,
+        messages: {
+          ...prev.messages,
+          [conv.id]: mergeZaloMessages(prev.messages[conv.id] || [], extra),
+        },
+      }));
+      setHasMore((prev) => ({ ...prev, [conv.id]: extra.length >= PAGE_SIZE }));
+      window.requestAnimationFrame(() => {
+        const current = threadRef.current;
+        if (current) current.scrollTop += current.scrollHeight - oldHeight;
+      });
+    } catch (e) {
+      showToast(errorMessage(e, 'Không tải thêm tin nhắn.'));
+    } finally {
+      loadingMoreRef.current = false;
+    }
   };
 
-  const openFolderModal = () => {
-    if (!conv) return;
-    const cfg = data.folderMap[String(conv.zalo_thread_id)] || {};
-    setFolderDraft({
-      ragFolderId: cfg.ragFolderId || '',
-      faqFolderId: cfg.faqFolderId || '',
-      label: cfg.label || '',
-    });
-    setFolderModal(true);
-  };
+  const sendMessage = useCallback(async (payload: ZaloSendPayload) => {
+    const conversationId = activeIdRef.current;
+    const sid = sourceIdRef.current;
+    if (!conversationId || !sid || sendingRef.current) return;
+    if (!payload.text.trim() && payload.files.length === 0) return;
+    sendingRef.current = true;
+    setSending(true);
+    try {
+      const saved = await zaloApi.sendMessage(sid, conversationId, payload);
+      let next = saved;
+      if (payload.files.length && !(next.files && next.files.length)) {
+        next = {
+          ...next,
+          files: payload.files.map((file) => ({
+            href: '',
+            fileName: file.name,
+            kind: file.type.startsWith('image/') ? 'photo' : 'file',
+          })),
+        };
+      }
+      if (payload.quoteMessageId && !next.quote) {
+        const quoted = (messagesRef.current[conversationId] || []).find(
+          (m) => m.id === payload.quoteMessageId || m.zalo_msg_id === payload.quoteMessageId,
+        );
+        if (quoted) {
+          const files = zaloMessageAttachments(quoted);
+          next = {
+            ...next,
+            quote: {
+              from: senderLabel(quoted),
+              msg: zaloQuotePreview(quoted),
+              attach: files.find(zaloIsImageAttachment) || files[0],
+              globalMsgId: quoted.zalo_msg_id || quoted.id,
+            },
+          };
+        }
+      }
+      setData((prev) => ({
+        ...prev,
+        conversations: prev.conversations.map((c) =>
+          c.id === conversationId ? { ...c, last_message_at: next.zalo_created_at, unread_count: 0 } : c,
+        ),
+        messages: {
+          ...prev.messages,
+          [conversationId]: mergeZaloMessages(prev.messages[conversationId] || [], next.id ? [next] : []),
+        },
+      }));
+      if (!next.id) void loadThread(sid, conversationId, true);
+      setPendingQuote(null);
+    } catch (e) {
+      showToast(errorMessage(e, 'Không gửi được tin nhắn.'));
+      throw e;
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
+  }, [loadThread, showToast]);
 
-  const saveFolder = () => {
-    if (!conv) return;
-    setData((prev) => ({
-      ...prev,
-      folderMap: { ...prev.folderMap, [String(conv.zalo_thread_id)]: { ...folderDraft } },
-    }));
-    setFolderModal(false);
-    showToast('Đã lưu Folder AI (giao diện mẫu)');
-  };
+  const onClearQuote = useCallback(() => setPendingQuote(null), []);
+
+  const jumpToQuoted = useCallback((quote: ZaloQuote) => {
+    const id = quote.globalMsgId;
+    if (!id || !threadRef.current) return;
+    const el = threadRef.current.querySelector(`[data-zalo-msg="${CSS.escape(id)}"]`);
+    if (!(el instanceof HTMLElement)) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.classList.add('is-jump-highlight');
+    window.setTimeout(() => el.classList.remove('is-jump-highlight'), 1600);
+  }, []);
 
   useEffect(() => {
     window.localStorage.setItem(LIST_WIDTH_KEY, String(listWidth));
@@ -415,28 +683,59 @@ export function ZaloChatPage() {
             <div className="chat-list-head zalo-list-head">
               <div className="zalo-list-title">
                 <strong>Tin nhắn Zalo</strong>
-                <span className="muted">{data.conversations.length} hội thoại — giao diện mẫu</span>
+                <span className="muted">
+                  {listLoading ? 'Đang tải...' : `${data.conversations.length} hội thoại`}
+                </span>
               </div>
-            </div>
-            <div className="zalo-list-filters">
-              <button
-                type="button"
-                className={navFilter === 'all' ? 'active' : undefined}
-                onClick={() => setNavFilter('all')}
-              >
-                Tất cả
-                {unreadConvCount > 0 && <span className="chat-badge">{unreadConvCount}</span>}
-              </button>
-              <button
-                type="button"
-                className={navFilter === 'unassigned' ? 'active' : undefined}
-                onClick={() => setNavFilter('unassigned')}
-              >
-                Chưa gán
-                {unassignedCount > 0 && (
-                  <span className="chat-badge zalo-badge-muted">{unassignedCount}</span>
+              <div className="zalo-source-pick" ref={sourceMenuRef}>
+                <button
+                  type="button"
+                  className="chat-icon-btn"
+                  title="Nhóm người dùng"
+                  onClick={() => navigateChat(navigate, '/chat/zalo/users')}
+                >
+                  <IconUsers size={16} />
+                </button>
+                <span className="zalo-source-name" title={sourceName}>
+                  {sources.length === 0 ? 'Chưa có nguồn' : sourceName}
+                </span>
+                {unreadConvCount > 0 && (
+                  <span className="chat-badge">{unreadConvCount > 99 ? '99+' : unreadConvCount}</span>
                 )}
-              </button>
+                <button
+                  type="button"
+                  className="chat-icon-btn"
+                  title="Đổi nguồn Zalo"
+                  aria-expanded={sourceMenuOpen}
+                  aria-haspopup="listbox"
+                  disabled={sources.length === 0}
+                  onClick={() => setSourceMenuOpen((open) => !open)}
+                >
+                  <IconSettings size={16} />
+                </button>
+                {sourceMenuOpen && sources.length > 0 && (
+                  <div className="zalo-source-menu" role="listbox" aria-label="Nguồn Zalo">
+                    {sources.map((source) => (
+                      <button
+                        type="button"
+                        key={source.id}
+                        role="option"
+                        aria-selected={sourceId === source.id}
+                        className={sourceId === source.id ? 'is-active' : undefined}
+                        onClick={() => {
+                          setSourceId(source.id);
+                          setSourceMenuOpen(false);
+                        }}
+                      >
+                        <span>{source.name}</span>
+                        {sourceId === source.id && unreadConvCount > 0 && (
+                          <span className="chat-badge">{unreadConvCount > 99 ? '99+' : unreadConvCount}</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="zalo-list-tools">
               <select
@@ -463,7 +762,8 @@ export function ZaloChatPage() {
             </div>
 
             <div className="chat-list-body">
-              {filtered.length === 0 && (
+              {error && <p className="chat-hint">{error}</p>}
+              {!error && !listLoading && filtered.length === 0 && (
                 <p className="chat-hint">Không có hội thoại phù hợp</p>
               )}
               {filtered.map((c) => {
@@ -476,7 +776,7 @@ export function ZaloChatPage() {
                     className={`chat-list-item${c.id === activeId ? ' is-active' : ''}`}
                     onClick={() => selectConversation(c.id)}
                   >
-                    <ZaloAvatar name={c.name} group={c.is_group} />
+                    <ChatAvatar name={c.name} group={c.is_group} imageSrc={c.avatar_url} size={36} />
                     <span className="chat-list-main">
                       <span className="chat-list-title">
                         <span className="chat-list-name-row">
@@ -486,14 +786,14 @@ export function ZaloChatPage() {
                         </span>
                         <span className="chat-list-time">{zaloListTime(c.last_message_at)}</span>
                       </span>
-                      <span className="chat-list-preview">{lastPreview(data.messages[c.id])}</span>
+                      <span className="chat-list-preview">
+                        {lastPreview(data.messages[c.id], c.last_preview)}
+                      </span>
                       <span className="zalo-list-meta">
-                        {asg ? (
+                        {asg && (
                           <span className="zalo-chip zalo-chip--folder">
                             {zaloFolderText(data.folderMap, c.zalo_thread_id)}
                           </span>
-                        ) : (
-                          <span className="zalo-chip zalo-chip--folder-off">Chưa gán folder</span>
                         )}
                         <span className={`zalo-ai${c.ai_enabled !== false ? ' is-on' : ''}`}>
                           <span className="zalo-ai-dot" />
@@ -544,7 +844,7 @@ export function ZaloChatPage() {
                 >
                   <IconBack size={18} />
                 </button>
-                <ZaloAvatar name={conv.name} size={40} group={conv.is_group} />
+                <ChatAvatar name={conv.name} size={40} group={conv.is_group} imageSrc={conv.avatar_url} />
                 <button type="button" className="chat-thread-title" onClick={openInfo}>
                   <span className="chat-thread-name zalo-thread-name">
                     <span>{conv.name}</span>
@@ -552,17 +852,7 @@ export function ZaloChatPage() {
                       {conv.is_group ? 'Nhóm' : 'Cá nhân'}
                     </span>
                   </span>
-                  <span className="chat-thread-sub zalo-thread-id">
-                    Thread: {conv.zalo_thread_id}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="chat-icon-btn"
-                  title="Copy thread ID"
-                  onClick={() => void copyThread()}
-                >
-                  {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                  <span className="chat-thread-sub">{sourceName}</span>
                 </button>
                 <span className="zalo-ai-switch-wrap">
                   <span>AI</span>
@@ -571,10 +861,18 @@ export function ZaloChatPage() {
                     role="switch"
                     aria-checked={conv.ai_enabled !== false}
                     className={`zalo-ai-switch${conv.ai_enabled !== false ? ' is-on' : ''}`}
-                    onClick={() => toggleAi()}
+                    onClick={() => void toggleAi()}
                     title={conv.ai_enabled !== false ? 'Tắt AI' : 'Bật AI'}
                   >
                     <span>{conv.ai_enabled !== false ? 'ON' : 'OFF'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="chat-icon-btn"
+                    title="Folder AI"
+                    onClick={openFolderModal}
+                  >
+                    <IconSettings size={16} />
                   </button>
                 </span>
                 <button type="button" className="chat-icon-btn" title="Thông tin" onClick={openInfo}>
@@ -594,7 +892,7 @@ export function ZaloChatPage() {
                       key={l.id}
                       className={`zalo-label-btn${on ? ' is-on' : ''}`}
                       style={on ? { background: l.color, borderColor: l.color, color: '#fff' } : undefined}
-                      onClick={() => toggleLabel(l.id)}
+                      onClick={() => void toggleLabel(l.id)}
                     >
                       {zaloLabelName(l)}
                     </button>
@@ -602,15 +900,26 @@ export function ZaloChatPage() {
                 })}
               </div>
 
-              <div ref={threadRef} className="chat-thread-body">
+              <div
+                ref={threadRef}
+                className="chat-thread-body"
+                onScroll={(event) => {
+                  if (event.currentTarget.scrollTop <= 40) void loadMore();
+                }}
+              >
                 {hasMore[conv.id] && (
                   <div className="chat-more">
-                    <button type="button" className="secondary" onClick={loadMore}>
+                    <button type="button" className="secondary" onClick={() => void loadMore()}>
                       ↑ Xem thêm tin nhắn cũ hơn
                     </button>
                   </div>
                 )}
-                {messages.length === 0 && (
+                {threadLoading && messages.length === 0 && (
+                  <p className="chat-hint" style={{ textAlign: 'center' }}>
+                    Đang tải tin nhắn...
+                  </p>
+                )}
+                {!threadLoading && messages.length === 0 && (
                   <p className="chat-hint" style={{ textAlign: 'center' }}>
                     Chưa có tin nhắn nào trong hội thoại này.
                   </p>
@@ -618,145 +927,138 @@ export function ZaloChatPage() {
                 {messages.map((msg, index) => {
                   const day = zaloDayLabel(msg.zalo_created_at);
                   const prevDay = index > 0 ? zaloDayLabel(messages[index - 1].zalo_created_at) : '';
-                  const showDay = Boolean(day && day !== prevDay);
-                  if (msg.sender_type === 'system') {
-                    const on = String(msg.content || '').startsWith('✓');
-                    return (
-                      <div key={msg.id}>
-                        {showDay && <div className="chat-day">{day}</div>}
-                        <div className={`chat-msg-system zalo-system${on ? ' is-on' : ' is-off'}`}>
-                          <span>{msg.content}</span>
-                        </div>
-                      </div>
-                    );
-                  }
                   const mine = msg.sender_type === 'bot' || msg.sender_type === 'operator';
+                  const on = msg.content.includes('bật');
+                  const member = members.find((m) => m.zalo_uid && m.zalo_uid === msg.sender_zalo_uid);
+                  const avatarSrc = msg.sender_avatar_url || member?.avatar_url;
                   return (
-                    <div key={msg.id}>
-                      {showDay && <div className="chat-day">{day}</div>}
-                      <div className={`chat-msg${mine ? ' chat-msg--mine' : ''}${msg.sender_type === 'bot' ? ' zalo-msg--bot' : ''}`}>
-                        {!mine && <ZaloAvatar name={senderLabel(msg)} size={28} />}
-                        <div className="chat-msg-main">
-                          <span className="chat-msg-sender">{senderLabel(msg)}</span>
-                          <div className="chat-bubble">
-                            {msg.quote && (
-                              <div className="chat-reply-quote">
-                                <strong>{msg.quote.from}</strong>
-                                <span>{msg.quote.msg || 'Tin nhắn'}</span>
-                              </div>
-                            )}
-                            <span className="zalo-msg-text">{renderMentionText(msg)}</span>
-                            {(msg.files || []).map((name) => (
-                              <div key={name} className="zalo-msg-file">
-                                📎 {name}
-                              </div>
-                            ))}
-                          </div>
-                          <span className="chat-msg-time">
-                            {zaloFmtTime(msg.zalo_created_at)}
-                            <button
-                              type="button"
-                              className="zalo-reply-btn"
-                              onClick={() => setPendingQuote(msg)}
-                            >
-                              <IconReply size={12} /> Trả lời
-                            </button>
-                          </span>
+                    <div key={msg.id} data-zalo-msg={msg.zalo_msg_id || msg.id} data-message-id={msg.id}>
+                      {day && day !== prevDay && <div className="chat-day">{day}</div>}
+                      {msg.sender_type === 'system' ? (
+                        <div className={`chat-msg-system zalo-system${on ? ' is-on' : ' is-off'}`}>
+                          {msg.content}
                         </div>
-                        {mine && (
-                          <ZaloAvatar
-                            name={msg.sender_type === 'bot' ? 'AI' : 'Bạn'}
+                      ) : (
+                      <div className={`chat-msg${mine ? ' chat-msg--mine' : ''}${msg.sender_type === 'bot' ? ' zalo-msg--bot' : ''}`}>
+                        {!mine && (
+                          <ChatAvatar
+                            name={senderLabel(msg)}
+                            imageSrc={avatarSrc}
                             size={28}
                           />
                         )}
+                        <div className="chat-msg-main">
+                          {!mine && <span className="chat-msg-sender">{senderLabel(msg)}</span>}
+                          <div className="chat-msg-row">
+                            {msg.sender_type === 'operator' &&
+                              (msg.operator_display_name || msg.sender_display_name) && (
+                                <span className="zalo-msg-operator">
+                                  {msg.operator_display_name || msg.sender_display_name}
+                                </span>
+                              )}
+                            <div className="chat-bubble-wrap">
+                              <div className="chat-bubble">
+                                {zaloQuoteHasContent(msg.quote) && msg.quote && (
+                                  <ZaloQuotedBlock
+                                    quote={msg.quote}
+                                    onJump={() => jumpToQuoted(msg.quote!)}
+                                  />
+                                )}
+                                {!zaloContentIsAttachmentOnly(msg) && (
+                                  <span className="zalo-msg-text">{renderMentionText(msg)}</span>
+                                )}
+                                {zaloMessageAttachments(msg).map((file) => {
+                                  const name = zaloAttachmentName(file);
+                                  const src = file.thumb || file.href || '';
+                                  if (mine) {
+                                    return (
+                                      <button
+                                        key={`${msg.id}-${name}`}
+                                        type="button"
+                                        className="chat-attachment-file"
+                                        title="Files bạn đã gửi"
+                                        onClick={() => {
+                                          if (file.href) zaloDownloadHref(file.href, name);
+                                        }}
+                                      >
+                                        <span className="chat-attachment-file-icon">
+                                          <IconFile size={28} />
+                                        </span>
+                                        <span>
+                                          <strong>{name}</strong>
+                                        </span>
+                                      </button>
+                                    );
+                                  }
+                                  const image = zaloIsImageAttachment(file) && !!src;
+                                  if (image) {
+                                    return (
+                                      <a
+                                        key={`${msg.id}-${src}`}
+                                        className="chat-attachment-image"
+                                        href={file.href || src}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        title="Xem ảnh"
+                                      >
+                                        <img src={src} alt={name} />
+                                      </a>
+                                    );
+                                  }
+                                  return (
+                                    <button
+                                      key={`${msg.id}-${src || name}`}
+                                      type="button"
+                                      className="chat-attachment-file"
+                                      title="Tải xuống"
+                                      onClick={() => {
+                                        if (file.href) zaloDownloadHref(file.href, name);
+                                      }}
+                                    >
+                                      <span className="chat-attachment-file-icon">
+                                        <IconFile size={28} />
+                                      </span>
+                                      <span>
+                                        <strong>{name}</strong>
+                                        <small>Tải xuống</small>
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                                <span className="chat-msg-time">{zaloFmtTime(msg.zalo_created_at)}</span>
+                              </div>
+                            </div>
+                            <div className="chat-msg-actions">
+                              <button
+                                type="button"
+                                className="chat-msg-action"
+                                title="Trả lời"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setPendingQuote(msg);
+                                }}
+                              >
+                                <IconReply size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                       </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
 
-              <div className="chat-composer">
-                {pendingQuote && (
-                  <div className="chat-reply-bar">
-                    <div>
-                      <strong>{pendingQuote.sender_display_name || senderLabel(pendingQuote)}</strong>
-                      <span>{pendingQuote.content || 'Tin nhắn'}</span>
-                    </div>
-                    <button type="button" className="chat-icon-btn" onClick={() => setPendingQuote(null)}>
-                      <IconClose size={16} />
-                    </button>
-                  </div>
-                )}
-                {pendingFiles.length > 0 && (
-                  <div className="chat-attachment-tray">
-                    {pendingFiles.map((name, i) => (
-                      <span key={`${name}-${i}`} className="zalo-pending-file">
-                        <span>{name}</span>
-                        <button
-                          type="button"
-                          onClick={() => setPendingFiles((prev) => prev.filter((_, idx) => idx !== i))}
-                        >
-                          <IconClose size={12} />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {mentionOpen && mentionMatches.length > 0 && (
-                  <div className="chat-mention-menu">
-                    {mentionMatches.map((m) => (
-                      <button type="button" key={m.id} onClick={() => insertMention(m.display_name)}>
-                        <ZaloAvatar name={m.display_name} size={24} />
-                        <span>{m.display_name}</span>
-                        <small>{m.zalo_uid}</small>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <div className="chat-composer-row">
-                  <button
-                    type="button"
-                    className="chat-attach"
-                    title="Đính kèm"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <IconPaperclip size={18} />
-                  </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    hidden
-                    onChange={(e) => {
-                      const names = Array.from(e.target.files || []).map((f) => f.name);
-                      setPendingFiles((prev) => [...prev, ...names].slice(0, 8));
-                      e.target.value = '';
-                    }}
-                  />
-                  <textarea
-                    ref={composerRef}
-                    rows={2}
-                    value={draft}
-                    placeholder="Nhập tin nhắn để trả lời thủ công..."
-                    onChange={(e) => onComposerChange(e.target.value, e.target.selectionStart || 0)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        sendMessage();
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="chat-send"
-                    disabled={!draft.trim() && pendingFiles.length === 0}
-                    onClick={sendMessage}
-                    title="Gửi"
-                  >
-                    <IconSend size={18} />
-                  </button>
-                </div>
-              </div>
+              <ZaloComposer
+                key={conv.id}
+                members={members}
+                pendingQuote={pendingQuote}
+                sending={sending}
+                onClearQuote={onClearQuote}
+                onSend={sendMessage}
+              />
             </div>
           )}
         </main>
@@ -769,14 +1071,13 @@ export function ZaloChatPage() {
           onPointerDown={(event) => beginResize('info', event)}
         />
 
-        <aside className="chat-panel chat-panel--info" aria-hidden={!infoVisible}>
+        <aside className="chat-panel chat-panel--info">
           <div className="chat-info">
             <header className="chat-info-head">
-              <strong>Thông tin hội thoại</strong>
+              <strong>Thông tin</strong>
               <button
                 type="button"
                 className="chat-icon-btn"
-                title="Đóng"
                 onClick={() => {
                   if (window.matchMedia('(max-width: 1023px)').matches || mobile) setPane('thread');
                   else setInfoVisible(false);
@@ -790,7 +1091,7 @@ export function ZaloChatPage() {
             ) : (
               <div className="chat-info-body">
                 <div className="chat-info-hero">
-                  <ZaloAvatar name={conv.name} size={64} group={conv.is_group} />
+                  <ChatAvatar name={conv.name} size={64} group={conv.is_group} imageSrc={conv.avatar_url} />
                   <strong className="chat-info-name">{conv.name}</strong>
                   <span className={`zalo-kind${conv.is_group ? ' is-group' : ''}`}>
                     {conv.is_group ? 'Nhóm Zalo' : 'Chat cá nhân'}
@@ -810,7 +1111,7 @@ export function ZaloChatPage() {
                   <button
                     type="button"
                     className={`zalo-ai-row${conv.ai_enabled !== false ? ' is-on' : ''}`}
-                    onClick={() => toggleAi()}
+                    onClick={() => void toggleAi()}
                   >
                     <span>
                       <strong>{conv.ai_enabled !== false ? 'AI đang bật' : 'AI đang tắt'}</strong>
@@ -826,59 +1127,49 @@ export function ZaloChatPage() {
                   </button>
                 </section>
 
+                {conv.ai_enabled !== false && (
                 <section className="chat-info-section">
                   <div className="chat-info-section-head">
                     Folder AI
-                    <button type="button" className="chat-info-link" onClick={openFolderModal}>
-                      <IconEdit size={13} /> Sửa
+                    <button
+                      type="button"
+                      className="chat-icon-btn"
+                      title="Cấu hình Folder AI"
+                      onClick={openFolderModal}
+                    >
+                      <IconSettings size={16} />
                     </button>
                   </div>
-                  {assigned ? (
+                  {assigned || data.folderMap[conv.zalo_thread_id]?.label ? (
                     <div className="zalo-folder-card">
-                      <strong>{folderLabel}</strong>
-                      {data.folderMap[conv.zalo_thread_id]?.ragFolderId && (
-                        <small>RAG: {data.folderMap[conv.zalo_thread_id].ragFolderId}</small>
+                      {data.folderMap[conv.zalo_thread_id]?.label && (
+                        <strong>{data.folderMap[conv.zalo_thread_id].label}</strong>
                       )}
-                      {data.folderMap[conv.zalo_thread_id]?.faqFolderId && (
-                        <small>FAQ: {data.folderMap[conv.zalo_thread_id].faqFolderId}</small>
-                      )}
+                      {data.folderMap[conv.zalo_thread_id]?.ragFolderId && <small>RAG</small>}
+                      {data.folderMap[conv.zalo_thread_id]?.faqFolderId && <small>FAQ</small>}
                     </div>
-                  ) : (
-                    <p className="chat-hint" style={{ padding: 0 }}>
-                      Chưa gán folder. Bấm Sửa để cấu hình RAG / FAQ.
-                    </p>
-                  )}
+                  ) : null}
                 </section>
-
-                <section className="chat-info-section">
-                  <div className="chat-info-section-head">Nhãn</div>
-                  <div className="zalo-label-wrap">
-                    {data.labels.map((l) => {
-                      const on = (conv.zalo_labels || []).some((x) => x.id === l.id);
-                      return (
-                        <button
-                          type="button"
-                          key={l.id}
-                          className={`zalo-label-btn${on ? ' is-on' : ''}`}
-                          style={on ? { background: l.color, borderColor: l.color, color: '#fff' } : undefined}
-                          onClick={() => toggleLabel(l.id)}
-                        >
-                          {zaloLabelName(l)}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </section>
+                )}
 
                 <section className="chat-info-section">
                   <div className="chat-info-section-head">Thành viên · {members.length}</div>
                   <ul className="chat-member-list">
                     {members.map((m) => (
                       <li key={m.id}>
-                        <ZaloAvatar name={m.display_name} size={32} />
+                        <ChatAvatar name={m.display_name} imageSrc={m.avatar_url} size={32} />
                         <span className="chat-member-main">
                           <span className="chat-member-name">{m.display_name}</span>
-                          <span className="chat-member-sub">UID {m.zalo_uid}</span>
+                        </span>
+                        <span className="chat-member-actions">
+                          <button
+                            type="button"
+                            className="chat-icon-btn"
+                            title="Copy UID"
+                            onClick={() => void copyUid(m.zalo_uid)}
+                          >
+                            {copiedUid === m.zalo_uid ? <IconCheck size={14} /> : <IconCopy size={14} />}
+                          </button>
                         </span>
                       </li>
                     ))}
@@ -895,7 +1186,7 @@ export function ZaloChatPage() {
           <div className="zalo-modal">
             <header>
               <div>
-                <h2>Cấu hình folder</h2>
+                <h2>Cấu hình Folder AI</h2>
                 <p>
                   {conv.name} — {conv.zalo_thread_id}
                 </p>
@@ -926,13 +1217,31 @@ export function ZaloChatPage() {
                   onChange={(e) => setFolderDraft((d) => ({ ...d, label: e.target.value }))}
                 />
               </label>
+              <label>
+                Số phút
+                <input
+                  type="number"
+                  min={0}
+                  max={1440}
+                  value={folderDraft.minutes ?? ''}
+                  onChange={(e) =>
+                    setFolderDraft((d) => ({
+                      ...d,
+                      minutes: e.target.value === '' ? undefined : Number(e.target.value),
+                    }))
+                  }
+                />
+              </label>
+              <p className="muted" style={{ margin: 0 }}>
+                Thời gian chờ thông báo, 0–1440 phút.
+              </p>
             </div>
             <footer>
               <button type="button" className="secondary" onClick={() => setFolderModal(false)}>
                 Hủy
               </button>
-              <button type="button" onClick={saveFolder}>
-                Lưu
+              <button type="button" disabled={savingFolder} onClick={() => void saveFolder()}>
+                {savingFolder ? 'Đang lưu...' : 'Lưu'}
               </button>
             </footer>
           </div>
