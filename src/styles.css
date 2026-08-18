@@ -5219,7 +5219,7 @@ body.chat-is-resizing {
 }
 
 .chat-list-kind-badge--group {
-  background: #fff;
+  background: #ffd966;
   color: #0f172a;
 }
 
@@ -6805,6 +6805,11 @@ body.chat-is-resizing {
 
   .chat-only-narrow {
     display: inline-flex;
+  }
+
+  .chat-shell-company,
+  .chat-shell-company + .chat-shell-header-sep {
+    display: none;
   }
 
   .chat-msg-main {
