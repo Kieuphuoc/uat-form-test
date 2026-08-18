@@ -1,4 +1,5 @@
-import { memo, useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import { mobileKeyboardFocusHandlers } from '../../lib/keyboardBridge';
 import { type ChatMember, type ChatMessage, type Conversation } from '../../api/chatApi';
 import { useAuth } from '../../auth/AuthContext';
 import { uiCopy } from '../../lib/uiCopy';
@@ -66,6 +67,7 @@ export const ChatComposer = memo(function ChatComposer({
   addFilesRef,
 }: Props) {
   const { mobile } = useAuth();
+  const keyboardHandlers = useMemo(() => mobileKeyboardFocusHandlers(mobile), [mobile]);
   const [draft, setDraft] = useState('');
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -358,6 +360,8 @@ export const ChatComposer = memo(function ChatComposer({
         <textarea
           ref={textareaRef}
           value={draft}
+          onFocus={keyboardHandlers.onFocus}
+          onBlur={keyboardHandlers.onBlur}
           onChange={(e) => {
             const el = e.currentTarget;
             setDraft(el.value);

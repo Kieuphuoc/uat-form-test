@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { isMobileEmbed, mobileKeyboardFocusHandlers } from '../../lib/keyboardBridge';
 import { IconClose, IconFile, IconPaperclip, IconSend } from '../AppIcons';
 import { ChatAvatar } from './ChatAvatar';
 import type { ZaloMember, ZaloMessage } from '../../lib/zaloChat';
@@ -56,6 +57,8 @@ export const ZaloComposer = memo(function ZaloComposer({
   onClearQuote,
   onSend,
 }: Props) {
+  const mobileEmbed = isMobileEmbed();
+  const keyboardHandlers = useMemo(() => mobileKeyboardFocusHandlers(mobileEmbed), [mobileEmbed]);
   const [draft, setDraft] = useState('');
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -256,6 +259,8 @@ export const ZaloComposer = memo(function ZaloComposer({
           rows={1}
           value={draft}
           placeholder="Nhập tin nhắn để trả lời thủ công..."
+          onFocus={keyboardHandlers.onFocus}
+          onBlur={keyboardHandlers.onBlur}
           onChange={(e) => onComposerChange(e.currentTarget)}
           onKeyDown={(e) => {
             if (mentionOpen && mentionMatches.length > 0) {

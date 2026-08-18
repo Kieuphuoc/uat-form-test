@@ -1,5 +1,7 @@
 import { Link } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
 import { useAuth } from './AuthContext';
+import { notifyParentAuthLost } from '../lib/embedAuthBridge';
 
 type Props = {
   children: React.ReactNode;
@@ -13,7 +15,15 @@ type Props = {
  * Khác RequireAdmin: không kiểm tra isAdmin và quay về nextPath thay vì /admin.
  */
 export function RequireAuth({ children, nextPath = '/', title = 'Cần đăng nhập' }: Props) {
-  const { status, jwt, login, loginError } = useAuth();
+  const { status, jwt, login, loginError, mobile } = useAuth();
+  const notifiedRef = useRef(false);
+
+  useEffect(() => {
+    if (status !== 'ready' || jwt || !mobile) return;
+    if (notifiedRef.current) return;
+    notifiedRef.current = true;
+    notifyParentAuthLost('missing');
+  }, [status, jwt, mobile]);
 
   if (status === 'loading') {
     return (

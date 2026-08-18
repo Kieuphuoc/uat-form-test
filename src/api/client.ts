@@ -1,3 +1,5 @@
+import { notifyParentAuthLost } from '../lib/embedAuthBridge';
+
 const JWT_KEY = 'arito_form_jwt';
 
 export function getApiBase(): string {
@@ -86,6 +88,9 @@ export async function apiFetch<T>(
   }
 
   if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      notifyParentAuthLost('401');
+    }
     return {
       success: false,
       error: body?.error || `HTTP ${res.status}`,

@@ -16,6 +16,7 @@ import {
 } from '../api/authApi';
 import { clearJwt, decodeJwtPayload, getJwt, getJwtUserId, isJwtExpired, setJwt, setSessionJwt } from '../api/client';
 import { installFormCacheClearListener } from '../lib/formRuntimeCache';
+import { notifyParentAuthLost } from '../lib/embedAuthBridge';
 
 /** Admin/Designer cần isAdmin; Chat chỉ cần đã đăng nhập. */
 export type LoginOptions = { requireAdmin?: boolean };
@@ -175,6 +176,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Embed: không bắt buộc /me
         setStatus('ready');
         return;
+      }
+
+      if (isMobile && embed && isJwtExpired(embed)) {
+        notifyParentAuthLost('expired');
       }
 
       const existing = getJwt();

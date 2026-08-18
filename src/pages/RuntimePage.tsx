@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { fetchRuntimeApp, fetchRuntimeForm } from '../api/formApi';
 import { useAuth } from '../auth/AuthContext';
@@ -7,6 +7,7 @@ import { FormRuntimeHost } from '../components/FormRuntimeView';
 import { useUiLan } from '../hooks/useUiLan';
 import { emitFormDebugLog, isFormDebugEnabled } from '../lib/formDebug';
 import { uiCopy } from '../lib/uiCopy';
+import { notifyParentAuthLost } from '../lib/embedAuthBridge';
 import type { ClientFormDto } from '../types/form';
 
 type RuntimePayload = {
@@ -47,6 +48,14 @@ export function RuntimePage() {
   const lan = useUiLan();
   const [data, setData] = useState<RuntimePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const authLostNotifiedRef = useRef(false);
+
+  useEffect(() => {
+    if (status !== 'ready' || jwt || !mobile) return;
+    if (authLostNotifiedRef.current) return;
+    authLostNotifiedRef.current = true;
+    notifyParentAuthLost('missing');
+  }, [status, jwt, mobile]);
 
   useEffect(() => {
     if (status !== 'ready' || !slug) return;
