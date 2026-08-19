@@ -169,6 +169,7 @@ export function mergeZaloMessages(current: ZaloMessage[], incoming: ZaloMessage[
 }
 
 const IMAGE_EXT = /\.(jpg|jpeg|png|gif|webp|bmp|jfif)(\?|#|$)/i;
+const PDF_EXT = /\.pdf(\?|#|$)/i;
 
 export function zaloIsImageUrl(url?: string | null): boolean {
   if (!url || !/^https?:\/\//i.test(url.trim())) return false;
@@ -182,6 +183,30 @@ export function zaloIsImageAttachment(file: ZaloAttachment): boolean {
   const kind = (file.kind || '').toLowerCase();
   if (kind.includes('photo') || kind.includes('image') || kind === 'img') return true;
   return zaloIsImageUrl(file.thumb || file.href);
+}
+
+export function zaloIsPdfAttachment(file: ZaloAttachment): boolean {
+  const kind = (file.kind || '').toLowerCase();
+  if (kind.includes('pdf')) return true;
+  const name = zaloAttachmentName(file).toLowerCase();
+  if (PDF_EXT.test(name)) return true;
+  return PDF_EXT.test(zaloAttachmentOpenHref(file).toLowerCase());
+}
+
+export function zaloIsPreviewableAttachment(file: ZaloAttachment): boolean {
+  return zaloIsImageAttachment(file) || zaloIsPdfAttachment(file);
+}
+
+function zaloShouldTreatContentUrlAsAttachment(msg: ZaloMessage, url: string): boolean {
+  const type = (msg.msg_type || '').toLowerCase();
+  if (type.includes('link')) return false;
+  if (type.includes('photo') || type.includes('image')) return true;
+  if (type.includes('file') || type.includes('attach')) return true;
+  if (type === 'text' || type === '') {
+    if (zaloIsImageUrl(url) && /zdn\.vn/i.test(url)) return true;
+    return false;
+  }
+  return zaloIsImageUrl(url);
 }
 
 export function zaloAttachmentName(file: ZaloAttachment): string {
@@ -199,32 +224,61 @@ export function zaloAttachmentName(file: ZaloAttachment): string {
   return 'Tệp đính kèm';
 }
 
+export function zaloAttachmentPreviewSrc(file: ZaloAttachment): string {
+  return (file.thumb || file.href || '').trim();
+}
+
+export function zaloAttachmentOpenHref(file: ZaloAttachment): string {
+  return (file.href || file.thumb || '').trim();
+}
+
 export function zaloMessageAttachments(msg: ZaloMessage): ZaloAttachment[] {
   const listed = [...(msg.files || [])];
   const text = (msg.content || '').trim();
   if (listed.length === 0 && (text.startsWith('{') || text.startsWith('['))) {
     try {
       const parsed = JSON.parse(text) as unknown;
-      const items = Array.isArray(parsed) ? parsed : [parsed];
-      for (const item of items) {
-        if (!item || typeof item !== 'object') continue;
-        const rec = item as Record<string, unknown>;
-        const href = String(rec.href ?? rec.url ?? rec.oriUrl ?? rec.thumb ?? '');
-        const fileName = String(rec.fileName ?? rec.file_name ?? rec.name ?? rec.title ?? '');
-        if (href || fileName) {
-          listed.push({
-            href: href || undefined,
-            fileName: fileName || undefined,
-            thumb: String(rec.thumb ?? rec.thumbnail ?? '') || undefined,
-            kind: String(rec.kind ?? rec.type ?? rec.fileExt ?? '') || undefined,
-          });
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (!item || typeof item !== 'object') continue;
+          const rec = item as Record<string, unknown>;
+          const href = String(rec.href ?? rec.url ?? rec.oriUrl ?? '');
+          const fileName = String(rec.fileName ?? rec.file_name ?? rec.name ?? rec.title ?? '');
+          const thumb = String(rec.thumb ?? rec.thumbnail ?? '') || undefined;
+          if (href || thumb || fileName) {
+            listed.push({
+              href: href || undefined,
+              fileName: fileName || undefined,
+              thumb,
+              kind: String(rec.kind ?? rec.type ?? rec.fileExt ?? '') || undefined,
+            });
+          }
+        }
+      } else if (parsed && typeof parsed === 'object') {
+        const rec = parsed as Record<string, unknown>;
+        const nested = rec.attachments ?? rec.files ?? rec.attach ?? rec.attachment;
+        const nestedItems = Array.isArray(nested) ? nested : nested ? [nested] : [];
+        for (const item of nestedItems) {
+          if (!item || typeof item !== 'object') continue;
+          const file = item as Record<string, unknown>;
+          const href = String(file.href ?? file.url ?? file.oriUrl ?? '');
+          const fileName = String(file.fileName ?? file.file_name ?? file.name ?? file.title ?? '');
+          const thumb = String(file.thumb ?? file.thumbnail ?? '') || undefined;
+          if (href || thumb || fileName) {
+            listed.push({
+              href: href || undefined,
+              fileName: fileName || undefined,
+              thumb,
+              kind: String(file.kind ?? file.type ?? file.fileExt ?? '') || undefined,
+            });
+          }
         }
       }
     } catch {
       /* not json */
     }
   }
-  if (listed.length === 0 && /^https?:\/\//i.test(text)) {
+  if (listed.length === 0 && /^https?:\/\//i.test(text) && zaloShouldTreatContentUrlAsAttachment(msg, text)) {
     listed.push({
       href: text,
       kind: zaloIsImageUrl(text) ? 'photo' : 'file',
@@ -235,7 +289,12 @@ export function zaloMessageAttachments(msg: ZaloMessage): ZaloAttachment[] {
   if (type.includes('photo') || type.includes('image')) {
     return listed.map((file) => ({ ...file, kind: file.kind || 'photo' }));
   }
-  if ((type.includes('file') || type.includes('attach')) && listed.length === 0 && text && !/^https?:/i.test(text)) {
+  if (
+    (type.includes('file') || type.includes('attach'))
+    && listed.length === 0
+    && text
+    && !/^https?:/i.test(text)
+  ) {
     listed.push({ fileName: text, kind: 'file' });
   }
   return listed;
@@ -246,9 +305,28 @@ export function zaloContentIsAttachmentOnly(msg: ZaloMessage): boolean {
   if (!text) return true;
   const files = zaloMessageAttachments(msg);
   if (!files.length) return false;
-  if (text.startsWith('{') || text.startsWith('[')) return true;
+  if (text.startsWith('{') || text.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (Array.isArray(parsed)) return true;
+      if (parsed && typeof parsed === 'object') {
+        const rec = parsed as Record<string, unknown>;
+        const embedded = String(rec.text ?? rec.content ?? rec.message ?? rec.caption ?? '').trim();
+        if (embedded) return false;
+        return true;
+      }
+    } catch {
+      return false;
+    }
+  }
   if (!/^https?:\/\//i.test(text)) return false;
   return files.some((file) => file.href === text || file.thumb === text);
+}
+
+export function zaloMessageDisplayText(msg: ZaloMessage): string {
+  const text = (msg.content || '').trim();
+  if (!text || zaloContentIsAttachmentOnly(msg)) return '';
+  return text;
 }
 
 export function zaloDownloadHref(url: string, fileName: string) {
@@ -270,8 +348,8 @@ export function zaloDownloadHref(url: string, fileName: string) {
 }
 
 export function zaloQuotePreview(msg: ZaloMessage): string {
-  const text = (msg.content || '').replace(/\n/g, ' ').trim();
-  if (text && !zaloContentIsAttachmentOnly(msg)) return text;
+  const text = zaloMessageDisplayText(msg).replace(/\n/g, ' ').trim();
+  if (text) return text;
   const files = zaloMessageAttachments(msg);
   if (files.some(zaloIsImageAttachment)) return '[Hình ảnh]';
   if (files.length) return files[0].fileName || files[0].title || '[Tệp đính kèm]';

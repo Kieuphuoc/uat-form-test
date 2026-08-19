@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChatApiError } from '../api/chatApi';
 import { zaloApi } from '../api/zaloApi';
@@ -16,6 +16,7 @@ import {
   IconUsers,
 } from '../components/AppIcons';
 import { ChatAvatar } from '../components/chat/ChatAvatar';
+import { ZaloFilePreviewModal } from '../components/chat/ZaloFilePreviewModal';
 import { ZaloComposer, type ZaloSendPayload } from '../components/chat/ZaloComposer';
 import { navigateChat } from '../lib/chatNav';
 import {
@@ -40,9 +41,13 @@ import {
   zaloQuoteThumb,
   zaloDownloadHref,
   zaloAttachmentName,
-  zaloContentIsAttachmentOnly,
+  zaloAttachmentOpenHref,
+  zaloAttachmentPreviewSrc,
   zaloIsImageAttachment,
+  zaloIsPreviewableAttachment,
   zaloMessageAttachments,
+  zaloMessageDisplayText,
+  type ZaloAttachment,
   type ZaloFolderConfig,
   type ZaloInboxData,
   type ZaloMessage,
@@ -78,26 +83,102 @@ function lastPreview(messages: ZaloMessage[] | undefined, fallback?: string): st
   return `${prefix}${text || 'Tin nhắn'}`;
 }
 
-function renderMentionText(msg: ZaloMessage) {
-  const text = msg.content || '';
+const URL_RE = /(https?:\/\/[^\s<>"']+)/g;
+
+function renderTextWithLinks(text: string, keyPrefix: string): ReactNode[] {
+  const parts: ReactNode[] = [];
+  let last = 0;
+  let match: RegExpExecArray | null;
+  let index = 0;
+  while ((match = URL_RE.exec(text))) {
+    if (match.index > last) parts.push(text.slice(last, match.index));
+    const href = match[1];
+    parts.push(
+      <a key={`${keyPrefix}-link-${index++}`} href={href} target="_blank" rel="noopener noreferrer">
+        {href}
+      </a>,
+    );
+    last = match.index + href.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
+
+function renderMentionLinkText(msg: ZaloMessage, displayText: string): ReactNode {
   const marks = [...(msg.mentions || [])].sort((a, b) => a.pos - b.pos);
-  if (!marks.length) return text;
-  const parts: React.ReactNode[] = [];
+  if (!marks.length) return renderTextWithLinks(displayText, msg.id);
+  const parts: ReactNode[] = [];
   let cursor = 0;
   marks.forEach((mark, i) => {
     const start = Math.max(0, mark.pos);
-    const end = Math.min(text.length, mark.pos + mark.len);
+    const end = Math.min(displayText.length, mark.pos + mark.len);
     if (start < cursor) return;
-    if (start > cursor) parts.push(text.slice(cursor, start));
+    if (start > cursor) parts.push(...renderTextWithLinks(displayText.slice(cursor, start), `${msg.id}-p${i}`));
     parts.push(
       <span key={`${msg.id}-m${i}`} className="chat-mention">
-        {text.slice(start, end)}
+        {displayText.slice(start, end)}
       </span>,
     );
     cursor = end;
   });
-  if (cursor < text.length) parts.push(text.slice(cursor));
+  if (cursor < displayText.length) parts.push(...renderTextWithLinks(displayText.slice(cursor), `${msg.id}-tail`));
   return parts;
+}
+
+function ZaloAttachmentBlock({
+  file,
+  onPreview,
+}: {
+  file: ZaloAttachment;
+  onPreview: (file: ZaloAttachment) => void;
+}) {
+  const name = zaloAttachmentName(file);
+  const previewSrc = zaloAttachmentPreviewSrc(file);
+  const openHref = zaloAttachmentOpenHref(file);
+  const image = zaloIsImageAttachment(file) && !!previewSrc;
+  const previewable = zaloIsPreviewableAttachment(file) && !!openHref;
+
+  if (image) {
+    return (
+      <button type="button" className="chat-attachment-image" onClick={() => onPreview(file)} title="Xem ảnh">
+        <img src={previewSrc} alt={name} />
+      </button>
+    );
+  }
+
+  if (previewable) {
+    return (
+      <button type="button" className="chat-attachment-file" onClick={() => onPreview(file)} title="Xem file">
+        <span className="chat-attachment-file-icon">
+          <IconFile size={28} />
+        </span>
+        <span>
+          <strong>{name}</strong>
+          <small>Xem file</small>
+        </span>
+      </button>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className="chat-attachment-file"
+      title={openHref ? 'Tải xuống' : name}
+      disabled={!openHref}
+      onClick={() => {
+        if (openHref) zaloDownloadHref(openHref, name);
+      }}
+    >
+      <span className="chat-attachment-file-icon">
+        <IconFile size={28} />
+      </span>
+      <span>
+        <strong>{name}</strong>
+        {openHref ? <small>Tải xuống</small> : null}
+      </span>
+    </button>
+  );
 }
 
 function senderLabel(msg: ZaloMessage): string {
@@ -153,6 +234,7 @@ export function ZaloChatPage() {
   const [folderModal, setFolderModal] = useState(false);
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   const [folderDraft, setFolderDraft] = useState<ZaloFolderConfig & { minutes?: number }>({});
+  const [filePreview, setFilePreview] = useState<ZaloAttachment | null>(null);
   const [infoVisible, setInfoVisible] = useState(true);
   const [listWidth, setListWidth] = useState(() => storedWidth(LIST_WIDTH_KEY, 320));
   const [infoWidth, setInfoWidth] = useState(() => storedWidth(INFO_WIDTH_KEY, 300));
@@ -172,6 +254,10 @@ export function ZaloChatPage() {
     setToast(msg);
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(''), 2200);
+  }, []);
+
+  const openFilePreview = useCallback((file: ZaloAttachment) => {
+    setFilePreview(file);
   }, []);
 
   useEffect(() => {
@@ -964,67 +1050,18 @@ export function ZaloChatPage() {
                                     onJump={() => jumpToQuoted(msg.quote!)}
                                   />
                                 )}
-                                {!zaloContentIsAttachmentOnly(msg) && (
-                                  <span className="zalo-msg-text">{renderMentionText(msg)}</span>
-                                )}
-                                {zaloMessageAttachments(msg).map((file) => {
-                                  const name = zaloAttachmentName(file);
-                                  const src = file.thumb || file.href || '';
-                                  if (mine) {
-                                    return (
-                                      <button
-                                        key={`${msg.id}-${name}`}
-                                        type="button"
-                                        className="chat-attachment-file"
-                                        title="Files bạn đã gửi"
-                                        onClick={() => {
-                                          if (file.href) zaloDownloadHref(file.href, name);
-                                        }}
-                                      >
-                                        <span className="chat-attachment-file-icon">
-                                          <IconFile size={28} />
-                                        </span>
-                                        <span>
-                                          <strong>{name}</strong>
-                                        </span>
-                                      </button>
-                                    );
-                                  }
-                                  const image = zaloIsImageAttachment(file) && !!src;
-                                  if (image) {
-                                    return (
-                                      <a
-                                        key={`${msg.id}-${src}`}
-                                        className="chat-attachment-image"
-                                        href={file.href || src}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        title="Xem ảnh"
-                                      >
-                                        <img src={src} alt={name} />
-                                      </a>
-                                    );
-                                  }
-                                  return (
-                                    <button
-                                      key={`${msg.id}-${src || name}`}
-                                      type="button"
-                                      className="chat-attachment-file"
-                                      title="Tải xuống"
-                                      onClick={() => {
-                                        if (file.href) zaloDownloadHref(file.href, name);
-                                      }}
-                                    >
-                                      <span className="chat-attachment-file-icon">
-                                        <IconFile size={28} />
-                                      </span>
-                                      <span>
-                                        <strong>{name}</strong>
-                                        <small>Tải xuống</small>
-                                      </span>
-                                    </button>
-                                  );
-                                })}
+                                {zaloMessageAttachments(msg).map((file) => (
+                                  <ZaloAttachmentBlock
+                                    key={`${msg.id}-${zaloAttachmentPreviewSrc(file) || zaloAttachmentOpenHref(file) || zaloAttachmentName(file)}`}
+                                    file={file}
+                                    onPreview={openFilePreview}
+                                  />
+                                ))}
+                                {zaloMessageDisplayText(msg) ? (
+                                  <span className="zalo-msg-text">
+                                    {renderMentionLinkText(msg, zaloMessageDisplayText(msg))}
+                                  </span>
+                                ) : null}
                                 <span className="chat-msg-time">{zaloFmtTime(msg.zalo_created_at)}</span>
                               </div>
                             </div>
@@ -1248,6 +1285,14 @@ export function ZaloChatPage() {
         </div>
       )}
 
+      {filePreview && (
+        <ZaloFilePreviewModal
+          fileName={zaloAttachmentName(filePreview)}
+          openHref={zaloAttachmentOpenHref(filePreview)}
+          isImage={zaloIsImageAttachment(filePreview)}
+          onClose={() => setFilePreview(null)}
+        />
+      )}
       {toast && <div className="zalo-toast">{toast}</div>}
     </div>
   );

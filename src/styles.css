@@ -7254,6 +7254,29 @@ body.mobile-embed .chat-topbar {
   word-break: break-word;
 }
 
+.zalo-chat .chat-bubble .zalo-msg-text {
+  display: block;
+  margin-top: 6px;
+}
+
+.zalo-chat .chat-bubble .zalo-msg-text a {
+  color: #2563eb;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.zalo-chat .chat-bubble .zalo-msg-text a:hover {
+  text-decoration: underline;
+}
+
+.zalo-chat .chat-msg--mine .chat-bubble .zalo-msg-text a {
+  color: #bfdbfe;
+}
+
+.zalo-chat .chat-msg--mine .chat-bubble .zalo-msg-text a:hover {
+  color: #dbeafe;
+}
+
 .zalo-chat .chat-bubble .chat-attachment-image {
   margin-top: 6px;
   border-radius: 10px;

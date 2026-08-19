@@ -73,15 +73,8 @@ function mapAttachment(raw: unknown): ZaloAttachment | null {
     return { href, fileName: href.split(/[\\/]/).pop() || href };
   }
   const file = asRecord(raw);
-  const href = str(
-    file.href
-      ?? file.url
-      ?? file.oriUrl
-      ?? file.hdUrl
-      ?? file.thumb
-      ?? file.thumbnail
-      ?? file.params,
-  );
+  const href = str(file.href ?? file.url ?? file.oriUrl ?? file.hdUrl ?? file.params);
+  const thumb = str(file.thumb ?? file.thumbnail) || undefined;
   const fileName = str(
     file.fileName
       ?? file.file_name
@@ -89,29 +82,66 @@ function mapAttachment(raw: unknown): ZaloAttachment | null {
       ?? file.title
       ?? file.fileNameDisplay,
   );
-  if (!href && !fileName) return null;
+  if (!href && !thumb && !fileName) return null;
   return {
     kind: str(file.kind ?? file.type ?? file.fileType ?? file.fileExt) || undefined,
-    href,
-    thumb: str(file.thumb ?? file.thumbnail) || undefined,
+    href: href || undefined,
+    thumb,
     title: str(file.title) || undefined,
     fileName: fileName || undefined,
   };
 }
 
-function attachmentsFromContent(content: string): ZaloAttachment[] {
-  const trimmed = content.trim();
-  if (!trimmed) return [];
-  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+function normalizeAttachmentList(raw: unknown): unknown[] {
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return [];
     try {
       const parsed = JSON.parse(trimmed) as unknown;
-      const items = Array.isArray(parsed) ? parsed : [parsed];
-      return items.map(mapAttachment).filter((item): item is ZaloAttachment => !!item);
+      return Array.isArray(parsed) ? parsed : [parsed];
     } catch {
       return [];
     }
   }
-  return [];
+  return asArray(raw);
+}
+
+function parseMessageContent(
+  content: string,
+): { content: string; extraAttachments: ZaloAttachment[] } {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+    return { content, extraAttachments: [] };
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (Array.isArray(parsed)) {
+      const extraAttachments = parsed
+        .map(mapAttachment)
+        .filter((item): item is ZaloAttachment => !!item);
+      if (extraAttachments.length) return { content: '', extraAttachments };
+      return { content, extraAttachments: [] };
+    }
+    const rec = asRecord(parsed);
+    const caption = str(rec.text ?? rec.content ?? rec.message ?? rec.caption ?? '');
+    const extraAttachments = [
+      ...normalizeAttachmentList(rec.attachments ?? rec.files),
+      rec.attach,
+      rec.attachment,
+    ]
+      .map(mapAttachment)
+      .filter((item): item is ZaloAttachment => !!item);
+    if (caption || extraAttachments.length) {
+      return { content: caption, extraAttachments };
+    }
+  } catch {
+    /* keep raw content */
+  }
+  return { content, extraAttachments: [] };
+}
+
+function attachmentsFromContent(content: string): ZaloAttachment[] {
+  return parseMessageContent(content).extraAttachments;
 }
 
 function mapQuote(raw: unknown): ZaloQuote | null {
@@ -185,7 +215,7 @@ export function mapZaloMessage(raw: unknown): ZaloMessage {
   let sender = str(row.sender_type ?? row.senderType, 'user') as ZaloSenderType;
   if (row.operator_staff_id || row.operatorStaffId) sender = 'operator';
   const attachments = [
-    ...asArray(row.attachments ?? row.files),
+    ...normalizeAttachmentList(row.attachments ?? row.files),
     row.attach,
     row.attachment,
   ];
@@ -193,6 +223,11 @@ export function mapZaloMessage(raw: unknown): ZaloMessage {
     .map((item) => mapAttachment(item))
     .filter((item): item is ZaloAttachment => !!item);
   let content = str(row.content);
+  const parsedContent = parseMessageContent(content);
+  content = parsedContent.content;
+  if (parsedContent.extraAttachments.length) {
+    files = [...files, ...parsedContent.extraAttachments];
+  }
   if (files.length === 0) {
     const fromContent = attachmentsFromContent(content);
     if (fromContent.length) {
