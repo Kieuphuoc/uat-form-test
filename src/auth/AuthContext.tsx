@@ -28,6 +28,8 @@ type AuthState = {
   isAdmin: boolean;
   userId: number;
   mobile: boolean;
+  /** `?hidden-navbar=true` — ẩn header Chat (title/user), giữ layout desktop. */
+  hiddenNavbar: boolean;
   loginError: string | null;
   setToken: (token: string | null) => void;
   acceptSession: (token: string, user?: AuthUser | null) => void;
@@ -37,6 +39,11 @@ type AuthState = {
 };
 
 const AuthContext = createContext<AuthState | null>(null);
+
+function isTruthyQuery(params: URLSearchParams, key: string): boolean {
+  const v = params.get(key);
+  return v === 'true' || v === '1';
+}
 
 function stripQueryKeys(...keys: string[]) {
   const params = new URLSearchParams(window.location.search);
@@ -109,6 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [jwt, setJwtState] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [mobile, setMobile] = useState(false);
+  const [hiddenNavbar, setHiddenNavbar] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
   const applyToken = useCallback((token: string | null, nextUser?: AuthUser | null) => {
@@ -154,9 +162,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const isMobile = params.get('mobile') === 'true';
+    const isMobile = isTruthyQuery(params, 'mobile');
+    const hideNavbar = isTruthyQuery(params, 'hidden-navbar');
     setMobile(isMobile);
+    setHiddenNavbar(hideNavbar);
     if (isMobile) document.body.classList.add('mobile-embed');
+    if (hideNavbar) document.body.classList.add('hidden-navbar');
 
     if (params.get('login_error') === '1') {
       setLoginError('Đăng nhập thất bại. Thử lại hoặc kiểm tra cookie keycloak / Auth Apps:mobile.');
@@ -245,6 +256,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAdmin,
       userId,
       mobile,
+      hiddenNavbar,
       loginError,
       setToken: (token) => applyToken(token),
       acceptSession,
@@ -259,6 +271,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAdmin,
       userId,
       mobile,
+      hiddenNavbar,
       loginError,
       applyToken,
       acceptSession,

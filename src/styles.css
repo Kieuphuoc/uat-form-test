@@ -6865,7 +6865,8 @@ body.chat-is-resizing {
 }
 
 /* Nhúng trong app mobile: ẩn header web (nav + tên user); 1 panel; ẩn tên công ty. */
-body.mobile-embed .chat-shell-header {
+body.mobile-embed .chat-shell-header,
+body.hidden-navbar .chat-shell-header {
   display: none;
 }
 

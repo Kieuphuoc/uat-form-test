@@ -41,9 +41,10 @@ function headerSelectPath(id: string): string | null {
 /**
  * Shell kiểu Dash: nền #f5f7fa, header navy #001854, nav Chat / Danh bạ / Zalo.
  * Mobile embed: ẩn header web — menu Chat/Danh bạ/Cài đặt nằm trên header native.
+ * `hidden-navbar`: ẩn header/title/user, giữ layout desktop.
  */
 export function ChatAppShell() {
-  const { mobile, user, logout, jwt } = useAuth();
+  const { mobile, hiddenNavbar, user, logout, jwt } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [me, setMe] = useState<ChatMe | null>(null);
@@ -190,7 +191,7 @@ export function ChatAppShell() {
 
   return (
     <div className={`chat-shell${mobile ? ' chat-shell--mobile' : ''}`} data-chat-theme={me?.chat_theme || 'default'}>
-      {!mobile && (
+      {!mobile && !hiddenNavbar && (
         <header className="chat-shell-header">
           <Link to="/chat" className="chat-shell-brand" title="Arito Chat">
             <img src="/favicon.ico" alt="" />
