@@ -17,8 +17,10 @@ import {
 } from '../components/AppIcons';
 import { ChatAvatar } from '../components/chat/ChatAvatar';
 import { ZaloFilePreviewModal } from '../components/chat/ZaloFilePreviewModal';
+import { ZaloGoogleIcon } from '../components/chat/ZaloGoogleIcon';
 import { ZaloComposer, type ZaloSendPayload } from '../components/chat/ZaloComposer';
 import { navigateChat } from '../lib/chatNav';
+import { renderTextWithLinks } from '../lib/linkifyText';
 import {
   seedZaloUnread,
   subscribeDesktopNotificationMode,
@@ -43,10 +45,15 @@ import {
   zaloAttachmentName,
   zaloAttachmentOpenHref,
   zaloAttachmentPreviewSrc,
+  zaloAttachmentPreviewTarget,
+  zaloBubbleAttachmentClass,
+  zaloGoogleLinkKind,
   zaloIsImageAttachment,
+  zaloIsLinkPreviewAttachment,
   zaloIsPreviewableAttachment,
   zaloMessageAttachments,
   zaloMessageDisplayText,
+  zaloMessageLinkHref,
   type ZaloAttachment,
   type ZaloFolderConfig,
   type ZaloInboxData,
@@ -62,6 +69,16 @@ const INFO_WIDTH_KEY = 'arito-zalo:info-width';
 const SOURCE_KEY = 'arito-zalo:source-id';
 const PAGE_SIZE = 50;
 const POLL_MS = 15_000;
+
+function conversationPulse(conv: { last_message_at?: string; unread_count?: number } | null | undefined): string {
+  if (!conv) return '';
+  return `${conv.last_message_at || ''}|${Number(conv.unread_count) || 0}`;
+}
+
+function isNearThreadBottom(el: HTMLDivElement | null, px = 80): boolean {
+  if (!el) return true;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < px;
+}
 
 function storedWidth(key: string, fallback: number): number {
   const value = Number(window.localStorage.getItem(key));
@@ -83,27 +100,6 @@ function lastPreview(messages: ZaloMessage[] | undefined, fallback?: string): st
   return `${prefix}${text || 'Tin nhắn'}`;
 }
 
-const URL_RE = /(https?:\/\/[^\s<>"']+)/g;
-
-function renderTextWithLinks(text: string, keyPrefix: string): ReactNode[] {
-  const parts: ReactNode[] = [];
-  let last = 0;
-  let match: RegExpExecArray | null;
-  let index = 0;
-  while ((match = URL_RE.exec(text))) {
-    if (match.index > last) parts.push(text.slice(last, match.index));
-    const href = match[1];
-    parts.push(
-      <a key={`${keyPrefix}-link-${index++}`} href={href} target="_blank" rel="noopener noreferrer">
-        {href}
-      </a>,
-    );
-    last = match.index + href.length;
-  }
-  if (last < text.length) parts.push(text.slice(last));
-  return parts;
-}
-
 function renderMentionLinkText(msg: ZaloMessage, displayText: string): ReactNode {
   const marks = [...(msg.mentions || [])].sort((a, b) => a.pos - b.pos);
   if (!marks.length) return renderTextWithLinks(displayText, msg.id);
@@ -123,6 +119,46 @@ function renderMentionLinkText(msg: ZaloMessage, displayText: string): ReactNode
   });
   if (cursor < displayText.length) parts.push(...renderTextWithLinks(displayText.slice(cursor), `${msg.id}-tail`));
   return parts;
+}
+
+function ZaloMessageText({ msg }: { msg: ZaloMessage }) {
+  const displayText = zaloMessageDisplayText(msg);
+  if (!displayText) return null;
+
+  const linkHref = zaloMessageLinkHref(msg);
+  const googleKind = zaloGoogleLinkKind(linkHref);
+  const contentText = (msg.content || '').trim();
+  const usesTitleLink =
+    !!googleKind
+    && zaloMessageAttachments(msg).some(zaloIsLinkPreviewAttachment)
+    && displayText !== contentText
+    && !!linkHref;
+
+  return (
+    <span className="zalo-msg-text">
+      {googleKind && linkHref ? (
+        <a
+          className="zalo-google-link-icon"
+          href={linkHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={`Mở Google ${googleKind}`}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <ZaloGoogleIcon kind={googleKind} size={18} />
+        </a>
+      ) : null}
+      <span className="zalo-msg-text-body">
+        {usesTitleLink ? (
+          <a href={linkHref} target="_blank" rel="noopener noreferrer" className="zalo-msg-link">
+            {displayText}
+          </a>
+        ) : (
+          renderMentionLinkText(msg, displayText)
+        )}
+      </span>
+    </span>
+  );
 }
 
 function ZaloAttachmentBlock({
@@ -238,6 +274,7 @@ export function ZaloChatPage() {
   const [infoVisible, setInfoVisible] = useState(true);
   const [listWidth, setListWidth] = useState(() => storedWidth(LIST_WIDTH_KEY, 320));
   const [infoWidth, setInfoWidth] = useState(() => storedWidth(INFO_WIDTH_KEY, 300));
+  const [newMsgCount, setNewMsgCount] = useState(0);
 
   const toastTimer = useRef<number | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
@@ -248,6 +285,7 @@ export function ZaloChatPage() {
   const activeIdRef = useRef<string | null>(null);
   const sourceIdRef = useRef(sourceId);
   const messagesRef = useRef(data.messages);
+  const conversationsRef = useRef(data.conversations);
   const sourceMenuRef = useRef<HTMLDivElement | null>(null);
 
   const showToast = useCallback((msg: string) => {
@@ -257,7 +295,7 @@ export function ZaloChatPage() {
   }, []);
 
   const openFilePreview = useCallback((file: ZaloAttachment) => {
-    setFilePreview(file);
+    setFilePreview(zaloAttachmentPreviewTarget(file));
   }, []);
 
   useEffect(() => {
@@ -275,6 +313,10 @@ export function ZaloChatPage() {
   }, [data.messages]);
 
   useEffect(() => {
+    conversationsRef.current = data.conversations;
+  }, [data.conversations]);
+
+  useEffect(() => {
     if (!sourceMenuOpen) return;
     const onDoc = (event: MouseEvent) => {
       if (!sourceMenuRef.current?.contains(event.target as Node)) setSourceMenuOpen(false);
@@ -289,8 +331,8 @@ export function ZaloChatPage() {
     };
   }, []);
 
-  const refreshList = useCallback(async (id: string, silent = false) => {
-    if (!silent) setListLoading(true);
+  const refreshList = useCallback(async (id: string) => {
+    setListLoading(true);
     try {
       const [conversations, labels, folderMap] = await Promise.all([
         zaloApi.listConversations(id),
@@ -303,7 +345,7 @@ export function ZaloChatPage() {
     } catch (e) {
       setError(errorMessage(e, 'Không tải được hộp thư Zalo.'));
     } finally {
-      if (!silent) setListLoading(false);
+      setListLoading(false);
     }
   }, []);
 
@@ -336,7 +378,10 @@ export function ZaloChatPage() {
         ? await zaloApi.listMessages(id, conversationId, { afterId: newest, limit: PAGE_SIZE })
         : await zaloApi.listMessages(id, conversationId, { limit: PAGE_SIZE });
       if (items.length === 0) return;
-      skipScrollRef.current = true;
+      const known = new Set(current.map((msg) => msg.id));
+      const added = items.reduce((sum, msg) => sum + (msg.id && !known.has(msg.id) ? 1 : 0), 0);
+      const atBottom = isNearThreadBottom(threadRef.current);
+      skipScrollRef.current = !(added > 0 && atBottom);
       setData((prev) => ({
         ...prev,
         messages: {
@@ -344,10 +389,31 @@ export function ZaloChatPage() {
           [conversationId]: mergeZaloMessages(prev.messages[conversationId] || [], items),
         },
       }));
+      if (added > 0 && !atBottom && conversationId === activeIdRef.current) {
+        setNewMsgCount((n) => n + added);
+      }
     } catch {
       // Poll lỗi im lặng; lần sau thử lại.
     }
   }, []);
+
+  const refreshConversations = useCallback(async (id: string, pollActiveIfChanged = false) => {
+    try {
+      const conversations = await zaloApi.listConversations(id);
+      const current = activeIdRef.current;
+      const shouldPoll =
+        pollActiveIfChanged
+        && !!current
+        && conversationPulse(conversationsRef.current.find((c) => c.id === current))
+          !== conversationPulse(conversations.find((c) => c.id === current));
+      setData((prev) => ({ ...prev, conversations }));
+      seedZaloUnread(id, conversations);
+      setError(null);
+      if (shouldPoll && current) void pollThread(id, current);
+    } catch {
+      // Poll list lỗi im lặng; lần sau thử lại.
+    }
+  }, [pollThread]);
 
   useEffect(() => {
     let cancelled = false;
@@ -380,30 +446,36 @@ export function ZaloChatPage() {
     setActiveId(null);
     setData(emptyZaloInbox());
     setHasMore({});
+    setNewMsgCount(0);
     setPane('list');
     void refreshList(sourceId);
   }, [sourceId, refreshList]);
 
   useEffect(() => {
-    if (!sourceId) return;
-    const timer = window.setInterval(() => {
-      void refreshList(sourceId, true);
-      const current = activeIdRef.current;
-      if (current) void pollThread(sourceId, current);
-    }, POLL_MS);
-    return () => window.clearInterval(timer);
-  }, [sourceId, refreshList, pollThread]);
+    setNewMsgCount(0);
+  }, [activeId]);
 
   useEffect(() => {
-    const notifyTimer = { id: 0 as number };
+    if (!sourceId) return;
+    const timer = window.setInterval(() => {
+      void refreshConversations(sourceId, true);
+    }, POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [sourceId, refreshConversations]);
+
+  useEffect(() => {
+    const notifyTimer = { id: 0 as number, pollActive: false };
     const sub = subscribeZaloInbox((event) => {
       const sid = sourceIdRef.current;
       if (!sid || event.source_id !== sid) return;
+      if (event.conversation_id === activeIdRef.current) notifyTimer.pollActive = true;
       if (notifyTimer.id) window.clearTimeout(notifyTimer.id);
       notifyTimer.id = window.setTimeout(() => {
-        void refreshList(sid, true);
+        const shouldPoll = notifyTimer.pollActive;
+        notifyTimer.pollActive = false;
+        void refreshConversations(sid);
         const current = activeIdRef.current;
-        if (current) void pollThread(sid, current);
+        if (shouldPoll && current) void pollThread(sid, current);
       }, 250);
       if (event.notify && event.conversation_id !== activeIdRef.current) {
         const who = event.conversation_name || 'Zalo';
@@ -414,7 +486,7 @@ export function ZaloChatPage() {
       sub.stop();
       if (notifyTimer.id) window.clearTimeout(notifyTimer.id);
     };
-  }, [refreshList, pollThread, showToast]);
+  }, [refreshConversations, pollThread, showToast]);
 
   const unreadConvCount = useMemo(
     () => data.conversations.filter((c) => (c.unread_count || 0) > 0).length,
@@ -702,6 +774,15 @@ export function ZaloChatPage() {
 
   const onClearQuote = useCallback(() => setPendingQuote(null), []);
 
+  const jumpToLatest = useCallback(() => {
+    const el = threadRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    setNewMsgCount(0);
+    const sid = sourceIdRef.current;
+    const cid = activeIdRef.current;
+    if (sid && cid) void zaloApi.markRead(sid, cid).catch(() => undefined);
+  }, []);
+
   const jumpToQuoted = useCallback((quote: ZaloQuote) => {
     const id = quote.globalMsgId;
     if (!id || !threadRef.current) return;
@@ -986,13 +1067,15 @@ export function ZaloChatPage() {
                 })}
               </div>
 
-              <div
-                ref={threadRef}
-                className="chat-thread-body"
-                onScroll={(event) => {
-                  if (event.currentTarget.scrollTop <= 40) void loadMore();
-                }}
-              >
+              <div className="zalo-thread-scroll">
+                <div
+                  ref={threadRef}
+                  className="chat-thread-body"
+                  onScroll={(event) => {
+                    if (event.currentTarget.scrollTop <= 40) void loadMore();
+                    if (isNearThreadBottom(event.currentTarget)) setNewMsgCount((n) => (n === 0 ? n : 0));
+                  }}
+                >
                 {hasMore[conv.id] && (
                   <div className="chat-more">
                     <button type="button" className="secondary" onClick={() => void loadMore()}>
@@ -1043,7 +1126,7 @@ export function ZaloChatPage() {
                                 </span>
                               )}
                             <div className="chat-bubble-wrap">
-                              <div className="chat-bubble">
+                              <div className={`chat-bubble${zaloBubbleAttachmentClass(msg)}`}>
                                 {zaloQuoteHasContent(msg.quote) && msg.quote && (
                                   <ZaloQuotedBlock
                                     quote={msg.quote}
@@ -1057,11 +1140,7 @@ export function ZaloChatPage() {
                                     onPreview={openFilePreview}
                                   />
                                 ))}
-                                {zaloMessageDisplayText(msg) ? (
-                                  <span className="zalo-msg-text">
-                                    {renderMentionLinkText(msg, zaloMessageDisplayText(msg))}
-                                  </span>
-                                ) : null}
+                                {zaloMessageDisplayText(msg) ? <ZaloMessageText msg={msg} /> : null}
                                 <span className="chat-msg-time">{zaloFmtTime(msg.zalo_created_at)}</span>
                               </div>
                             </div>
@@ -1086,6 +1165,12 @@ export function ZaloChatPage() {
                     </div>
                   );
                 })}
+                </div>
+                {newMsgCount > 0 && (
+                  <button type="button" className="zalo-new-msg-pill" onClick={jumpToLatest}>
+                    {newMsgCount > 99 ? '99+' : newMsgCount} tin mới
+                  </button>
+                )}
               </div>
 
               <ZaloComposer

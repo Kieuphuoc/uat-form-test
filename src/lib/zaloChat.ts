@@ -43,6 +43,8 @@ export type ZaloMessage = {
   mentions?: ZaloMention[];
   quote?: ZaloQuote | null;
   files?: ZaloAttachment[];
+  /** Tiêu đề thẻ link Zalo (chat.recommended) — lấy từ zaloContentRaw.params.mediaTitle */
+  link_preview_title?: string;
   zalo_created_at: string;
 };
 
@@ -180,6 +182,7 @@ export function zaloIsImageUrl(url?: string | null): boolean {
 }
 
 export function zaloIsImageAttachment(file: ZaloAttachment): boolean {
+  if (zaloIsLinkPreviewAttachment(file)) return zaloIsImageUrl(file.thumb);
   const kind = (file.kind || '').toLowerCase();
   if (kind.includes('photo') || kind.includes('image') || kind === 'img') return true;
   return zaloIsImageUrl(file.thumb || file.href);
@@ -194,12 +197,49 @@ export function zaloIsPdfAttachment(file: ZaloAttachment): boolean {
 }
 
 export function zaloIsPreviewableAttachment(file: ZaloAttachment): boolean {
+  if (zaloIsLinkPreviewAttachment(file)) return zaloIsImageUrl(file.thumb);
   return zaloIsImageAttachment(file) || zaloIsPdfAttachment(file);
+}
+
+/** Thumb là ảnh preview, href là link chia sẻ (Google Docs, web…). */
+export function zaloIsLinkPreviewAttachment(file: ZaloAttachment): boolean {
+  const href = (file.href || '').trim();
+  const thumb = (file.thumb || '').trim();
+  if (!href || !thumb || href === thumb) return false;
+  return zaloIsImageUrl(thumb) && !zaloIsImageUrl(href);
+}
+
+export type ZaloGoogleLinkKind = 'docs' | 'sheets' | 'slides' | 'drive' | 'forms';
+
+export function zaloGoogleLinkKind(url?: string | null): ZaloGoogleLinkKind | null {
+  if (!url || !/^https?:\/\//i.test(url.trim())) return null;
+  try {
+    const parsed = new URL(url.trim());
+    const host = parsed.hostname.toLowerCase();
+    const path = parsed.pathname.toLowerCase();
+    if (host === 'drive.google.com') return 'drive';
+    if (!host.endsWith('google.com')) return null;
+    if (path.includes('/spreadsheets/')) return 'sheets';
+    if (path.includes('/presentation/')) return 'slides';
+    if (path.includes('/document/')) return 'docs';
+    if (path.includes('/forms/')) return 'forms';
+    if (host === 'docs.google.com') return 'docs';
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export function zaloMessageLinkHref(msg: ZaloMessage): string {
+  const text = (msg.content || '').trim();
+  if (/^https?:\/\//i.test(text)) return text;
+  const preview = (msg.files || []).find(zaloIsLinkPreviewAttachment);
+  return (preview?.href || text).trim();
 }
 
 function zaloShouldTreatContentUrlAsAttachment(msg: ZaloMessage, url: string): boolean {
   const type = (msg.msg_type || '').toLowerCase();
-  if (type.includes('link')) return false;
+  if (type.includes('link') || type.includes('recommend')) return false;
   if (type.includes('photo') || type.includes('image')) return true;
   if (type.includes('file') || type.includes('attach')) return true;
   if (type === 'text' || type === '') {
@@ -320,13 +360,34 @@ export function zaloContentIsAttachmentOnly(msg: ZaloMessage): boolean {
     }
   }
   if (!/^https?:\/\//i.test(text)) return false;
+  if (files.some(zaloIsLinkPreviewAttachment)) return false;
   return files.some((file) => file.href === text || file.thumb === text);
 }
 
 export function zaloMessageDisplayText(msg: ZaloMessage): string {
   const text = (msg.content || '').trim();
-  if (!text || zaloContentIsAttachmentOnly(msg)) return '';
+  if (!text) return '';
+  if (zaloContentIsAttachmentOnly(msg)) return '';
+  const previewTitle = (msg.link_preview_title || '').trim();
+  if (previewTitle && zaloMessageAttachments(msg).some(zaloIsLinkPreviewAttachment)) {
+    return previewTitle;
+  }
   return text;
+}
+
+export function zaloAttachmentPreviewTarget(file: ZaloAttachment): ZaloAttachment {
+  if (zaloIsLinkPreviewAttachment(file) && file.thumb) {
+    return { ...file, href: file.thumb, kind: 'photo' };
+  }
+  return file;
+}
+
+export function zaloBubbleAttachmentClass(msg: ZaloMessage): string {
+  if (zaloQuoteHasContent(msg.quote)) return '';
+  const hasImage = zaloMessageAttachments(msg).some(zaloIsImageAttachment);
+  if (!hasImage) return '';
+  if (zaloMessageDisplayText(msg)) return ' chat-bubble--attachment chat-bubble--attachment-mixed';
+  return ' chat-bubble--attachment';
 }
 
 export function zaloDownloadHref(url: string, fileName: string) {

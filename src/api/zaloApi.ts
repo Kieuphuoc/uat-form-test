@@ -144,6 +144,35 @@ function attachmentsFromContent(content: string): ZaloAttachment[] {
   return parseMessageContent(content).extraAttachments;
 }
 
+function extractLinkPreviewTitle(row: Json): string {
+  const raw = asRecord(row.zaloContentRaw ?? row.zalo_content_raw);
+  if (!Object.keys(raw).length) return '';
+  let params: unknown = raw.params;
+  if (typeof params === 'string') {
+    const trimmed = params.trim();
+    if (trimmed.startsWith('{')) {
+      try {
+        params = JSON.parse(trimmed) as unknown;
+      } catch {
+        params = null;
+      }
+    }
+  }
+  const parsedParams = asRecord(params);
+  const candidates = [
+    parsedParams.mediaTitle,
+    parsedParams.media_title,
+    parsedParams.title,
+    raw.title,
+    raw.description,
+  ];
+  for (const value of candidates) {
+    const text = str(value).trim();
+    if (text && !/^https?:\/\//i.test(text)) return text;
+  }
+  return '';
+}
+
 function mapQuote(raw: unknown): ZaloQuote | null {
   let value = raw;
   if (typeof raw === 'string') {
@@ -264,6 +293,7 @@ export function mapZaloMessage(raw: unknown): ZaloMessage {
     mentions: mentions.length ? mentions : undefined,
     quote,
     files: files.length ? files : undefined,
+    link_preview_title: extractLinkPreviewTitle(row) || undefined,
     zalo_created_at: iso(row.zalo_created_at ?? row.zaloCreatedAt ?? row.receivedAt),
   };
 }

@@ -1,4 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { renderTextWithLinks } from '../../lib/linkifyText';
 import { IconChevronsDown, IconChevronsUp, IconClose, IconMaximize } from '../AppIcons';
 
 const HEADING_RE = /^(#{1,6})\s+(.+?)(?:\s+#*)?$/;
@@ -18,7 +19,7 @@ function inlineMarkdown(text: string): ReactNode[] {
   let match: RegExpExecArray | null;
   let key = 0;
   while ((match = pattern.exec(text))) {
-    if (match.index > last) nodes.push(text.slice(last, match.index));
+    if (match.index > last) nodes.push(...renderTextWithLinks(text.slice(last, match.index), `md-${key++}`));
     const token = match[0];
     if (token.startsWith('`')) {
       nodes.push(<code key={key++}>{token.slice(1, -1)}</code>);
@@ -50,7 +51,7 @@ function inlineMarkdown(text: string): ReactNode[] {
     }
     last = match.index + token.length;
   }
-  if (last < text.length) nodes.push(text.slice(last));
+  if (last < text.length) nodes.push(...renderTextWithLinks(text.slice(last), `md-tail-${key}`));
   return nodes;
 }
 
