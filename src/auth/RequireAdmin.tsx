@@ -1,13 +1,33 @@
+import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useAuth } from '../auth/AuthContext';
+import { fetchAuthConfig } from '../api/authApi';
+import { useAuth } from './AuthContext';
 
 type Props = {
   children: React.ReactNode;
 };
 
-/** Chỉ cho /admin/* — cần JWT + isAdmin. Runtime embed không dùng. */
+/** Chỉ cho /admin/* — JWT + isAdmin, hoặc password developMode (claim form_dev). */
 export function RequireAdmin({ children }: Props) {
-  const { status, jwt, user, isAdmin, login, logout, loginError } = useAuth();
+  const { status, jwt, user, canAccessAdmin, login, logout, loginError, unlockDevelop } = useAuth();
+  const [developMode, setDevelopMode] = useState<boolean | null>(null);
+  const [pass, setPass] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [passError, setPassError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!jwt || canAccessAdmin) {
+      setDevelopMode(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchAuthConfig().then((cfg) => {
+      if (!cancelled) setDevelopMode(!!cfg.developMode);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [jwt, canAccessAdmin]);
 
   if (status === 'loading') {
     return (
@@ -37,7 +57,19 @@ export function RequireAdmin({ children }: Props) {
     );
   }
 
-  if (!isAdmin) {
+  if (canAccessAdmin) {
+    return <>{children}</>;
+  }
+
+  if (developMode === null) {
+    return (
+      <div className="shell">
+        <p className="muted">Đang kiểm tra quyền…</p>
+      </div>
+    );
+  }
+
+  if (!developMode) {
     return (
       <div className="shell stack">
         <h1>Không có quyền admin</h1>
@@ -59,5 +91,42 @@ export function RequireAdmin({ children }: Props) {
     );
   }
 
-  return <>{children}</>;
+  const onUnlock = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setPassError(null);
+    try {
+      const res = await unlockDevelop(pass);
+      if (!res.ok) {
+        setPassError(res.error || 'Sai password.');
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="shell stack">
+      <h1>Form Admin</h1>
+      <div className="banner">Nhập password develop mode để xem file và design.</div>
+      {passError && <div className="banner">{passError}</div>}
+      <form className="card stack" onSubmit={(e) => void onUnlock(e)}>
+        <label className="field">
+          Password
+          <input
+            type="password"
+            value={pass}
+            autoComplete="current-password"
+            onChange={(e) => setPass(e.target.value)}
+          />
+        </label>
+        <div className="row">
+          <button type="submit" disabled={busy || !pass.trim()}>
+            Vào Admin
+          </button>
+          <Link to="/">Home</Link>
+        </div>
+      </form>
+    </div>
+  );
 }

@@ -6,6 +6,8 @@ export type AuthUser = {
   email: string;
   nickname: string;
   isAdmin: boolean;
+  /** JWT claim form_dev — unlock Admin bằng password developMode. */
+  formDev?: boolean;
   /** Ngôn ngữ UI: v | e | o */
   lan?: 'v' | 'e' | 'o' | string;
 };
@@ -13,6 +15,13 @@ export type AuthUser = {
 export type AuthConfiguredClient = {
   clientId: string;
   name: string;
+};
+
+export type DemoRuntime = {
+  slug: string;
+  label: string;
+  description?: string;
+  icon?: string;
 };
 
 export type AuthConfig = {
@@ -24,16 +33,20 @@ export type AuthConfig = {
   dataSelectionEnabled?: boolean;
   clientSelectionEnabled?: boolean;
   clients?: AuthConfiguredClient[];
+  developMode?: boolean;
+  demoRuntimes?: DemoRuntime[];
 };
 
 export function mapAuthUser(raw: Record<string, unknown>): AuthUser {
   const isAdminRaw = raw.isAdmin ?? raw.is_admin;
+  const formDevRaw = raw.formDev ?? raw.form_dev;
   return {
     userId: Number(raw.userId ?? raw.user_id ?? 0),
     clientId: String(raw.clientId ?? raw.client_id ?? ''),
     email: String(raw.email ?? ''),
     nickname: String(raw.nickname ?? ''),
     isAdmin: isAdminRaw === true || isAdminRaw === 1 || isAdminRaw === '1',
+    formDev: formDevRaw === true || formDevRaw === 1 || formDevRaw === '1',
     lan: String(raw.lan ?? 'v'),
   };
 }
@@ -59,7 +72,11 @@ export async function fetchAuthConfig(): Promise<AuthConfig> {
 }
 
 export async function fetchAuthMe(): Promise<ApiResult<AuthUser>> {
-  return apiFetch<AuthUser>('/auth/me');
+  const res = await apiFetch<AuthUser>('/auth/me');
+  if (res.success && res.data) {
+    return { ...res, data: mapAuthUser(res.data as unknown as Record<string, unknown>) };
+  }
+  return res;
 }
 
 /** Đổi cookie keycloak (AritoID) → JWT Form.Api. */
@@ -68,6 +85,13 @@ export async function authAritoSession(): Promise<ApiResult<SsoLoginResponse>> {
   return apiFetch<SsoLoginResponse>('/auth/arito-session', {
     method: 'POST',
     body: JSON.stringify(keycloakData ? { keycloakData } : {}),
+  });
+}
+
+export async function unlockDevelopMode(pass: string): Promise<ApiResult<SsoLoginResponse>> {
+  return apiFetch<SsoLoginResponse>('/auth/develop-unlock', {
+    method: 'POST',
+    body: JSON.stringify({ pass }),
   });
 }
 

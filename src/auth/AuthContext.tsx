@@ -12,6 +12,8 @@ import {
   buildLoginHref,
   fetchAuthConfig,
   fetchAuthMe,
+  unlockDevelopMode,
+  mapAuthUser,
   type AuthUser,
 } from '../api/authApi';
 import { clearJwt, decodeJwtPayload, getJwt, getJwtUserId, isJwtExpired, setJwt, setSessionJwt } from '../api/client';
@@ -26,6 +28,8 @@ type AuthState = {
   jwt: string | null;
   user: AuthUser | null;
   isAdmin: boolean;
+  formDev: boolean;
+  canAccessAdmin: boolean;
   userId: number;
   mobile: boolean;
   /** `?hidden-navbar=true` — ẩn header Chat (title/user), giữ layout desktop. */
@@ -36,6 +40,7 @@ type AuthState = {
   login: (nextPath?: string, options?: LoginOptions) => Promise<void>;
   logout: () => void;
   refreshMe: () => Promise<void>;
+  unlockDevelop: (pass: string) => Promise<{ ok: boolean; error?: string }>;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -96,6 +101,12 @@ function decodeIsAdmin(jwt: string): boolean {
   return claims.is_admin === true || claims.is_admin === '1' || claims.is_admin === 'true';
 }
 
+function decodeFormDev(jwt: string): boolean {
+  const claims = decodeJwtPayload(jwt) as { form_dev?: string | boolean } | null;
+  if (!claims) return false;
+  return claims.form_dev === true || claims.form_dev === '1' || claims.form_dev === 'true';
+}
+
 function decodeNickname(jwt: string): string {
   const claims = decodeJwtPayload(jwt) as { nickname?: string } | null;
   return typeof claims?.nickname === 'string' ? claims.nickname : '';
@@ -108,6 +119,7 @@ function userFromJwt(jwt: string): AuthUser {
     email: '',
     nickname: decodeNickname(jwt),
     isAdmin: decodeIsAdmin(jwt),
+    formDev: decodeFormDev(jwt),
   };
 }
 
@@ -137,6 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               ...prev,
               userId: prev.userId > 0 ? prev.userId : getJwtUserId(token),
               isAdmin: decodeIsAdmin(token) || prev.isAdmin,
+              formDev: decodeFormDev(token),
             }
           : userFromJwt(token),
       );
@@ -245,7 +258,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [applyToken],
   );
 
+  const unlockDevelop = useCallback(
+    async (pass: string): Promise<{ ok: boolean; error?: string }> => {
+      const res = await unlockDevelopMode(pass);
+      if (!res.success || !res.data?.jwt) {
+        return { ok: false, error: res.error || 'Sai password.' };
+      }
+      applyToken(
+        res.data.jwt,
+        mapAuthUser(res.data.user as unknown as Record<string, unknown>),
+      );
+      return { ok: true };
+    },
+    [applyToken],
+  );
+
   const isAdmin = !!user?.isAdmin || (!!jwt && decodeIsAdmin(jwt));
+  const formDev = !!user?.formDev || (!!jwt && decodeFormDev(jwt));
+  const canAccessAdmin = isAdmin || formDev;
   const userId = user?.userId && user.userId > 0 ? user.userId : jwt ? getJwtUserId(jwt) : 0;
 
   const value = useMemo<AuthState>(
@@ -254,6 +284,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       jwt,
       user,
       isAdmin,
+      formDev,
+      canAccessAdmin,
       userId,
       mobile,
       hiddenNavbar,
@@ -263,12 +295,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       logout,
       refreshMe,
+      unlockDevelop,
     }),
     [
       status,
       jwt,
       user,
       isAdmin,
+      formDev,
+      canAccessAdmin,
       userId,
       mobile,
       hiddenNavbar,
@@ -278,6 +313,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       logout,
       refreshMe,
+      unlockDevelop,
     ],
   );
 

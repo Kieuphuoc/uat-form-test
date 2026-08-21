@@ -3848,6 +3848,119 @@ pre.json {
   margin: 0;
 }
 
+.home-guest {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.home-guest-login {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding-top: 8px;
+}
+
+.home-guest-login button {
+  min-width: 220px;
+}
+
+.home-guest-body {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 28px 20px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.home-guest-hero {
+  text-align: center;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.home-guest-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+
+.home-guest-brand img {
+  width: 36px;
+  height: 36px;
+}
+
+.home-guest-brand h1 {
+  margin: 0;
+  font-size: 2rem;
+  letter-spacing: -0.03em;
+}
+
+.home-guest-lead {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+  font-size: 15px;
+}
+
+.home-guest-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.home-guest-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.home-guest-card h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.home-guest-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+@media (max-width: 640px) {
+  .home-guest-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .home-guest-brand h1 {
+    font-size: 1.6rem;
+  }
+}
+
+.home-head-actions {
+  align-items: center;
+}
+
+.home-admin-link {
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.home-admin-link:hover {
+  text-decoration: underline;
+}
+
 /* ===================== Chat: layout 3 panel ===================== */
 
 .chat-shell {
