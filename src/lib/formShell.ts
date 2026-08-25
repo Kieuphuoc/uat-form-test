@@ -26,6 +26,8 @@ export type FormChromeState = {
   title: string;
   canBack: boolean;
   headerActions?: FormChromeAction[];
+  /** view | edit | new — icon trái tiêu đề. */
+  formMode?: string;
 };
 
 export function normalizeOpenShellTarget(raw: string): OpenShellTarget | null {

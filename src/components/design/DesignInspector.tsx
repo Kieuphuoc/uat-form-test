@@ -46,6 +46,8 @@ import { CONTROL_TYPES } from '../../types/formDoc';
 import { CodeEditor } from '../CodeEditor';
 import { LocalizedTextInput } from './LocalizedTextInput';
 import type { FormControlDef } from '../../types/form';
+import { formatValuesMapText, parseValuesMapText, pcMaxColumns } from '../../lib/pcLayout';
+import { inferColumnSizeMode } from '../../lib/gridColumnLayout';
 
 type Props = {
   doc: FormDocument;
@@ -57,6 +59,8 @@ type Props = {
   onSelect?: (sel: DesignSelection) => void;
   /** Mở tab Actions và focus action id. */
   onEditAction?: (actionId: string) => void;
+  /** Overlay Design Grid (cột `lists[].columns[]`). */
+  onOpenGridEditor?: (listId: string) => void;
 };
 
 const ACTION_NEW = '__new__';
@@ -1050,6 +1054,7 @@ export function DesignInspector({
   onCommit,
   onSelect,
   onEditAction,
+  onOpenGridEditor,
 }: Props) {
   const actions = useMemo(() => actionIds(doc), [doc]);
   const sel = selection ?? { kind: 'form' as const };
@@ -1090,6 +1095,49 @@ export function DesignInspector({
             <option value="edit">edit</option>
           </select>
         </PropRow>
+        <label className="design-prop-row">
+          <span className="design-prop-label">pc.enabled</span>
+          <span className="design-prop-value">
+            <input
+              type="checkbox"
+              checked={!!doc.pc?.enabled}
+              onChange={(e) =>
+                onCommit(
+                  setFormMeta(doc, {
+                    pc: e.target.checked
+                      ? { enabled: true, columns: doc.pc?.columns ?? 3 }
+                      : undefined,
+                  }),
+                )
+              }
+            />
+          </span>
+        </label>
+        {doc.pc?.enabled ? (
+          <PropRow
+            label="pc.columns"
+            title="Số cột TỐI ĐA. Runtime tự hạ theo bề rộng (vd. max 3 → 2 cột trên màn hẹp)."
+          >
+            <input
+              type="number"
+              min={1}
+              max={6}
+              value={pcMaxColumns(doc)}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                onCommit(
+                  setFormMeta(doc, {
+                    pc: {
+                      ...doc.pc,
+                      enabled: true,
+                      columns: Number.isFinite(n) ? n : 3,
+                    },
+                  }),
+                );
+              }}
+            />
+          </PropRow>
+        ) : null}
         <EventActionSelect
           label="onLoad"
           event="onLoad"
@@ -1477,6 +1525,28 @@ export function DesignInspector({
             onChange={(e) => patch({ width: e.target.value.trim() || undefined })}
           />
         </PropRow>
+        {doc.pc?.enabled ? (
+          <PropRow label="pc.colSpan" title="Số cột chiếm trên lưới PC. Mobile bỏ qua.">
+            <select
+              value={String(c.pc?.colSpan ?? 1)}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                patch({
+                  pc: {
+                    ...c.pc,
+                    colSpan: n <= 1 ? undefined : n,
+                  },
+                });
+              }}
+            >
+              {Array.from({ length: pcMaxColumns(doc) }, (_, i) => i + 1).map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </PropRow>
+        ) : null}
         {(c.type === 'textarea' || c.type === 'maps' || c.height) && (
           <PropRow label="height">
             <input
@@ -1792,6 +1862,131 @@ export function DesignInspector({
             </PropRow>
           </>
         )}
+        <strong className="design-inspector-title" style={{ marginTop: 8 }}>
+          List (mobile)
+        </strong>
+        <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>
+          template + itemTemplate — card/media trên điện thoại.
+        </p>
+        <strong className="design-inspector-title">Grid (PC)</strong>
+        <div className="design-prop-row">
+          <span className="design-prop-label">grid.enabled</span>
+          <span className="design-prop-value design-prop-value--row">
+            <input
+              type="checkbox"
+              checked={!!list.grid?.enabled}
+              onChange={(e) =>
+                onCommit(
+                  updateList(doc, list.id, {
+                    grid: e.target.checked
+                      ? { ...list.grid, enabled: true }
+                      : list.grid?.rowEdit
+                        ? { ...list.grid, enabled: false }
+                        : undefined,
+                  }),
+                )
+              }
+            />
+            {list.grid?.enabled ? (
+              <button
+                type="button"
+                className="design-icon-btn design-icon-btn--sm"
+                title="Design Grid — cột + size"
+                aria-label="Design Grid"
+                onClick={() => onOpenGridEditor?.(list.id)}
+              >
+                ▦
+              </button>
+            ) : null}
+          </span>
+        </div>
+        {list.grid?.enabled ? (
+          <>
+            <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>
+              PC (≥900px, không ?mobile=true) vẽ bảng từ columns[]. Không cần form.pc.enabled.
+              Load/search/paging giữ nguyên List. Bấm icon bảng cạnh enabled để Design Grid (cột + size).
+            </p>
+            <PropRow label="rowEdit.formId" title="Form sửa dòng — mở drawer phải trên PC">
+              <select
+                value={list.grid.rowEdit?.formId ?? ''}
+                onChange={(e) => {
+                  const formId = e.target.value.trim();
+                  onCommit(
+                    updateList(doc, list.id, {
+                      grid: {
+                        ...list.grid,
+                        enabled: true,
+                        rowEdit: formId
+                          ? { ...list.grid?.rowEdit, formId }
+                          : undefined,
+                      },
+                    }),
+                  );
+                }}
+              >
+                <option value="">(dùng onRowClick)</option>
+                {formIds.map((id) => (
+                  <option key={id} value={id}>
+                    {id}
+                  </option>
+                ))}
+              </select>
+            </PropRow>
+            {list.grid.rowEdit?.formId ? (
+              <>
+                <PropRow label="rowEdit.formMode">
+                  <select
+                    value={list.grid.rowEdit.formMode ?? 'edit'}
+                    onChange={(e) =>
+                      onCommit(
+                        updateList(doc, list.id, {
+                          grid: {
+                            ...list.grid,
+                            enabled: true,
+                            rowEdit: {
+                              ...list.grid?.rowEdit,
+                              formId: list.grid?.rowEdit?.formId,
+                              formMode: e.target.value,
+                            },
+                          },
+                        }),
+                      )
+                    }
+                  >
+                    <option value="view">view</option>
+                    <option value="new">new</option>
+                    <option value="edit">edit</option>
+                  </select>
+                </PropRow>
+                <PropRow
+                  label="rowEdit.values"
+                  title="Mỗi dòng: đích = nguồn. vd. state.id = row.id"
+                >
+                  <textarea
+                    rows={4}
+                    placeholder={'state.id = row.id\ncontrol.code = row.code'}
+                    value={formatValuesMapText(list.grid.rowEdit.values)}
+                    onChange={(e) =>
+                      onCommit(
+                        updateList(doc, list.id, {
+                          grid: {
+                            ...list.grid,
+                            enabled: true,
+                            rowEdit: {
+                              ...list.grid?.rowEdit,
+                              formId: list.grid?.rowEdit?.formId,
+                              values: parseValuesMapText(e.target.value),
+                            },
+                          },
+                        }),
+                      )
+                    }
+                  />
+                </PropRow>
+              </>
+            ) : null}
+          </>
+        ) : null}
         <label className="design-prop-row">
           <span className="design-prop-label">search</span>
           <span className="design-prop-value">
@@ -2091,14 +2286,42 @@ export function DesignInspector({
             <option value="stepper">stepper</option>
           </select>
         </PropRow>
+        <PropRow label="sizeMode" title="fixed (px) | flex (phần còn lại) | percent (%)">
+          <select
+            value={inferColumnSizeMode(col)}
+            onChange={(e) => {
+              const sizeMode = e.target.value as 'fixed' | 'flex' | 'percent';
+              const width =
+                sizeMode === 'fixed' ? '120px' : sizeMode === 'percent' ? '20%' : '1';
+              onCommit(updateColumn(doc, list.id, col.field, { sizeMode, width }));
+            }}
+          >
+            <option value="fixed">fixed (px)</option>
+            <option value="flex">flex</option>
+            <option value="percent">percent (%)</option>
+          </select>
+        </PropRow>
         <PropRow label="width">
           <input
             value={col.width ?? ''}
-            placeholder="18%"
+            placeholder="120px | 1 | 20%"
             onChange={(e) =>
               onCommit(
                 updateColumn(doc, list.id, col.field, {
                   width: e.target.value.trim() || undefined,
+                }),
+              )
+            }
+          />
+        </PropRow>
+        <PropRow label="minWidth" title="Cột flex không xẹp quá mức">
+          <input
+            value={col.minWidth ?? ''}
+            placeholder="80px"
+            onChange={(e) =>
+              onCommit(
+                updateColumn(doc, list.id, col.field, {
+                  minWidth: e.target.value.trim() || undefined,
                 }),
               )
             }

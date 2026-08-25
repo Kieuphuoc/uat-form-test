@@ -15,12 +15,14 @@ import { useAuth } from '../auth/AuthContext';
 import { DesignActionsEditor } from '../components/design/DesignActionsEditor';
 import { DesignCanvas } from '../components/design/DesignCanvas';
 import { DesignHelpChatPanel } from '../components/design/DesignHelpChatPanel';
+import { DesignGridEditor } from '../components/design/DesignGridEditor';
 import { DesignInspector } from '../components/design/DesignInspector';
 import {
   DesignQuickHelpPanel,
 } from '../components/design/DesignQuickHelpPanel';
 import { DesignSplitter } from '../components/design/DesignSplitter';
 import { DesignPreview } from '../components/DesignPreview';
+import type { DesignViewport } from '../lib/pcLayout';
 import { JsonCodeEditor, type JsonEditorTheme } from '../components/JsonCodeEditor';
 import type { DesignHelpKind } from '../api/designHelpApi';
 import {
@@ -187,6 +189,7 @@ export function DesignPage() {
   const [location, setLocation] = useState<FormContentLocation | null>(null);
   const [jsonTheme, setJsonTheme] = useState<JsonEditorTheme>(() => readJsonTheme());
   const [designUiTheme, setDesignUiTheme] = useState<'light' | 'dark'>(() => readDesignUiTheme());
+  const [designViewport, setDesignViewport] = useState<DesignViewport>('phone');
   const [panels, setPanels] = useState<PanelLayout>(() => readPanelLayout());
   const [showLocationInfo, setShowLocationInfo] = useState(false);
   const [helpChatOpen, setHelpChatOpen] = useState(false);
@@ -195,6 +198,7 @@ export function DesignPage() {
   const [helpEmbedKind, setHelpEmbedKind] = useState<DesignHelpKind | null>(null);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [gridEditorListId, setGridEditorListId] = useState<string | null>(null);
 
   const historyRef = useRef<string[]>([]);
   const histIndexRef = useRef(-1);
@@ -204,6 +208,10 @@ export function DesignPage() {
   const isSharedFocus =
     treeFocus?.kind === 'shared-actions' || treeFocus?.kind === 'shared-fragment';
   const dirty = jsonText !== savedJson || (!isSharedFocus && sharedDirty);
+
+  useEffect(() => {
+    setGridEditorListId(null);
+  }, [slug, activeForm]);
   const runtimeHref = useMemo(() => {
     if (!slug) return '';
     const q = new URLSearchParams();
@@ -1182,6 +1190,23 @@ export function DesignPage() {
               ◫
             </button>
             <span className="design-toolbar-sep" />
+            <div className="design-viewport-toggle" title="Viewport Design / Preview">
+              <button
+                type="button"
+                className={designViewport === 'phone' ? 'active' : ''}
+                onClick={() => setDesignViewport('phone')}
+              >
+                Phone
+              </button>
+              <button
+                type="button"
+                className={designViewport === 'pc' ? 'active' : ''}
+                onClick={() => setDesignViewport('pc')}
+              >
+                PC
+              </button>
+            </div>
+            <span className="design-toolbar-sep" />
             <button
               type="button"
               className="design-icon-btn"
@@ -1376,6 +1401,7 @@ export function DesignPage() {
                   <DesignCanvas
                     doc={formDoc}
                     selection={selection}
+                    viewport={designViewport}
                     onSelect={setSelection}
                     onRequestAddControl={requestAddControl}
                     onRequestAddIconButton={requestAddIconButton}
@@ -1443,6 +1469,7 @@ export function DesignPage() {
                       onCommit={commitDoc}
                       onSelect={setSelection}
                       onEditAction={editAction}
+                      onOpenGridEditor={(listId) => setGridEditorListId(listId)}
                     />
                   )}
                 </>
@@ -1588,7 +1615,12 @@ export function DesignPage() {
             </div>
           </div>
           <div className="design-preview-body">
-            <DesignPreview slug={slug} formId={activeForm} refreshKey={previewKey} />
+            <DesignPreview
+              slug={slug}
+              formId={activeForm}
+              refreshKey={previewKey}
+              viewport={designViewport}
+            />
           </div>
           {runtimeHref ? (
             <div className="design-preview-footer">
@@ -1610,6 +1642,14 @@ export function DesignPage() {
           ) : null}
         </section>
       )}
+      {gridEditorListId && formDoc ? (
+        <DesignGridEditor
+          doc={formDoc}
+          listId={gridEditorListId}
+          onCommit={commitDoc}
+          onClose={() => setGridEditorListId(null)}
+        />
+      ) : null}
     </div>
   );
 }

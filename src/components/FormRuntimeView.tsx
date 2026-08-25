@@ -43,7 +43,27 @@ import type {
   FormMode,
   RuntimeActionResponse,
 } from '../types/form';
+import {
+  gridRowEditFormId,
+  isPcDrawerViewport,
+  isPcGridList,
+  isPcLayoutActive,
+  mapRowEditValues,
+  pcColumnCount,
+  pcGridContainerStyle,
+  pcGridItemStyle,
+  pcSpanForLayoutGroup,
+  prepareControlsForPc,
+  resolveOverlayMode,
+  useViewportWidth,
+  type ViewportMode,
+} from '../lib/pcLayout';
 import { FormDebugBug } from './FormDebugBug';
+import { FormTitleWithMode } from './formModeTitleIcon';
+import {
+  GRID_CHECK_COL_PX,
+  resolveGridColgroup,
+} from '../lib/gridColumnLayout';
 import {
   OpenAsAnchor,
   resolveOpenAs,
@@ -97,6 +117,12 @@ type Props = {
   preview?: boolean;
   /** Preview trong Designer — compact shell, ẩn debug bug. */
   embedded?: boolean;
+  /** auto = theo chiều rộng; phone/pc = Designer toggle. */
+  viewportMode?: ViewportMode;
+  /** Đóng host lồng (drawer PC). */
+  onClose?: () => void;
+  /** Nested drawer: báo form sửa đã đổi values (so với lúc mở / đổi dòng). */
+  onDirtyChange?: (dirty: boolean) => void;
 };
 
 export { groupControlsByRowId };
@@ -129,9 +155,9 @@ function truthyCell(v: unknown): boolean {
   return s === '1' || s === 'y' || s === 'yes' || s === 'true' || s === 'x';
 }
 
-function listCellStyle(col: FormListColumnDef): CSSProperties | undefined {
+function listCellStyle(col: FormListColumnDef, opts?: { skipWidth?: boolean }): CSSProperties | undefined {
   const style: CSSProperties = {};
-  if (col.width?.trim()) style.width = col.width.trim();
+  if (!opts?.skipWidth && col.width?.trim()) style.width = col.width.trim();
   if (col.bold) style.fontWeight = 700;
   if (col.italic) style.fontStyle = 'italic';
   if (col.color?.trim()) style.color = col.color.trim();
@@ -430,10 +456,14 @@ export function FormRuntimeView({
   uiLan,
   preview,
   embedded,
+  viewportMode = 'auto',
+  onClose,
+  onDirtyChange,
 }: Props) {
   const authLan = useUiLan();
   const lan = uiLan ?? authLan;
   const { user } = useAuth();
+  const viewportWidth = useViewportWidth();
   const [stack, setStack] = useState<StackFrame[]>([
     buildFrame(initialForm, {
       values: initialValues,
@@ -446,15 +476,53 @@ export function FormRuntimeView({
   const [toast, setToast] = useState<Toast>(null);
   /** Override collapsed theo groupId (undefined = dùng defaultCollapsed). */
   const [groupCollapsed, setGroupCollapsed] = useState<Record<string, boolean>>({});
+  const drawerDirtyRef = useRef(false);
+  const valuesSnapshotRef = useRef<string | null>(null);
 
   const top = stack[stack.length - 1]!;
   const isOverlay = stack.length > 1;
-  const overlayMode = (top.uiMode ?? 'modal').trim().toLowerCase();
+  const allowDrawer = isPcDrawerViewport({
+    viewportMode,
+    width: viewportWidth,
+  });
+  const overlayMode = resolveOverlayMode(top.uiMode, allowDrawer);
   const isFullscreen = overlayMode === 'fullscreen' || overlayMode === 'full';
   const isSheet = overlayMode === 'sheet';
+  const isDrawerSplit = isOverlay && overlayMode === 'drawer' && allowDrawer;
+  /** Khi drawer PC: khung chính vẫn là form cha; `top` là form sửa bên phải. */
+  const visualFrame = isDrawerSplit && stack.length > 1 ? stack[stack.length - 2]! : top;
+  const pcActive = isPcLayoutActive(visualFrame.form, {
+    viewportMode,
+    width: viewportWidth,
+  });
+  const pcViewport = isPcDrawerViewport({
+    viewportMode,
+    width: viewportWidth,
+  });
+  const pcCols = pcColumnCount(visualFrame.form, {
+    viewportMode,
+    width: viewportWidth,
+  });
   /** Designer preview giữ modal-header; runtime gom title ra chrome ngoài. */
   const useOuterChrome = !embedded;
   const isModal = isOverlay && !useOuterChrome;
+
+  useEffect(() => {
+    if (!onDirtyChange) return;
+    if (valuesSnapshotRef.current === null) {
+      valuesSnapshotRef.current = JSON.stringify(top.values);
+      onDirtyChange(false);
+      return;
+    }
+    onDirtyChange(JSON.stringify(top.values) !== valuesSnapshotRef.current);
+  }, [top.values, onDirtyChange]);
+
+  const confirmLeaveDirtyEdit = useCallback((): boolean => {
+    if (!isDrawerSplit) return true;
+    if (top.formMode !== 'edit') return true;
+    if (!drawerDirtyRef.current) return true;
+    return window.confirm(uiCopy(lan, 'confirmLeaveDirtyEdit'));
+  }, [isDrawerSplit, top.formMode, lan]);
 
   useEffect(() => {
     setGroupCollapsed({});
@@ -640,7 +708,11 @@ export function FormRuntimeView({
 
           if (ui?.close) {
             if (frames.length <= 1) {
-              showToast(uiCopy(lan, 'closed'), 'info');
+              if (onClose) {
+                onClose();
+              } else {
+                showToast(uiCopy(lan, 'closed'), 'info');
+              }
             } else {
               const child = frames[frames.length - 1]!;
               const parent = { ...frames[frames.length - 2]! };
@@ -657,7 +729,7 @@ export function FormRuntimeView({
         setBusy(false);
       }
     },
-    [stack, slug, preview, mergeResult, showToast, lan],
+    [stack, slug, preview, mergeResult, showToast, lan, onClose],
   );
 
   const openLinkedForm = useCallback(
@@ -678,6 +750,49 @@ export function FormRuntimeView({
             returnMap,
           }),
         ]);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [slug, preview, showToast, lan],
+  );
+
+  const openRowEditForm = useCallback(
+    async (list: FormListDef, row: Record<string, unknown>, rowKey: string) => {
+      const formId = gridRowEditFormId(list);
+      if (!formId) return;
+      const mapped = mapRowEditValues(list.grid?.rowEdit?.values, row);
+      setBusy(true);
+      try {
+        const loaded = await fetchRuntimeForm(slug, formId, preview);
+        if (!loaded.success || !loaded.data) {
+          showToast(loaded.error || uiCopy(lan, 'cannotOpenForm'), 'error');
+          return;
+        }
+        drawerDirtyRef.current = false;
+        const frame = buildFrame(loaded.data.form, {
+          values: { ...(loaded.data.values ?? {}), ...mapped.values },
+          state: { ...(loaded.data.state ?? {}), ...mapped.state },
+          datasets: loaded.data.datasets,
+          formMode: list.grid?.rowEdit?.formMode || 'edit',
+          uiMode: 'drawer',
+        });
+        setStack((prev) => {
+          const last = prev[prev.length - 1];
+          const alreadyDrawer =
+            prev.length > 1 &&
+            last?.formId === formId &&
+            (last.uiMode ?? '').toLowerCase() === 'drawer';
+          const parentIdx = alreadyDrawer ? prev.length - 2 : prev.length - 1;
+          const copy = [...prev];
+          const parent = copy[parentIdx];
+          if (parent) copy[parentIdx] = { ...parent, selectedRowKey: rowKey };
+          if (alreadyDrawer) {
+            copy[copy.length - 1] = frame;
+            return copy;
+          }
+          return [...copy, frame];
+        });
       } finally {
         setBusy(false);
       }
@@ -779,9 +894,17 @@ export function FormRuntimeView({
     void runActions(actions, undefined, undefined, { [qBind]: query, [pageBind]: 1 });
   };
 
-  const { header: headerControls, body: bodyControls, footer: footerControls } = useMemo(
-    () => splitControlsByPlacement(top.form.controls),
-    [top.form.controls],
+  const { header: headerControls, body: bodyControlsRaw, footer: footerControlsRaw } = useMemo(
+    () => splitControlsByPlacement(visualFrame.form.controls),
+    [visualFrame.form.controls],
+  );
+  const bodyControls = useMemo(
+    () => (pcActive ? prepareControlsForPc(bodyControlsRaw) : bodyControlsRaw),
+    [bodyControlsRaw, pcActive],
+  );
+  const footerControls = useMemo(
+    () => (pcActive ? prepareControlsForPc(footerControlsRaw) : footerControlsRaw),
+    [footerControlsRaw, pcActive],
   );
   const controlGroups = useMemo(
     () => groupControlsForLayout(bodyControls, lan),
@@ -792,15 +915,16 @@ export function FormRuntimeView({
     [footerControls, lan],
   );
   const lists = useMemo(
-    () => [...top.form.lists].sort((a, b) => a.order - b.order),
-    [top.form.lists],
+    () => [...visualFrame.form.lists].sort((a, b) => a.order - b.order),
+    [visualFrame.form.lists],
   );
 
   const emitCurrentChrome = useCallback(() => {
     if (!useOuterChrome) return;
-    const title = resolveLocalizedText(top.form.title, lan) || top.form.id;
+    const chromeFrame = isDrawerSplit ? visualFrame : top;
+    const title = resolveLocalizedText(chromeFrame.form.title, lan) || chromeFrame.form.id;
     const headerActions = headerControls
-      .filter((hc) => isControlVisible(hc, top.formMode))
+      .filter((hc) => isControlVisible(hc, visualFrame.formMode))
       .map((hc) => ({
         id: hc.id,
         label: resolveLocalizedText(hc.text, lan) || resolveLocalizedText(hc.label, lan) || hc.id,
@@ -809,8 +933,17 @@ export function FormRuntimeView({
       title,
       canBack: stack.length > 1,
       headerActions,
+      formMode: chromeFrame.formMode,
     });
-  }, [useOuterChrome, top.form, top.formMode, headerControls, lan, stack.length]);
+  }, [
+    useOuterChrome,
+    isDrawerSplit,
+    top,
+    visualFrame,
+    headerControls,
+    lan,
+    stack.length,
+  ]);
 
   useEffect(() => {
     emitCurrentChrome();
@@ -841,19 +974,19 @@ export function FormRuntimeView({
   }, [useOuterChrome, headerControls, openLinkedForm, runActions, emitCurrentChrome]);
 
   const renderControl = (c: FormControlDef, inRow = false): ReactNode => {
-    if (!isControlVisible(c, top.formMode)) return null;
+    if (!isControlVisible(c, visualFrame.formMode)) return null;
 
     // openAs + view + rỗng → ẩn cả control (vd. QR không phải link).
     if (
       c.type === 'text' &&
-      top.formMode === 'view' &&
+      visualFrame.formMode === 'view' &&
       resolveOpenAs(c.openAs) &&
-      !asInputValue(top.values[c.id]).trim()
+      !asInputValue(visualFrame.values[c.id]).trim()
     ) {
       return null;
     }
 
-    const editable = isControlEditable(c, top.formMode, busy);
+    const editable = isControlEditable(c, visualFrame.formMode, busy);
     const disabled = !editable;
     const layoutStyle = controlLayoutStyle(c, inRow);
     const textStyle = controlTextStyle(c);
@@ -890,7 +1023,7 @@ export function FormRuntimeView({
       }
 
       const openAs = resolveOpenAs(c.openAs);
-      const fromValue = asInputValue(top.values[c.id]).trim();
+      const fromValue = asInputValue(visualFrame.values[c.id]).trim();
       let sessionText = '';
       if ((c.bind ?? '').trim().toLowerCase() === 'sessionuser') {
         const name = (user?.nickname || user?.email || '').trim();
@@ -924,9 +1057,9 @@ export function FormRuntimeView({
         <div key={c.id} className="form-maps-field" style={layoutStyle}>
           {showLabel ? <span className="form-maps-field__label">{labelText}</span> : null}
           <MapsControl
-            value={top.values[c.id] ?? c.defaultValue}
+            value={visualFrame.values[c.id] ?? c.defaultValue}
             height={c.height}
-            autoLocate={!asInputValue(top.values[c.id] ?? c.defaultValue).trim()}
+            autoLocate={!asInputValue(visualFrame.values[c.id] ?? c.defaultValue).trim()}
             onLocationsChange={(serialized) => setValue(c.id, serialized)}
           />
         </div>
@@ -983,7 +1116,7 @@ export function FormRuntimeView({
       disabled,
       readOnly: disabled,
       placeholder: placeholderText,
-      value: asInputValue(top.values[c.id]),
+      value: asInputValue(visualFrame.values[c.id]),
       style: { ...heightStyle, ...textStyle } as CSSProperties,
       onChange: (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         if (!editable) return;
@@ -1001,7 +1134,7 @@ export function FormRuntimeView({
             {c.required ? ' *' : ''}
             {(c.type === 'file' || c.type === 'image') &&
             !editable &&
-            parseAttachments(top.values[c.id]).length === 0 ? (
+            parseAttachments(visualFrame.values[c.id]).length === 0 ? (
               <em className="form-attach-empty-inline">
                 {c.type === 'image' ? uiCopy(lan, 'noImageParen') : uiCopy(lan, 'noFilesParen')}
               </em>
@@ -1009,7 +1142,7 @@ export function FormRuntimeView({
           </span>
         ) : (c.type === 'file' || c.type === 'image') &&
           !editable &&
-          parseAttachments(top.values[c.id]).length === 0 ? (
+          parseAttachments(visualFrame.values[c.id]).length === 0 ? (
           <em className="form-attach-empty-inline">
             {c.type === 'image' ? uiCopy(lan, 'noImage') : uiCopy(lan, 'noFiles')}
           </em>
@@ -1021,8 +1154,8 @@ export function FormRuntimeView({
             c={c}
             disabled={disabled}
             editable={editable}
-            value={asInputValue(top.values[c.id])}
-            datasets={top.datasets}
+            value={asInputValue(visualFrame.values[c.id])}
+            datasets={visualFrame.datasets}
             heightStyle={{ ...heightStyle, ...textStyle }}
             placeholder={placeholderText}
             onChangeValue={(v) => {
@@ -1052,7 +1185,7 @@ export function FormRuntimeView({
             editable={editable}
             format={c.format}
             placeholder={placeholderText}
-            value={top.values[c.id]}
+            value={visualFrame.values[c.id]}
             style={{ ...heightStyle, ...textStyle }}
             onCommit={(n) => {
               setValue(c.id, n);
@@ -1066,7 +1199,7 @@ export function FormRuntimeView({
             editable={editable}
             format={c.format}
             placeholder={placeholderText}
-            value={top.values[c.id]}
+            value={visualFrame.values[c.id]}
             style={{ ...heightStyle, ...textStyle }}
             onCommit={(s) => {
               setValue(c.id, s);
@@ -1080,7 +1213,7 @@ export function FormRuntimeView({
             editable={editable}
             format={c.format}
             placeholder={placeholderText}
-            value={top.values[c.id]}
+            value={visualFrame.values[c.id]}
             style={{ ...heightStyle, ...textStyle }}
             onCommit={(s) => {
               setValue(c.id, s);
@@ -1092,7 +1225,7 @@ export function FormRuntimeView({
             id={c.id}
             disabled={disabled}
             editable={editable}
-            value={top.values[c.id]}
+            value={visualFrame.values[c.id]}
             style={{ ...heightStyle, ...textStyle }}
             lan={lan}
             onCommit={(hex) => {
@@ -1101,7 +1234,7 @@ export function FormRuntimeView({
             }}
           />
         ) : c.type === 'file' || c.type === 'image' ? (
-          !editable && parseAttachments(top.values[c.id]).length === 0 ? null : (
+          !editable && parseAttachments(visualFrame.values[c.id]).length === 0 ? null : (
             <RuntimeFileImageInput
               kind={c.type}
               slug={slug}
@@ -1111,7 +1244,7 @@ export function FormRuntimeView({
               maxFiles={c.maxFiles}
               uploadMode={c.uploadMode}
               previewWidth={c.previewWidth}
-              value={top.values[c.id]}
+              value={visualFrame.values[c.id]}
               style={heightStyle}
               lan={lan}
               onCommit={(items) => {
@@ -1122,8 +1255,8 @@ export function FormRuntimeView({
           )
         ) : (() => {
           const openAs = resolveOpenAs(c.openAs);
-          if (c.type === 'text' && openAs && top.formMode === 'view') {
-            const raw = asInputValue(top.values[c.id]);
+          if (c.type === 'text' && openAs && visualFrame.formMode === 'view') {
+            const raw = asInputValue(visualFrame.values[c.id]);
             return (
               <OpenAsAnchor kind={openAs} value={raw} className="form-openas-link form-openas-link--field" />
             );
@@ -1192,27 +1325,59 @@ export function FormRuntimeView({
   const footerNodes = footerGroups.map(renderLayoutGroup).filter(Boolean);
   const hasFooter = footerNodes.length > 0;
   /** list = list-only chrome (không card/border, không tiêu đề list + chọn tất cả). */
-  const isListLayout = (top.form.layout || '').toLowerCase() === 'list';
+  const isListLayout = (visualFrame.form.layout || '').toLowerCase() === 'list';
 
   const body = (
     <div className={`form-shell${hasFooter ? ' form-shell--has-footer' : ''}`}>
       <div
-        className={`form-scroll ${top.form.layout === 'drawer' ? 'form-drawer' : 'stack'}`}
+        className={`form-scroll ${
+          visualFrame.form.layout === 'drawer'
+            ? 'form-drawer'
+            : pcActive
+              ? 'form-pc-grid'
+              : 'stack'
+        }`}
+        style={pcActive ? pcGridContainerStyle(pcCols) : undefined}
       >
-      {!useOuterChrome && !isModal && top.form.layout !== 'drawer' && !isListLayout && (
-        <h1>{resolveLocalizedText(top.form.title, lan)}</h1>
+      {!useOuterChrome &&
+        !isModal &&
+        !isDrawerSplit &&
+        !onClose &&
+        visualFrame.form.layout !== 'drawer' &&
+        !isListLayout && (
+        <h1 style={pcActive ? { gridColumn: '1 / -1' } : undefined}>
+          <FormTitleWithMode
+            mode={visualFrame.formMode}
+            text={resolveLocalizedText(visualFrame.form.title, lan)}
+          />
+        </h1>
       )}
-      {!useOuterChrome && !isModal && top.form.layout === 'drawer' && (
-        <h1 className="form-drawer-title">{resolveLocalizedText(top.form.title, lan)}</h1>
+      {!useOuterChrome &&
+        !isModal &&
+        !isDrawerSplit &&
+        !onClose &&
+        visualFrame.form.layout === 'drawer' && (
+        <h1 className="form-drawer-title">
+          <FormTitleWithMode
+            mode={visualFrame.formMode}
+            text={resolveLocalizedText(visualFrame.form.title, lan)}
+          />
+        </h1>
       )}
-      {isModal && (
+      {isModal && !isDrawerSplit && (
         <div
           className={`modal-header${headerControls.length ? ' modal-header--has-actions' : ''}`}
+          style={pcActive ? { gridColumn: '1 / -1' } : undefined}
         >
-          <h2>{resolveLocalizedText(top.form.title, lan)}</h2>
+          <h2>
+            <FormTitleWithMode
+              mode={visualFrame.formMode}
+              text={resolveLocalizedText(visualFrame.form.title, lan)}
+            />
+          </h2>
           <div className="modal-header-actions">
             {headerControls.map((hc) => {
-              if (!isControlVisible(hc, top.formMode)) return null;
+              if (!isControlVisible(hc, visualFrame.formMode)) return null;
               const ht = resolveLocalizedText(hc.text, lan) || resolveLocalizedText(hc.label, lan);
               return (
                 <button
@@ -1234,7 +1399,32 @@ export function FormRuntimeView({
               className="modal-close"
               title={uiCopy(lan, 'close')}
               aria-label={uiCopy(lan, 'close')}
-              onClick={() => setStack((s) => s.slice(0, -1))}
+              onClick={() => {
+                if (stack.length > 1) setStack((s) => s.slice(0, -1));
+                else onClose?.();
+              }}
+              disabled={busy}
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+      {onClose && !isModal && (
+        <div className="modal-header" style={pcActive ? { gridColumn: '1 / -1' } : undefined}>
+          <h2>
+            <FormTitleWithMode
+              mode={visualFrame.formMode}
+              text={resolveLocalizedText(visualFrame.form.title, lan)}
+            />
+          </h2>
+          <div className="modal-header-actions">
+            <button
+              type="button"
+              className="modal-close"
+              title={uiCopy(lan, 'close')}
+              aria-label={uiCopy(lan, 'close')}
+              onClick={() => onClose()}
               disabled={busy}
             >
               ×
@@ -1243,26 +1433,47 @@ export function FormRuntimeView({
         </div>
       )}
 
-      {controlGroups.map(renderLayoutGroup)}
+      {pcActive
+        ? controlGroups.map((g) => (
+            <div key={
+              g.kind === 'group'
+                ? `pc:group:${g.groupId}`
+                : g.kind === 'row'
+                  ? `pc:row:${g.rowId}`
+                  : `pc:${g.control.id}`
+            } style={pcGridItemStyle(pcSpanForLayoutGroup(g, pcCols))}>
+              {renderLayoutGroup(g)}
+            </div>
+          ))
+        : controlGroups.map(renderLayoutGroup)}
 
       {lists.map((list) => {
-        const rawRows = top.datasets[list.bind] ?? [];
-        const rows = filterListRows(rawRows, list, top.state);
+        const rawRows = visualFrame.datasets[list.bind] ?? [];
+        const rows = filterListRows(rawRows, list, visualFrame.state);
         const multi = list.selection === 'multiple';
         const keysBind = list.selectedKeysBind || 'selectedKeys';
-        const selectedKeys = asStringKeys(top.state[keysBind]);
+        const selectedKeys = asStringKeys(visualFrame.state[keysBind]);
         const selectedSet = new Set(selectedKeys);
         const visibleKeys = rows.map((row, idx) => String(list.rowKey ? row[list.rowKey] : idx));
         const allVisibleSelected =
           visibleKeys.length > 0 && visibleKeys.every((k) => selectedSet.has(k));
-        const colCount = list.columns.length + (multi ? 1 : 0);
+        const showGrid = isPcGridList(list, pcViewport);
+        const editFormId = gridRowEditFormId(list);
+        const colCount = list.columns.length + (multi ? 1 : 0) + (showGrid && editFormId ? 1 : 0);
+        const gridLayout = showGrid
+          ? resolveGridColgroup(
+              list.columns,
+              { checkbox: multi, edit: !!editFormId },
+              Math.max(320, isDrawerSplit ? viewportWidth * 0.55 : viewportWidth),
+            )
+          : null;
         const paging = list.paging;
         const pageSize = Math.max(1, paging?.pageSize ?? 20);
         const pageBind = paging?.pageBind || 'page';
-        const page = Math.max(1, Number(top.state[pageBind] ?? 1) || 1);
-        const pageCount = resolvePageCount(top, list);
-        const total = resolveListTotal(top, list);
-        const lastCount = top.listFetchMeta?.[list.bind]?.lastCount ?? rawRows.length;
+        const page = Math.max(1, Number(visualFrame.state[pageBind] ?? 1) || 1);
+        const pageCount = resolvePageCount(visualFrame, list);
+        const total = resolveListTotal(visualFrame, list);
+        const lastCount = visualFrame.listFetchMeta?.[list.bind]?.lastCount ?? rawRows.length;
         const mode = (paging?.mode ?? 'none').toLowerCase();
         const hasMore =
           mode === 'loadmore'
@@ -1278,21 +1489,28 @@ export function FormRuntimeView({
         const listTpl = resolveListTemplate(list);
         const itemTpl = list.itemTemplate ?? {};
         const sep = itemTpl.lineSep ?? ' · ';
-        const isCards = listTpl === 'card' || listTpl === 'media';
+        const isCards = !showGrid && (listTpl === 'card' || listTpl === 'media');
         const searchOn = isListSearchEnabled(list);
         const qBind = list.search?.queryBind || `${list.id}Query`;
-        const searchQuery = String(top.state[qBind] ?? '');
+        const searchQuery = String(visualFrame.state[qBind] ?? '');
 
         const onRowActivate = (row: Record<string, unknown>, key: string) => {
           if (multi) {
             toggleListKey(list, key);
             return;
           }
+          if (showGrid && editFormId) {
+            if (visualFrame.selectedRowKey === key && isDrawerSplit) return;
+            if (!confirmLeaveDirtyEdit()) return;
+            void openRowEditForm(list, row, key);
+            return;
+          }
           setStack((prev) => {
             const copy = [...prev];
-            const last = { ...copy[copy.length - 1]! };
+            const idx = isDrawerSplit ? Math.max(0, prev.length - 2) : prev.length - 1;
+            const last = { ...copy[idx]! };
             last.selectedRowKey = key;
-            copy[copy.length - 1] = last;
+            copy[idx] = last;
             return copy;
           });
           if (list.onRowClick?.length) void runActions(list.onRowClick, row);
@@ -1347,7 +1565,8 @@ export function FormRuntimeView({
         return (
           <div
             key={list.id}
-            className={`stack form-drawer-span form-list${isListLayout ? ' form-list--bare' : ' card'}`}
+            className={`stack form-drawer-span form-list${isListLayout ? ' form-list--bare' : ' card'}${showGrid ? ' form-list--grid' : ''}`}
+            style={pcActive ? { gridColumn: '1 / -1' } : undefined}
           >
             {!isListLayout && (
               <div className="form-list-head">
@@ -1385,7 +1604,7 @@ export function FormRuntimeView({
                 {rows.length === 0 && <p className="muted">{uiCopy(lan, 'noData')}</p>}
                 {rows.map((row, idx) => {
                   const key = String(list.rowKey ? row[list.rowKey] : idx);
-                  const rowSelected = multi ? selectedSet.has(key) : top.selectedRowKey === key;
+                  const rowSelected = multi ? selectedSet.has(key) : visualFrame.selectedRowKey === key;
                   const line1 = joinRowFields(row, itemTpl.line1, sep);
                   const line2 = joinRowFields(row, itemTpl.line2, sep);
                   const meta = itemTpl.metaField
@@ -1432,11 +1651,26 @@ export function FormRuntimeView({
                 })}
               </div>
             ) : (
-              <table className="data">
+              <div className={showGrid ? 'form-grid-scroll' : undefined}>
+              <table
+                className={`data${showGrid ? ' form-grid-table' : ''}`}
+                style={
+                  showGrid && gridLayout && gridLayout.usedPct > 100
+                    ? { minWidth: `${gridLayout.usedPct}%` }
+                    : undefined
+                }
+              >
+                {gridLayout ? (
+                  <colgroup>
+                    {gridLayout.cols.map((c) => (
+                      <col key={c.key} style={c.style} />
+                    ))}
+                  </colgroup>
+                ) : null}
                 <thead>
                   <tr>
                     {multi && (
-                      <th className="form-list-check-col" style={{ width: 36 }}>
+                      <th className="form-list-check-col" style={showGrid ? undefined : { width: GRID_CHECK_COL_PX }}>
                         <input
                           type="checkbox"
                           checked={allVisibleSelected}
@@ -1449,10 +1683,13 @@ export function FormRuntimeView({
                       </th>
                     )}
                     {list.columns.map((col) => (
-                      <th key={col.field} style={listCellStyle(col)}>
+                      <th key={col.field} style={listCellStyle(col, { skipWidth: showGrid })}>
                         {resolveLocalizedText(col.title, lan)}
                       </th>
                     ))}
+                    {showGrid && editFormId ? (
+                      <th className="form-grid-edit-col">{uiCopy(lan, 'listEdit')}</th>
+                    ) : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -1465,7 +1702,7 @@ export function FormRuntimeView({
                   )}
                   {rows.map((row, idx) => {
                     const key = String(list.rowKey ? row[list.rowKey] : idx);
-                    const rowSelected = multi ? selectedSet.has(key) : top.selectedRowKey === key;
+                    const rowSelected = multi ? selectedSet.has(key) : visualFrame.selectedRowKey === key;
                     return (
                       <tr
                         key={key}
@@ -1486,15 +1723,32 @@ export function FormRuntimeView({
                           </td>
                         )}
                         {list.columns.map((col) => (
-                          <td key={col.field} style={listCellStyle(col)}>
+                          <td key={col.field} style={listCellStyle(col, { skipWidth: showGrid })}>
                             {renderListCell(col, row)}
                           </td>
                         ))}
+                        {showGrid && editFormId ? (
+                          <td className="form-grid-edit-col" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              className="secondary form-grid-edit-btn"
+                              disabled={busy}
+                              onClick={() => {
+                                if (visualFrame.selectedRowKey === key && isDrawerSplit) return;
+                                if (!confirmLeaveDirtyEdit()) return;
+                                void openRowEditForm(list, row, key);
+                              }}
+                            >
+                              {uiCopy(lan, 'listEdit')}
+                            </button>
+                          </td>
+                        ) : null}
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
+              </div>
             )}
             {pagingFooter}
           </div>
@@ -1509,9 +1763,44 @@ export function FormRuntimeView({
     </div>
   );
 
+  const shellClass = [
+    embedded ? 'shell embedded' : 'shell',
+    pcActive || pcViewport ? 'shell--pc' : '',
+    isDrawerSplit ? 'shell--pc-split' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  const drawerPanel = isDrawerSplit ? (
+    <FormRuntimeHost
+      key={`${slug}:${top.formId}:${String(visualFrame.selectedRowKey ?? '')}:drawer`}
+      slug={slug}
+      initialForm={top.form}
+      initialDatasets={top.datasets}
+      initialValues={top.values}
+      initialState={top.state}
+      initialFormMode={top.formMode}
+      uiLan={lan}
+      preview={preview}
+      embedded
+      viewportMode={viewportMode === 'phone' ? 'phone' : 'pc'}
+      onClose={() => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s))}
+      onDirtyChange={(dirty) => {
+        drawerDirtyRef.current = dirty;
+      }}
+    />
+  ) : null;
+
   return (
     <>
-      {isOverlay && !useOuterChrome ? (
+      {isDrawerSplit ? (
+        <div className={shellClass}>
+          <div className="form-pc-split">
+            <div className="form-pc-split__main">{body}</div>
+            <aside className="form-pc-split__drawer">{drawerPanel}</aside>
+          </div>
+        </div>
+      ) : isOverlay && !useOuterChrome ? (
         <>
           <div className={embedded ? 'shell embedded' : 'shell'}>
             <p className="muted">{uiCopy(lan, 'mainFormModalOpen')}</p>
@@ -1531,7 +1820,7 @@ export function FormRuntimeView({
           </div>
         </>
       ) : (
-        <div className={embedded ? 'shell embedded' : 'shell'}>{body}</div>
+        <div className={shellClass}>{body}</div>
       )}
       {toast && <div className={`toast toast-tr ${toast.level}`}>{toast.text}</div>}
       {!embedded && <FormDebugBug slug={slug} form={top.form} />}

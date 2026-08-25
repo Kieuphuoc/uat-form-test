@@ -4,12 +4,14 @@ import { clearRuntimeFormCacheForSlug } from '../lib/formRuntimeCache';
 import type { LangCode } from '../lib/localizedText';
 import type { ClientFormDto, FormMode } from '../types/form';
 import { FormRuntimeHost } from './FormRuntimeView';
+import type { DesignViewport } from '../lib/pcLayout';
 
 type Props = {
   slug: string;
   formId: string;
   /** Bump để reload sau Save — bắt buộc remount runtime. */
   refreshKey: number;
+  viewport?: DesignViewport;
 };
 
 const MODES: { id: FormMode; label: string }[] = [
@@ -24,7 +26,7 @@ const LANS: { id: LangCode; label: string; title: string }[] = [
   { id: 'o', label: 'o', title: 'Other' },
 ];
 
-export function DesignPreview({ slug, formId, refreshKey }: Props) {
+export function DesignPreview({ slug, formId, refreshKey, viewport = 'phone' }: Props) {
   const [form, setForm] = useState<ClientFormDto | null>(null);
   const [datasets, setDatasets] = useState<Record<string, Record<string, unknown>[]> | undefined>();
   const [values, setValues] = useState<Record<string, unknown> | undefined>();
@@ -104,9 +106,9 @@ export function DesignPreview({ slug, formId, refreshKey }: Props) {
           ))}
         </div>
       </div>
-      <div className="design-phone">
+      <div className={viewport === 'pc' ? 'design-pc' : 'design-phone'}>
         <FormRuntimeHost
-          key={`${slug}:${formId}:${refreshKey}:${formMode}:${lan}`}
+          key={`${slug}:${formId}:${refreshKey}:${formMode}:${lan}:${viewport}`}
           slug={slug}
           initialForm={form}
           initialDatasets={datasets}
@@ -116,6 +118,7 @@ export function DesignPreview({ slug, formId, refreshKey }: Props) {
           uiLan={lan}
           preview
           embedded
+          viewportMode={viewport}
         />
       </div>
     </div>

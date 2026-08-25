@@ -109,9 +109,24 @@ export type FormControlDef = {
   previewWidth?: number;
   onChange?: string[];
   onClick?: string[];
+  /** Override layout PC. Mobile bỏ qua. */
+  pc?: FormControlPc;
 };
 
-/** Chế độ tương tác form (khác mode=modal|sheet|fullscreen của showForm). */
+export type FormPcLayout = {
+  enabled?: boolean;
+  /** Số cột tối đa trên PC (vd. 3). Runtime tự hạ theo bề rộng màn. */
+  columns?: number;
+};
+
+export type FormControlPc = {
+  /** Số cột chiếm (1..N). Mặc định 1. */
+  colSpan?: number;
+  visible?: boolean;
+  order?: number;
+};
+
+/** Chế độ tương tác form (khác mode=modal|sheet|fullscreen|drawer của showForm). */
 export type FormMode = 'view' | 'new' | 'edit';
 
 export type ClientActionMeta = {
@@ -128,6 +143,10 @@ export type FormListColumnDef = {
   /** text (default) | checkbox | icon | image | stepper */
   type?: string;
   width?: string;
+  /** fixed | flex | percent — thiếu thì suy từ width. */
+  sizeMode?: 'fixed' | 'flex' | 'percent' | string;
+  /** vd. 80px */
+  minWidth?: string;
   bold?: boolean;
   italic?: boolean;
   color?: string;
@@ -204,10 +223,25 @@ export type FormListDef = {
   selectedKeysBind?: string;
   paging?: FormListPaging;
   onLoadMore?: string[];
-  /** table (default) | card | media */
+  /** table (default) | card | media — hiển thị List (mobile). */
   template?: string;
   itemTemplate?: FormListItemTemplate;
   search?: FormListSearch;
+  /** Hiển thị Grid trên PC (cùng load List). Thiếu = PC cũng dùng template List. */
+  grid?: FormListGrid;
+};
+
+export type FormListGrid = {
+  enabled?: boolean;
+  rowEdit?: FormListGridRowEdit;
+};
+
+export type FormListGridRowEdit = {
+  formId?: string;
+  /** view | new | edit */
+  formMode?: string;
+  /** Map đích ← nguồn, giống showForm values (vd. state.id ← row.id). */
+  values?: Record<string, string>;
 };
 
 export type ClientFormDto = {
@@ -217,6 +251,8 @@ export type ClientFormDto = {
   layout: string;
   /** Mặc định khi mở form nếu không truyền formMode (view|new|edit). */
   defaultFormMode?: string;
+  /** Overlay layout PC (opt-in). Mobile bỏ qua. */
+  pc?: FormPcLayout;
   controls: FormControlDef[];
   lists: FormListDef[];
   datasets?: Record<string, string>;

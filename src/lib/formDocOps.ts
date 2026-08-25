@@ -1,4 +1,4 @@
-import type { FormControlDef, FormListColumnDef, FormListDef } from '../types/form';
+import type { FormControlDef, FormListColumnDef, FormListDef, FormPcLayout } from '../types/form';
 import type { ControlType, FormDocument } from '../types/formDoc';
 import {
   flattenDesignGroup,
@@ -448,7 +448,7 @@ export function addColumn(doc: FormDocument, listId: string, field: string, titl
       const fid = nextColumnField(l, field.trim() || 'field');
       return {
         ...l,
-        columns: [...l.columns, { field: fid, title: title.trim() || fid }],
+        columns: [...l.columns, { field: fid, title: title.trim() || fid, sizeMode: 'flex', width: '1', minWidth: '80px' }],
       };
     }),
   };
@@ -477,6 +477,7 @@ export function duplicateColumn(
       const newField = nextColumnField(l, `${src.field}_copy`);
       const cols = [...l.columns];
       cols.splice(idx + 1, 0, {
+        ...src,
         field: newField,
         title: `${resolveLocalizedText(src.title, 'v')} copy`,
       });
@@ -497,7 +498,7 @@ export function insertColumnAfter(
       if (l.id !== listId) return l;
       const idx = l.columns.findIndex((c) => c.field === afterField);
       const newField = nextColumnField(l, 'field');
-      const col = { field: newField, title: 'Cột mới' };
+      const col = { field: newField, title: 'Cột mới', sizeMode: 'flex' as const, width: '1', minWidth: '80px' };
       if (idx < 0) return { ...l, columns: [...l.columns, col] };
       const cols = [...l.columns];
       cols.splice(idx + 1, 0, col);
@@ -551,6 +552,27 @@ export function moveColumn(
       if (!item) return l;
       cols.splice(Math.max(0, Math.min(toIndex, cols.length)), 0, item);
       return { ...l, columns: cols };
+    }),
+  };
+}
+
+export function renameColumnField(
+  doc: FormDocument,
+  listId: string,
+  fromField: string,
+  toField: string,
+): FormDocument {
+  const next = toField.trim();
+  if (!next || next === fromField) return doc;
+  return {
+    ...doc,
+    lists: doc.lists.map((l) => {
+      if (l.id !== listId) return l;
+      if (l.columns.some((c) => c.field === next && c.field !== fromField)) return l;
+      return {
+        ...l,
+        columns: l.columns.map((c) => (c.field === fromField ? { ...c, field: next } : c)),
+      };
     }),
   };
 }
@@ -716,9 +738,10 @@ export function setFormMeta(
     layout?: string;
     onLoad?: string[];
     defaultFormMode?: string;
+    pc?: FormPcLayout | undefined;
   },
 ): FormDocument {
-  return {
+  const next: FormDocument = {
     ...doc,
     ...(patch.title != null ? { title: patch.title } : {}),
     ...(patch.layout != null ? { layout: patch.layout } : {}),
@@ -727,4 +750,8 @@ export function setFormMeta(
       ? { defaultFormMode: patch.defaultFormMode.trim() || undefined }
       : {}),
   };
+  if ('pc' in patch) {
+    next.pc = patch.pc;
+  }
+  return next;
 }

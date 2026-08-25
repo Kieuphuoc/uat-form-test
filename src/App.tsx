@@ -14,6 +14,7 @@ import { DesignPage } from './pages/DesignPage';
 import { HomePage } from './pages/HomePage';
 import { RedirectPage } from './pages/RedirectPage';
 import { RuntimePage } from './pages/RuntimePage';
+import { ZaloLinkPage } from './pages/ZaloLinkPage';
 
 function AdminGate({ children }: { children: React.ReactNode }) {
   return <RequireAdmin>{children}</RequireAdmin>;
@@ -33,6 +34,14 @@ export function App() {
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/redirect" element={<RedirectPage />} />
+      <Route
+        path="/account/zalo"
+        element={
+          <RequireAuth nextPath="/account/zalo" title="Liên kết Zalo">
+            <ZaloLinkPage />
+          </RequireAuth>
+        }
+      />
       <Route path="/runtime/:slug" element={<RuntimePage />} />
       <Route
         path="/chat"

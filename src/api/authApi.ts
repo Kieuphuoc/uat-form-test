@@ -110,3 +110,28 @@ export function buildLoginHref(loginUrl: string, nextPath = '/admin'): string {
 export function isAdminUser(user: AuthUser | null | undefined): boolean {
   return !!user?.isAdmin;
 }
+
+export type ZaloMapping = {
+  linked: boolean;
+  userId: number;
+  zaloId?: string | null;
+};
+
+export type ZaloBindStart = {
+  bindToken: string;
+  expiresIn: number;
+  qrUrl: string;
+  miniAppId?: string;
+};
+
+export async function fetchZaloMapping(): Promise<ApiResult<ZaloMapping>> {
+  return apiFetch<ZaloMapping>('/auth/zalo/mapping');
+}
+
+export async function startZaloBind(): Promise<ApiResult<ZaloBindStart>> {
+  return apiFetch<ZaloBindStart>('/auth/zalo/bind/start', { method: 'POST' });
+}
+
+export async function unbindZalo(): Promise<ApiResult<{ linked: boolean; userId: number }>> {
+  return apiFetch('/auth/zalo/unbind', { method: 'POST' });
+}

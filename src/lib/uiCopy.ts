@@ -46,6 +46,11 @@ const UI_COPY = {
   listSelectedCount: { v: 'Chọn {n}', e: 'Selected {n}' },
   listSelectAll: { v: 'Chọn tất cả', e: 'Select all' },
   listSearchPlaceholder: { v: 'Tìm kiếm…', e: 'Search…' },
+  listEdit: { v: 'Sửa', e: 'Edit' },
+  confirmLeaveDirtyEdit: {
+    v: 'Bạn đã sửa dòng này. Đổi sang dòng khác sẽ mất thay đổi chưa lưu. Tiếp tục?',
+    e: 'You have unsaved changes on this row. Switch to another row and lose them?',
+  },
 } as const;
 
 export type UiCopyKey = keyof typeof UI_COPY;

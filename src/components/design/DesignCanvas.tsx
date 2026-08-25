@@ -27,12 +27,22 @@ import {
 import { resolveLocalizedText } from '../../lib/localizedText';
 import type { FormControlDef, FormListDef } from '../../types/form';
 import type { DesignSelection, FormDocument } from '../../types/formDoc';
+import {
+  isPcLayoutActive,
+  pcColumnCount,
+  pcGridContainerStyle,
+  pcGridItemStyle,
+  pcSpanForDesignGroup,
+  type DesignViewport,
+} from '../../lib/pcLayout';
 import { LiveClockLabel } from '../LiveClockLabel';
 import { DesignContextMenu, type ContextMenuState } from './DesignContextMenu';
 
 type Props = {
   doc: FormDocument;
   selection: DesignSelection | null;
+  /** Phone (360) hoặc PC (~960). Mặc định phone. */
+  viewport?: DesignViewport;
   onSelect: (sel: DesignSelection) => void;
   onRequestAddControl: () => void;
   onRequestAddIconButton?: () => void;
@@ -63,6 +73,7 @@ function displayLabel(c: FormControlDef): string {
 export function DesignCanvas({
   doc,
   selection,
+  viewport = 'phone',
   onSelect,
   onRequestAddControl,
   onRequestAddIconButton,
@@ -103,6 +114,8 @@ export function DesignCanvas({
     () => splitControlsByPlacement(doc.controls),
     [doc.controls],
   );
+  const pcActive = isPcLayoutActive(doc, { viewportMode: viewport });
+  const pcCols = pcColumnCount(doc, { viewportMode: viewport });
   /** Design: header controls hiện cùng vùng body (có type badge). */
   const bodyControls = useMemo(
     () => [...headerControls, ...bodyOnly],
@@ -533,6 +546,7 @@ export function DesignCanvas({
       className={`design-drop-slot${
         dropLine === slot && draggingGroup != null && dragZone === zone ? ' active' : ''
       }`}
+      style={pcActive && zone === 'body' ? { gridColumn: '1 / -1' } : undefined}
       aria-hidden
     />
   );
@@ -738,6 +752,7 @@ export function DesignCanvas({
       <div
         key={list.id}
         className={`design-canvas-list${selected ? ' selected' : ''}${inc ? ' is-include' : ''}`}
+        style={pcActive ? { gridColumn: '1 / -1' } : undefined}
         onClick={(e) => {
           e.stopPropagation();
           onSelect({ kind: 'list', id: list.id });
@@ -896,16 +911,22 @@ export function DesignCanvas({
         })
       }
     >
-      <div className="design-phone design-canvas-phone">
+      <div className={viewport === 'pc' ? 'design-pc design-canvas-pc' : 'design-phone design-canvas-phone'}>
         <div className="shell embedded">
           <div className="form-shell form-shell--design">
-            <div className={`form-scroll ${doc.layout === 'drawer' ? 'form-drawer' : 'stack'}`}>
+            <div
+              className={`form-scroll ${
+                doc.layout === 'drawer' ? 'form-drawer' : pcActive ? 'form-pc-grid' : 'stack'
+              }`}
+              style={pcActive ? pcGridContainerStyle(pcCols) : undefined}
+            >
             <h1
               className={
                 isSelected({ kind: 'form' })
                   ? `design-canvas-title selected${doc.layout === 'drawer' ? ' form-drawer-title' : ''}`
                   : `design-canvas-title${doc.layout === 'drawer' ? ' form-drawer-title' : ''}`
               }
+              style={pcActive ? { gridColumn: '1 / -1' } : undefined}
               onClick={(e) => {
                 e.stopPropagation();
                 onSelect({ kind: 'form' });
@@ -917,7 +938,8 @@ export function DesignCanvas({
             <div
               className={`design-canvas-groups${
                 draggingGroup != null && dragZone === 'body' ? ' is-dragging' : ''
-              }`}
+              }${pcActive ? ' form-pc-grid' : ''}`}
+              style={pcActive ? { display: 'contents' } : undefined}
             >
               {renderDropLine(0, 'body')}
               {bodyGroups.map((g, i) => {
@@ -930,7 +952,10 @@ export function DesignCanvas({
                         ? `wrap:group:${g.groupId}`
                         : `wrap:inc:${g.fragmentId}`;
                 return (
-                  <div key={wrapKey}>
+                  <div
+                    key={wrapKey}
+                    style={pcActive ? pcGridItemStyle(pcSpanForDesignGroup(g, pcCols)) : undefined}
+                  >
                     {renderGroup(g, i, 'body')}
                     {renderDropLine(i + 1, 'body')}
                   </div>
@@ -941,7 +966,9 @@ export function DesignCanvas({
             {lists.map(renderList)}
 
             {doc.controls.length === 0 && doc.lists.length === 0 && (
-              <p className="muted">Chuột phải để thêm control / list.</p>
+              <p className="muted" style={pcActive ? { gridColumn: '1 / -1' } : undefined}>
+                Chuột phải để thêm control / list.
+              </p>
             )}
             </div>
 

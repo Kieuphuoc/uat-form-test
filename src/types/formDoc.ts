@@ -1,4 +1,4 @@
-import type { FormControlDef, FormListDef } from './form';
+import type { FormControlDef, FormListDef, FormPcLayout } from './form';
 import type { LocalizedText } from '../lib/localizedText';
 
 /** Full form.json (giữ nguyên actions SQL khi round-trip Design ↔ JSON). */
@@ -9,6 +9,8 @@ export type FormDocument = {
   layout?: string;
   /** view | new | edit — mặc định khi mở form. */
   defaultFormMode?: string;
+  /** Overlay layout PC (opt-in). Mobile bỏ qua. */
+  pc?: FormPcLayout;
   controls: FormControlDef[];
   lists: FormListDef[];
   datasets?: Record<string, string>;
@@ -56,21 +58,20 @@ export function isFormDocument(v: unknown): v is FormDocument {
 
 export function parseFormDocument(v: unknown): FormDocument | null {
   if (!isFormDocument(v)) return null;
+  const raw = v as FormDocument;
   return {
-    id: v.id,
-    title: v.title,
-    layout: v.layout ?? 'stack',
-    defaultFormMode:
-      typeof (v as FormDocument).defaultFormMode === 'string'
-        ? (v as FormDocument).defaultFormMode
-        : undefined,
-    controls: Array.isArray(v.controls) ? (v.controls as FormControlDef[]) : [],
-    lists: Array.isArray(v.lists) ? (v.lists as FormListDef[]) : [],
-    datasets: v.datasets && typeof v.datasets === 'object' ? (v.datasets as Record<string, string>) : {},
-    onLoad: Array.isArray(v.onLoad) ? (v.onLoad as string[]) : [],
+    id: raw.id,
+    title: raw.title,
+    layout: raw.layout ?? 'stack',
+    defaultFormMode: typeof raw.defaultFormMode === 'string' ? raw.defaultFormMode : undefined,
+    pc: raw.pc && typeof raw.pc === 'object' ? raw.pc : undefined,
+    controls: Array.isArray(raw.controls) ? (raw.controls as FormControlDef[]) : [],
+    lists: Array.isArray(raw.lists) ? (raw.lists as FormListDef[]) : [],
+    datasets: raw.datasets && typeof raw.datasets === 'object' ? (raw.datasets as Record<string, string>) : {},
+    onLoad: Array.isArray(raw.onLoad) ? (raw.onLoad as string[]) : [],
     actions:
-      v.actions && typeof v.actions === 'object'
-        ? (v.actions as Record<string, Record<string, unknown>>)
+      raw.actions && typeof raw.actions === 'object'
+        ? (raw.actions as Record<string, Record<string, unknown>>)
         : {},
   };
 }

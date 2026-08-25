@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchAuthConfig, type DemoRuntime } from '../api/authApi';
 import { useAuth } from '../auth/AuthContext';
-import { IconApps, IconChat, IconDesign, IconForm } from '../components/AppIcons';
+import { IconApps, IconChat, IconDesign, IconForm, IconZalo } from '../components/AppIcons';
 
 function demoIcon(icon?: string) {
   if (icon === 'apps') return <IconApps size={26} />;
@@ -51,6 +51,9 @@ export function HomePage() {
         </div>
         {!mobile && (
           <div className="row home-head-actions">
+            <Link to="/account/zalo" className="home-admin-link">
+              Liên kết Zalo
+            </Link>
             {showAdmin && (
               <Link to="/admin" className="home-admin-link">
                 Admin
@@ -64,6 +67,13 @@ export function HomePage() {
       </header>
 
       <div className="home-tiles">
+        <Link to="/account/zalo" className="home-tile" title="Gắn tài khoản Arito với Zalo Mini App">
+          <span className="home-tile-icon">
+            <IconZalo size={26} />
+          </span>
+          <span className="home-tile-label">Zalo</span>
+          <span className="home-tile-desc">Liên kết Mini App bằng QR</span>
+        </Link>
         <Link to="/chat" className="home-tile home-tile--primary" title="Nhắn tin nội bộ, nhóm làm việc">
           <span className="home-tile-icon">
             <IconChat size={26} />

@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { FormModeTitleIcon } from './formModeTitleIcon';
 import {
   FORM_CHROME_MSG,
   FORM_OPEN_SHELL_MSG,
@@ -12,6 +13,7 @@ type Chrome = {
   title: string;
   canBack: boolean;
   headerActions: FormChromeAction[];
+  formMode?: string;
 };
 
 function readChrome(raw: unknown): Chrome | null {
@@ -33,7 +35,9 @@ function readChrome(raw: unknown): Chrome | null {
       });
     }
   }
-  return { title, canBack, headerActions };
+  const formMode =
+    o.formMode === 'view' || o.formMode === 'edit' || o.formMode === 'new' ? o.formMode : undefined;
+  return { title, canBack, headerActions, formMode };
 }
 
 type Props = {
@@ -89,7 +93,10 @@ export function FormOuterChrome({ fallbackTitle = 'Arito Form', children }: Prop
           ) : (
             <span className="form-outer-chrome__mark" aria-hidden />
           )}
-          <h1 className="form-outer-chrome__title">{title}</h1>
+          <h1 className="form-outer-chrome__title">
+            {chrome.formMode ? <FormModeTitleIcon mode={chrome.formMode} /> : null}
+            <span className="form-title-with-mode__text">{title}</span>
+          </h1>
         </div>
         {chrome.headerActions.length > 0 ? (
           <div className="form-outer-chrome__actions">

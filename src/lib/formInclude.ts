@@ -277,6 +277,7 @@ export function collapseFormDocument(
     title: merged.title,
     layout: merged.layout,
     defaultFormMode: merged.defaultFormMode,
+    pc: merged.pc,
     controls: sourceControls,
     lists: sourceLists,
     datasets,
