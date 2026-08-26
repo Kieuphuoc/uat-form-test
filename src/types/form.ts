@@ -107,6 +107,17 @@ export type FormControlDef = {
   uploadMode?: 'immediate' | 'onSave' | string;
   /** image: cạnh preview vuông (px), mặc định 50. */
   previewWidth?: number;
+  /**
+   * image:
+   * - `camera` — chỉ chụp (camera live), ẩn chọn album/file
+   * - `both` (mặc định) — chụp + chọn ảnh
+   */
+  imageSource?: 'camera' | 'both' | string;
+  /**
+   * Căn control trong hàng: left | center | right.
+   * center + width x% (<100) → control một hàng riêng, rộng x% hàng.
+   */
+  align?: 'left' | 'center' | 'right' | string;
   onChange?: string[];
   onClick?: string[];
   /** Override layout PC. Mobile bỏ qua. */

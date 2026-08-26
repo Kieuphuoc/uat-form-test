@@ -4,6 +4,8 @@ import { RequireAuth } from './auth/RequireAuth';
 import { ChatAppShell } from './components/chat/ChatAppShell';
 import { AdminAppPage } from './pages/AdminAppPage';
 import { AdminListPage } from './pages/AdminListPage';
+import { ApprovalDesignPage } from './pages/ApprovalDesignPage';
+import { ApprovalListPage } from './pages/ApprovalListPage';
 import { ChatPage } from './pages/ChatPage';
 import { ChatSettingsPage } from './pages/ChatSettingsPage';
 import { ChatBotCreatePage } from './pages/ChatBotCreatePage';
@@ -97,6 +99,22 @@ export function App() {
         element={
           <AdminGate>
             <DesignPage />
+          </AdminGate>
+        }
+      />
+      <Route
+        path="/admin/approval"
+        element={
+          <AdminGate>
+            <ApprovalListPage />
+          </AdminGate>
+        }
+      />
+      <Route
+        path="/admin/approval/:id"
+        element={
+          <AdminGate>
+            <ApprovalDesignPage />
           </AdminGate>
         }
       />

@@ -1,4 +1,5 @@
 import type { FormControlDef } from '../types/form';
+import { needsAlignSoloRow } from './controlLayout';
 import { resolveLocalizedText, type LangCode } from './localizedText';
 
 /** Control pin cuối form (thanh footer). */
@@ -58,17 +59,19 @@ export type DesignControlGroup =
       controls: FormControlDef[];
     };
 
-/** Gom control cùng rowId (kề nhau theo order) thành một hàng. */
+/** Gom control cùng rowId (kề nhau theo order) thành một hàng.
+ * Control `align` + width % &lt; 100 luôn một hàng riêng (solo).
+ */
 export function groupControlsByRowId(controls: FormControlDef[]): RowLayoutGroup[] {
   const sorted = [...controls].sort((a, b) => a.order - b.order);
   const groups: RowLayoutGroup[] = [];
 
   for (const c of sorted) {
-    const rowId = c.rowId?.trim();
-    if (!rowId) {
+    if (needsAlignSoloRow(c) || !c.rowId?.trim()) {
       groups.push({ kind: 'single', control: c });
       continue;
     }
+    const rowId = c.rowId.trim();
     const last = groups[groups.length - 1];
     if (last?.kind === 'row' && last.rowId === rowId) {
       last.controls.push(c);

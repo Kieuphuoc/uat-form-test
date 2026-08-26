@@ -1425,19 +1425,34 @@ export function DesignInspector({
               </select>
             </PropRow>
             {c.type === 'image' && (
-              <PropRow label="previewWidth" title="Cạnh preview vuông (px), mặc định 50">
-                <input
-                  type="number"
-                  min={24}
-                  value={c.previewWidth ?? 50}
-                  onChange={(e) => {
-                    const n = Number(e.target.value);
-                    patch({
-                      previewWidth: Number.isFinite(n) && n >= 24 ? Math.floor(n) : undefined,
-                    });
-                  }}
-                />
-              </PropRow>
+              <>
+                <PropRow label="imageSource" title="camera = chỉ chụp live; both = chụp + chọn ảnh">
+                  <select
+                    value={c.imageSource === 'camera' ? 'camera' : 'both'}
+                    onChange={(e) =>
+                      patch({
+                        imageSource: e.target.value === 'camera' ? 'camera' : 'both',
+                      })
+                    }
+                  >
+                    <option value="both">both (chụp + chọn ảnh)</option>
+                    <option value="camera">camera (chỉ chụp)</option>
+                  </select>
+                </PropRow>
+                <PropRow label="previewWidth" title="Cạnh preview vuông (px), mặc định 50">
+                  <input
+                    type="number"
+                    min={24}
+                    value={c.previewWidth ?? 50}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      patch({
+                        previewWidth: Number.isFinite(n) && n >= 24 ? Math.floor(n) : undefined,
+                      });
+                    }}
+                  />
+                </PropRow>
+              </>
             )}
             <p className="muted design-prop-hint">
               File: scope <code>app-files</code>. Image: <code>app-images</code> (thumb 256 + cache
@@ -1524,6 +1539,27 @@ export function DesignInspector({
             placeholder="40%"
             onChange={(e) => patch({ width: e.target.value.trim() || undefined })}
           />
+        </PropRow>
+        <PropRow
+          label="align"
+          title="left|center|right. center + width x% (&lt;100) → một hàng, rộng x%"
+        >
+          <select
+            value={
+              c.align === 'center' || c.align === 'right' || c.align === 'left' ? c.align : ''
+            }
+            onChange={(e) => {
+              const v = e.target.value;
+              patch({
+                align: v === 'left' || v === 'center' || v === 'right' ? v : undefined,
+              });
+            }}
+          >
+            <option value="">(mặc định)</option>
+            <option value="left">left</option>
+            <option value="center">center</option>
+            <option value="right">right</option>
+          </select>
         </PropRow>
         {doc.pc?.enabled ? (
           <PropRow label="pc.colSpan" title="Số cột chiếm trên lưới PC. Mobile bỏ qua.">

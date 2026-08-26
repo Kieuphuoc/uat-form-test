@@ -112,11 +112,22 @@ function decodeNickname(jwt: string): string {
   return typeof claims?.nickname === 'string' ? claims.nickname : '';
 }
 
+function decodeEmail(jwt: string): string {
+  const claims = decodeJwtPayload(jwt) as {
+    email?: string;
+    Email?: string;
+    unique_name?: string;
+  } | null;
+  if (!claims) return '';
+  const raw = claims.email ?? claims.Email ?? claims.unique_name;
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
 function userFromJwt(jwt: string): AuthUser {
   return {
     userId: getJwtUserId(jwt),
     clientId: '',
-    email: '',
+    email: decodeEmail(jwt),
     nickname: decodeNickname(jwt),
     isAdmin: decodeIsAdmin(jwt),
     formDev: decodeFormDev(jwt),

@@ -18,6 +18,7 @@ const ACTION_TYPES = [
   'validate',
   'showForm',
   'getGps',
+  'scanQr',
   'openShell',
   'closeForm',
   'message',
@@ -55,6 +56,8 @@ const ACTION_TYPE_HINTS: Record<string, string> = {
     'showForm: mở form con (formId). mode=modal|sheet|fullscreen; formMode=view|new|edit; returnMap map giá trị trả về parent.',
   getGps:
     'getGps: client-only — lấy GPS độ chính xác cao, cập nhật control maps (nếu có), mở formId kết quả (giống Test & Debug).',
+  scanQr:
+    'scanQr: client-only — xin camera quét QR (web) hoặc báo AppShell quét (native). Mở form qrscan với nội dung đã quét.',
   openShell:
     'openShell: client-only — bảo mobile AppShell đè Chart/AI Agent/Chat/Files/Docs/Monitor/Cấu hình/Log. mode = target. Runtime browser: toast.',
   closeForm:
@@ -606,6 +609,7 @@ export function DesignActionsEditor({
             {(type === 'setValue' || type === 'validate' || type === 'closeForm' || !isSql) &&
               type !== 'showForm' &&
               type !== 'getGps' &&
+              type !== 'scanQr' &&
               type !== 'openShell' &&
               type !== 'message' && (
                 <label className="field design-actions-sql-field">

@@ -31,7 +31,14 @@ export function decodeJwtPayload(jwt: string): Record<string, unknown> | null {
   try {
     const part = jwt.split('.')[1];
     if (!part) return null;
-    return JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/'))) as Record<string, unknown>;
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = b64.length % 4 === 0 ? '' : '='.repeat(4 - (b64.length % 4));
+    const bin = atob(b64 + pad);
+    // JWT payload là JSON UTF-8 — atob+JSON.parse trực tiếp làm hỏng tiếng Việt (Phạm → Pháº¡m).
+    const json = new TextDecoder('utf-8').decode(
+      Uint8Array.from(bin, (ch) => ch.charCodeAt(0)),
+    );
+    return JSON.parse(json) as Record<string, unknown>;
   } catch {
     return null;
   }

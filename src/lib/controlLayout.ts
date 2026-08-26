@@ -1,24 +1,89 @@
 import type { CSSProperties } from 'react';
 import type { FormControlDef } from '../types/form';
 
+export type ControlAlign = 'left' | 'center' | 'right';
+
+/** Parse width "40%" → 40; không phải % → null. */
+export function parseWidthPercent(width?: string | null): number | null {
+  const raw = width?.trim();
+  if (!raw) return null;
+  const m = /^([\d.]+)\s*%$/.exec(raw);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+export function normalizeControlAlign(raw?: string | null): ControlAlign | null {
+  const v = (raw ?? '').trim().toLowerCase();
+  if (v === 'left' || v === 'start') return 'left';
+  if (v === 'center' || v === 'middle') return 'center';
+  if (v === 'right' || v === 'end') return 'right';
+  return null;
+}
+
+/**
+ * align + width x% (&lt;100) → control một hàng riêng, rộng x% hàng.
+ * (center bắt buộc; left/right cũng solo theo kế hoạch.)
+ */
+export function needsAlignSoloRow(c: FormControlDef): boolean {
+  const align = normalizeControlAlign(c.align);
+  if (!align) return false;
+  const pct = parseWidthPercent(c.width);
+  return pct != null && pct > 0 && pct < 100;
+}
+
+function justifyForAlign(align: ControlAlign): CSSProperties['justifyContent'] {
+  if (align === 'center') return 'center';
+  if (align === 'right') return 'flex-end';
+  return 'flex-start';
+}
+
+/** Style wrapper hàng solo (align + % &lt; 100). */
+export function alignSoloRowStyle(c: FormControlDef): CSSProperties {
+  const align = normalizeControlAlign(c.align) ?? 'left';
+  return {
+    display: 'flex',
+    width: '100%',
+    justifyContent: justifyForAlign(align),
+    maxWidth: '100%',
+  };
+}
+
 /**
  * Layout style cho control trong hàng.
- * `width: "60%"` được hiểu là **tỷ lệ flex** (60:40) để luôn cùng hàng dù có gap.
- * Width khác % (vd. `120px`) dùng fixed basis.
+ * `width: "60%"` trong hàng chung = tỷ lệ flex (60:40).
+ * Ngoài hàng / alignSolo: % = width tuyệt đối của hàng (vd. 50%).
  */
-export function controlLayoutStyle(c: FormControlDef, inRow: boolean): CSSProperties {
+export function controlLayoutStyle(
+  c: FormControlDef,
+  inRow: boolean,
+  opts?: { alignSolo?: boolean },
+): CSSProperties {
   const raw = c.width?.trim();
+  const alignSolo = opts?.alignSolo === true || needsAlignSoloRow(c);
+  const pctVal = parseWidthPercent(c.width);
+
+  // align + % < 100, hoặc % khi đứng một mình (không inRow): width tuyệt đối.
+  if (alignSolo || (!inRow && pctVal != null)) {
+    if (pctVal != null) {
+      return {
+        width: `${pctVal}%`,
+        maxWidth: '100%',
+        minWidth: 0,
+        flex: '0 0 auto',
+        boxSizing: 'border-box',
+      };
+    }
+  }
+
   if (!raw) {
     return inRow ? { flex: '1 1 0%', minWidth: 0 } : {};
   }
-  const pct = /^([\d.]+)\s*%$/.exec(raw);
-  if (pct) {
-    const n = Number(pct[1]);
-    if (Number.isFinite(n) && n > 0) {
-      return { flex: `${n} ${n} 0%`, minWidth: 0, maxWidth: '100%' };
-    }
+  if (pctVal != null) {
+    // Trong hàng chung: tỷ lệ flex
+    return { flex: `${pctVal} ${pctVal} 0%`, minWidth: 0, maxWidth: '100%' };
   }
-  return { flex: `0 0 ${raw}`, width: raw, maxWidth: raw, minWidth: 0 };
+  return { flex: `0 0 ${raw}`, width: raw, maxWidth: raw, minWidth: 0, boxSizing: 'border-box' };
 }
 
 /** Typography + màu chữ — dùng chung Design canvas và Runtime. */
@@ -40,6 +105,10 @@ export function controlTextStyle(c: FormControlDef): CSSProperties {
 }
 
 /** Gộp layout hàng + typography. */
-export function controlVisualStyle(c: FormControlDef, inRow: boolean): CSSProperties {
-  return { ...controlLayoutStyle(c, inRow), ...controlTextStyle(c) };
+export function controlVisualStyle(
+  c: FormControlDef,
+  inRow: boolean,
+  opts?: { alignSolo?: boolean },
+): CSSProperties {
+  return { ...controlLayoutStyle(c, inRow, opts), ...controlTextStyle(c) };
 }

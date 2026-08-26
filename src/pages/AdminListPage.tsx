@@ -57,6 +57,7 @@ export function AdminListPage() {
             Đăng xuất
           </button>
           <Link to="/admin/design">Designer</Link>
+          <Link to="/admin/approval">Approval</Link>
           <Link to="/">Home</Link>
         </div>
       </div>

@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import { fetchRuntimeForm, runAction } from '../api/formApi';
-import { controlLayoutStyle, controlTextStyle, controlVisualStyle } from '../lib/controlLayout';
+import { alignSoloRowStyle, controlLayoutStyle, controlTextStyle, controlVisualStyle, needsAlignSoloRow } from '../lib/controlLayout';
 import {
   groupControlsByRowId,
   groupControlsForLayout,
@@ -78,6 +78,7 @@ import { getCachedImagePreviewUrl, loadImagePreviewBlob, parseAttachments, strip
 import { useUiLan } from '../hooks/useUiLan';
 import { useAuth } from '../auth/AuthContext';
 import { buildGoogleMapsUrl, requestDeviceGps } from '../lib/deviceGps';
+import { requestScanQr } from '../lib/deviceScanQr';
 import { formatMapLocations } from '../lib/mapLocations';
 import {
   emitFormChrome,
@@ -666,6 +667,25 @@ export function FormRuntimeView({
             continue;
           }
 
+          if ((meta?.type ?? '').trim().toLowerCase() === 'scanqr') {
+            try {
+              const scanned = await requestScanQr();
+              if (!scanned.ok) {
+                if (scanned.reason === 'denied' || scanned.reason === 'error' || scanned.reason === 'unavailable') {
+                  showToast(scanned.message || uiCopy(lan, 'actionFailed'), 'error');
+                }
+                setStack(frames);
+                return;
+              }
+            } catch (e) {
+              showToast(e instanceof Error ? e.message : String(e), 'error');
+              setStack(frames);
+              return;
+            }
+            working = frames[frames.length - 1]!;
+            continue;
+          }
+
           const res = await runAction(slug, actionId, {
             formId: working.formId,
             controlValues: stripAttachmentPreviewUrls(working.values),
@@ -988,9 +1008,10 @@ export function FormRuntimeView({
 
     const editable = isControlEditable(c, visualFrame.formMode, busy);
     const disabled = !editable;
-    const layoutStyle = controlLayoutStyle(c, inRow);
+    const alignSolo = needsAlignSoloRow(c);
+    const layoutStyle = controlLayoutStyle(c, inRow, { alignSolo });
     const textStyle = controlTextStyle(c);
-    const visualStyle = controlVisualStyle(c, inRow);
+    const visualStyle = controlVisualStyle(c, inRow, { alignSolo });
     const heightStyle: CSSProperties | undefined = c.height?.trim()
       ? { height: c.height.trim(), minHeight: c.height.trim() }
       : undefined;
@@ -1026,20 +1047,25 @@ export function FormRuntimeView({
       const fromValue = asInputValue(visualFrame.values[c.id]).trim();
       let sessionText = '';
       if ((c.bind ?? '').trim().toLowerCase() === 'sessionuser') {
-        const name = (user?.nickname || user?.email || '').trim();
+        const name = (user?.nickname || '').trim();
         const email = (user?.email || '').trim();
-        sessionText =
-          name && email && name !== email ? `${name} (${email})` : name || email || '—';
+        if (name && email && name !== email) sessionText = `${name} (${email})`;
+        else sessionText = name || email || '—';
       }
       // type=label: nội dung chỉ lấy từ `text` (không dùng prop `label`).
       const caption = textText.trim();
       const raw = (fromValue || sessionText || caption).trim();
       if (fmt === 'personnel' || (c.bind ?? '').trim().toLowerCase() === 'sessionuser') {
         const left = caption || 'Nhân sự';
+        // sessionuser: ưu tiên phiên hiện tại (đủ nickname + email), không dùng value form cũ.
+        const value =
+          (c.bind ?? '').trim().toLowerCase() === 'sessionuser'
+            ? sessionText || '—'
+            : sessionText || fromValue || '—';
         return (
           <div key={c.id} className="form-personnel-row" style={visualStyle}>
             <span className="form-personnel-row__label">{left}</span>
-            <span className="form-personnel-row__value">{sessionText || fromValue || '—'}</span>
+            <span className="form-personnel-row__value">{value}</span>
           </div>
         );
       }
@@ -1244,6 +1270,7 @@ export function FormRuntimeView({
               maxFiles={c.maxFiles}
               uploadMode={c.uploadMode}
               previewWidth={c.previewWidth}
+              imageSource={c.imageSource}
               value={visualFrame.values[c.id]}
               style={heightStyle}
               lan={lan}
@@ -1269,7 +1296,20 @@ export function FormRuntimeView({
 
   const renderRowGroup = (g: RowLayoutGroup): ReactNode => {
     if (g.kind === 'single') {
-      return renderControl(g.control, false);
+      const node = renderControl(g.control, false);
+      if (!node) return null;
+      if (needsAlignSoloRow(g.control)) {
+        return (
+          <div
+            key={`align-solo:${g.control.id}`}
+            className="form-control-row form-control-row--align-solo"
+            style={alignSoloRowStyle(g.control)}
+          >
+            {node}
+          </div>
+        );
+      }
+      return node;
     }
     const kids = g.controls.map((c) => renderControl(c, true)).filter(Boolean);
     if (kids.length === 0) return null;

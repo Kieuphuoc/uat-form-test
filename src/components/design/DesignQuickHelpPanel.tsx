@@ -152,6 +152,7 @@ const CONTROL_GUIDES: Record<string, Guide> = {
     title: 'Control · image',
     lines: [
       'Preview vuông (`previewWidth` px, mặc định 50); chọn ảnh / chụp.',
+      '`imageSource`: both (chụp+chọn) | camera (chỉ chụp live).',
       '`uploadMode` giống file. View: chỉ xem, không upload.',
     ],
     asks: [],

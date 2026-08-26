@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   fetchZaloMapping,
   startZaloBind,
@@ -17,12 +17,15 @@ function maskZaloId(id: string | null | undefined): string {
   return `…${raw.slice(-4)}`;
 }
 
-function qrImageSrc(qrUrl: string): string {
-  return `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrUrl)}`;
+function qrImageSrc(qrUrl: string, size = 240): string {
+  return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(qrUrl)}`;
 }
 
 export function ZaloLinkPage() {
   const { user } = useAuth();
+  const [params] = useSearchParams();
+  const embed = params.get('embed') === 'true' || params.get('embed') === '1';
+
   const [mapping, setMapping] = useState<ZaloMapping | null>(null);
   const [bind, setBind] = useState<ZaloBindStart | null>(null);
   const [expiresAt, setExpiresAt] = useState(0);
@@ -102,6 +105,41 @@ export function ZaloLinkPage() {
 
   const linked = !!mapping?.linked;
 
+  if (embed) {
+    if (linked) {
+      return (
+        <div className="zalo-embed">
+          <p className="ok">Đã liên kết Zalo</p>
+        </div>
+      );
+    }
+    if (error) {
+      return (
+        <div className="zalo-embed">
+          <p className="err">{error}</p>
+        </div>
+      );
+    }
+    if (!bind?.qrUrl) {
+      return (
+        <div className="zalo-embed">
+          <p className="muted">{busy ? 'Đang tạo mã…' : 'Đang tải QR…'}</p>
+        </div>
+      );
+    }
+    return (
+      <div className="zalo-embed">
+        <img
+          className="zalo-link-qr"
+          src={qrImageSrc(bind.qrUrl, 280)}
+          alt="QR liên kết Zalo"
+          width={280}
+          height={280}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="shell stack zalo-link">
       <p>
@@ -114,8 +152,8 @@ export function ZaloLinkPage() {
         <div>
           <h1>Liên kết Zalo Mini App</h1>
           <p className="muted">
-            Tài khoản Arito {user?.nickname || user?.email || `#${user?.userId ?? 0}`}. Quét QR bằng
-            Zalo trên điện thoại để gắn zalo_id.
+            Tài khoản Arito {user?.nickname || user?.email || `#${user?.userId ?? 0}`}. Quét mã QR bằng
+            ứng dụng Zalo trên điện thoại để liên kết tài khoản.
           </p>
         </div>
       </header>
@@ -138,19 +176,11 @@ export function ZaloLinkPage() {
               <img
                 className="zalo-link-qr"
                 src={qrImageSrc(bind.qrUrl)}
-                alt="QR Mini App Zalo"
+                alt="QR liên kết Zalo"
                 width={240}
                 height={240}
               />
-              <p className="muted">Quét bằng Zalo. QR đã gắn env=DEVELOPMENT (chưa phải bản Live). Còn {remain}s.</p>
-              <p className="zalo-link-url muted">{bind.qrUrl}</p>
-              <div className="banner zalo-link-hint">
-                Nếu Zalo báo <strong>đang trong giai đoạn phát triển</strong>: QR Live chưa được duyệt.
-                Phải có <code>env=DEVELOPMENT</code> hoặc <code>env=TESTING</code> trên URL (Auth{' '}
-                <code>Zalo:Env</code>). Bản DEVELOPMENT đôi khi cần thêm <code>Zalo:Version</code> (VERSION_ID
-                trên Mini App Center). Tài khoản Zalo còn phải nằm trong{' '}
-                <strong>Người dùng thử nghiệm</strong> (không chỉ danh sách Admin).
-              </div>
+              <p className="muted">Mở Zalo và quét mã. Mã còn hiệu lực {remain}s.</p>
               <button type="button" className="secondary" disabled={busy} onClick={() => void createQr()}>
                 Tạo mã mới
               </button>

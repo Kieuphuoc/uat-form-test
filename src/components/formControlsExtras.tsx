@@ -26,6 +26,7 @@ import {
   normalizeOpenAs,
   type OpenAsKind,
 } from '../lib/openAs';
+import { requestImagesFromParent } from '../lib/deviceImagePick';
 
 export function OpenAsAnchor({
   kind,
@@ -186,6 +187,7 @@ export function RuntimeFileImageInput({
   maxFiles,
   uploadMode,
   previewWidth,
+  imageSource,
   value,
   style,
   lan = 'v',
@@ -200,6 +202,8 @@ export function RuntimeFileImageInput({
   maxFiles?: number;
   uploadMode?: string;
   previewWidth?: number;
+  /** image: 'camera' | 'both' (mặc định). */
+  imageSource?: string;
   value: unknown;
   style?: CSSProperties;
   lan?: LangCode;
@@ -209,6 +213,7 @@ export function RuntimeFileImageInput({
   const max = Math.max(1, maxFiles ?? (kind === 'image' ? 1 : 5));
   const mode = resolveUploadMode(uploadMode);
   const thumb = Math.max(24, previewWidth ?? 50);
+  const cameraOnly = kind === 'image' && String(imageSource ?? '').trim().toLowerCase() === 'camera';
   const canUpload = editable && !disabled;
   const inputRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -220,8 +225,14 @@ export function RuntimeFileImageInput({
 
   const commit = (next: FormFileItem[]) => onCommit(next);
 
-  const addFiles = async (list: FileList | null) => {
-    if (!list?.length || !canUpload) return;
+  const addFiles = async (list: FileList | null | File[]) => {
+    const filesIn =
+      list == null
+        ? []
+        : Array.isArray(list)
+          ? list
+          : Array.from(list);
+    if (!filesIn.length || !canUpload) return;
     const room = max - items.length;
     if (room <= 0) {
       setError(uiCopy(lan, 'maxFiles', { n: max }));
@@ -231,7 +242,7 @@ export function RuntimeFileImageInput({
     setError(null);
     try {
       const next = [...items];
-      const files = Array.from(list).slice(0, room);
+      const files = filesIn.slice(0, room);
       for (const f of files) {
         const sizeKb = Math.max(1, Math.round((f.size / 1024) * 100) / 100);
         let item: FormFileItem;
@@ -295,6 +306,22 @@ export function RuntimeFileImageInput({
     }
     const href = resolveFileHref(item.url, item.id);
     if (href) window.open(href, '_blank', 'noopener,noreferrer');
+  };
+
+  const pickViaShellOrInput = async (mode: 'camera' | 'album') => {
+    if (!canUpload || busy || items.length >= max) return;
+    const room = Math.max(1, max - items.length);
+    try {
+      const files = await requestImagesFromParent({
+        count: room,
+        sourceType: mode === 'camera' ? ['camera'] : ['album', 'camera'],
+        cameraType: 'back',
+      });
+      await addFiles(files);
+    } catch {
+      if (mode === 'camera') cameraRef.current?.click();
+      else inputRef.current?.click();
+    }
   };
 
   const numbered = items.map((item, i) => ({ item, idx: i, n: items.length - i }));
@@ -376,24 +403,26 @@ export function RuntimeFileImageInput({
                 type="button"
                 className="form-image-action"
                 disabled={busy || items.length >= max}
-                onClick={() => cameraRef.current?.click()}
+                onClick={() => void pickViaShellOrInput('camera')}
               >
                 <span className="form-image-action-icon" aria-hidden>
                   📷
                 </span>
                 {uiCopy(lan, 'takePhoto')}
               </button>
-              <button
-                type="button"
-                className="form-image-action"
-                disabled={busy || items.length >= max}
-                onClick={() => inputRef.current?.click()}
-              >
-                <span className="form-image-action-icon" aria-hidden>
-                  🖼️
-                </span>
-                {uiCopy(lan, 'chooseImage')}
-              </button>
+              {!cameraOnly ? (
+                <button
+                  type="button"
+                  className="form-image-action"
+                  disabled={busy || items.length >= max}
+                  onClick={() => void pickViaShellOrInput('album')}
+                >
+                  <span className="form-image-action-icon" aria-hidden>
+                    🖼️
+                  </span>
+                  {uiCopy(lan, 'chooseImage')}
+                </button>
+              ) : null}
             </div>
           ) : null}
           {busy ? <div className="muted form-attach-meta">{uiCopy(lan, 'loading')}</div> : null}

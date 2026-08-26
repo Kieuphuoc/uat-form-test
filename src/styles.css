@@ -143,6 +143,16 @@ a {
   grid-column: 1 / -1;
 }
 
+.form-control-row--align-solo {
+  align-items: stretch;
+  flex-wrap: nowrap;
+}
+
+.form-control-row--align-solo > .field,
+.form-control-row--align-solo > .design-canvas-item {
+  flex: 0 0 auto;
+}
+
 .form-control-row > .field,
 .form-control-row > button,
 .form-control-row > .design-canvas-item,
@@ -4285,6 +4295,24 @@ pre.json {
   margin-top: 6px;
 }
 
+.zalo-embed {
+  min-height: 100%;
+  margin: 0;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  text-align: center;
+}
+
+.zalo-embed .zalo-link-qr {
+  width: 280px;
+  height: 280px;
+  max-width: 100%;
+}
+
 /* ===================== Chat: layout 3 panel ===================== */
 
 .chat-shell {
@@ -8276,6 +8304,187 @@ body.mobile-embed .chat-topbar {
   background: #eef2f6;
   color: var(--text);
 }
+
+/* —— Approval Hub designer —— */
+.banner--ok {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.approval-design {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.approval-design__bar {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--card);
+}
+
+.approval-design__body {
+  display: grid;
+  grid-template-columns: 220px 1fr 260px;
+  gap: 0;
+  flex: 1;
+  min-height: 420px;
+  border-bottom: 1px solid var(--line);
+}
+
+.approval-design__side,
+.approval-design__inspector {
+  padding: 12px;
+  background: var(--card);
+  border-right: 1px solid var(--line);
+  overflow: auto;
+}
+
+.approval-design__inspector {
+  border-right: none;
+  border-left: 1px solid var(--line);
+}
+
+.approval-design__main {
+  position: relative;
+  overflow: auto;
+  background: #eef2f5;
+}
+
+.approval-canvas {
+  position: relative;
+  min-width: 100%;
+  min-height: 400px;
+  user-select: none;
+}
+
+.approval-canvas__edges {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
+.approval-canvas__edges .approval-edge {
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.approval-edge line {
+  stroke: #7a8a9a;
+  stroke-width: 2;
+  fill: none;
+}
+
+.approval-edge polygon {
+  fill: #7a8a9a;
+}
+
+.approval-edge text {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.approval-edge.is-selected line {
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+
+.approval-edge.is-selected polygon {
+  fill: var(--accent);
+}
+
+.approval-canvas__hint {
+  position: sticky;
+  top: 8px;
+  z-index: 2;
+  margin: 8px;
+  padding: 6px 10px;
+  background: #fff8e6;
+  border: 1px solid #e6d39a;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.approval-node {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 10px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: none;
+  cursor: grab;
+  z-index: 1;
+}
+
+.approval-node.is-selected,
+.approval-node.is-link-from {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent-soft);
+}
+
+.approval-node--start {
+  background: #eef6ff;
+}
+
+.approval-node--end {
+  background: #f3f3f3;
+}
+
+.approval-node--condition {
+  background: #fff8e8;
+}
+
+.approval-node--approve {
+  background: var(--accent-soft);
+}
+
+.approval-node__type {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.approval-node__label {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval-inspector .field,
+.approval-design__side .field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.approval-test {
+  margin: 12px 16px 20px;
+}
+
+@media (max-width: 960px) {
+  .approval-design__body {
+    grid-template-columns: 1fr;
+  }
+
+  .approval-design__side,
+  .approval-design__inspector {
+    border-right: none;
+    border-left: none;
+    border-bottom: 1px solid var(--line);
+  }
+}
+
 
 
 

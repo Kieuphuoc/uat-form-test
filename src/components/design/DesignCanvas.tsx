@@ -9,7 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
-import { controlLayoutStyle, controlTextStyle, controlVisualStyle } from '../../lib/controlLayout';
+import { alignSoloRowStyle, controlLayoutStyle, controlTextStyle, controlVisualStyle, needsAlignSoloRow } from '../../lib/controlLayout';
 import {
   groupControlsByRowId,
   resolveGroupBackground,
@@ -324,7 +324,8 @@ export function DesignCanvas({
     const showLabel = c.type !== 'label' && labelText.length > 0;
     const placeholderText = resolveLocalizedText(c.placeholder, 'v');
     const textStyle = controlTextStyle(c);
-    const visualStyle = controlVisualStyle(c, inRow);
+    const alignSolo = needsAlignSoloRow(c);
+    const visualStyle = controlVisualStyle(c, inRow, { alignSolo });
     const labelFmt = (c.format ?? '').trim().toLowerCase();
     const btnStyle: CSSProperties | undefined =
       c.type === 'button'
@@ -338,7 +339,7 @@ export function DesignCanvas({
       <div
         key={c.id}
         className={`design-canvas-item${selected ? ' selected' : ''}${c.visible === false ? ' hidden-mark' : ''}`}
-        style={controlLayoutStyle(c, inRow)}
+        style={controlLayoutStyle(c, inRow, { alignSolo })}
         onClick={(e) => {
           e.stopPropagation();
           onSelect({ kind: 'control', id: c.id });
@@ -553,7 +554,21 @@ export function DesignCanvas({
 
   const renderRowUnits = (units: RowLayoutGroup[]): ReactNode[] =>
     units.map((u) => {
-      if (u.kind === 'single') return renderControlBody(u.control, false);
+      if (u.kind === 'single') {
+        const body = renderControlBody(u.control, false);
+        if (needsAlignSoloRow(u.control)) {
+          return (
+            <div
+              key={`align-solo:${u.control.id}`}
+              className="form-control-row design-canvas-row form-control-row--align-solo"
+              style={alignSoloRowStyle(u.control)}
+            >
+              {body}
+            </div>
+          );
+        }
+        return body;
+      }
       return (
         <div key={`row:${u.rowId}`} className="form-control-row design-canvas-row">
           {u.controls.map((c) => renderControlBody(c, true))}
