@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { FormControlDef } from '../types/form';
 
-export type ControlAlign = 'left' | 'center' | 'right';
+export type ControlAlign = 'left' | 'center' | 'right' | 'squareCenter';
 
 /** Parse width "40%" → 40; không phải % → null. */
 export function parseWidthPercent(width?: string | null): number | null {
@@ -18,12 +18,19 @@ export function normalizeControlAlign(raw?: string | null): ControlAlign | null 
   if (v === 'left' || v === 'start') return 'left';
   if (v === 'center' || v === 'middle') return 'center';
   if (v === 'right' || v === 'end') return 'right';
+  if (v === 'squarecenter' || v === 'square-center' || v === 'square_center') return 'squareCenter';
   return null;
+}
+
+/** center | squareCenter — căn giữa label / nội dung. */
+export function isCenterishAlign(raw?: string | null): boolean {
+  const a = normalizeControlAlign(raw);
+  return a === 'center' || a === 'squareCenter';
 }
 
 /**
  * align + width x% (&lt;100) → control một hàng riêng, rộng x% hàng.
- * (center bắt buộc; left/right cũng solo theo kế hoạch.)
+ * (center/squareCenter bắt buộc; left/right cũng solo theo kế hoạch.)
  */
 export function needsAlignSoloRow(c: FormControlDef): boolean {
   const align = normalizeControlAlign(c.align);
@@ -33,7 +40,7 @@ export function needsAlignSoloRow(c: FormControlDef): boolean {
 }
 
 function justifyForAlign(align: ControlAlign): CSSProperties['justifyContent'] {
-  if (align === 'center') return 'center';
+  if (align === 'center' || align === 'squareCenter') return 'center';
   if (align === 'right') return 'flex-end';
   return 'flex-start';
 }

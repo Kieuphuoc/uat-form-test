@@ -98,6 +98,11 @@ export const approvalApi = {
       method: 'POST',
     }),
 
+  deleteDefinition: (id: number) =>
+    approvalFetch<{ id: number; deleted: boolean }>(`/api/approvals/definitions/${id}`, {
+      method: 'DELETE',
+    }),
+
   start: (body: StartApprovalRequest) =>
     approvalFetch<WfInstanceDetail>(
       '/api/internal/approvals/start',

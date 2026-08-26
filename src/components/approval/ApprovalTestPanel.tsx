@@ -1,61 +1,105 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ApprovalApiError, approvalApi } from '../../api/approvalApi';
-import { getJwtUserId, getJwt } from '../../api/client';
-import type { WfInstanceDetail } from '../../types/approval';
+import { getJwt, getJwtUserId } from '../../api/client';
+import type { WfAssigneeRow, WfInstanceDetail, WfNodeRow } from '../../types/approval';
 
 type Props = {
   definitionCode: string;
+  assignees: WfAssigneeRow[];
+  nodes: WfNodeRow[];
+  onHighlightChange: (highlight: {
+    currentKey: string | null;
+    doneKeys: string[];
+  }) => void;
+  onToast: (text: string, level?: 'info' | 'success' | 'error') => void;
 };
 
-export function ApprovalTestPanel({ definitionCode }: Props) {
-  const [soNgay, setSoNgay] = useState(1);
-  const [docId, setDocId] = useState(() => `test-${Date.now()}`);
-  const [tpUser, setTpUser] = useState(() => {
+function nodeTitle(nodes: WfNodeRow[], key: string | null | undefined): string {
+  if (!key) return '—';
+  const n = nodes.find((x) => x.node_key === key);
+  if (!n) return key;
+  if (n.node_type === 'start') return 'Bắt đầu';
+  if (n.node_type === 'end') return 'Kết thúc';
+  try {
+    const c = n.config_json ? (JSON.parse(n.config_json) as { label?: string; field?: string }) : {};
+    if (n.node_type === 'approve' && c.label) return c.label;
+    if (n.node_type === 'condition' && c.field) return `Điều kiện: ${c.field}`;
+  } catch {
+    /* ignore */
+  }
+  return key;
+}
+
+export function ApprovalTestPanel({
+  definitionCode,
+  assignees,
+  nodes,
+  onHighlightChange,
+  onToast,
+}: Props) {
+  const me = useMemo(() => {
     const jwt = getJwt();
-    return jwt ? getJwtUserId(jwt) || 3 : 3;
-  });
-  const [gdUser, setGdUser] = useState(4);
+    return jwt ? getJwtUserId(jwt) || 0 : 0;
+  }, []);
+
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<WfInstanceDetail | null>(null);
   const [comment, setComment] = useState('');
 
-  const runStart = async () => {
+  const roleAssignees = useMemo(() => {
+    const map: Record<string, number> = {};
+    const uid = me > 0 ? me : 3;
+    for (const a of assignees) {
+      if (a.resolve_type === 'role' && a.resolve_value) {
+        map[a.resolve_value] = uid;
+      }
+    }
+    if (!map.truong_phong) map.truong_phong = uid;
+    if (!map.giam_doc) map.giam_doc = uid;
+    return map;
+  }, [assignees, me]);
+
+  const applyHighlight = (inst: WfInstanceDetail | null) => {
+    if (!inst) {
+      onHighlightChange({ currentKey: null, doneKeys: [] });
+      return;
+    }
+    const done = inst.tasks.filter((t) => t.status === 'done').map((t) => t.node_key);
+    const pending = inst.tasks.find((t) => t.status === 'pending');
+    const current =
+      pending?.node_key
+      ?? (inst.instance.status === 'completed' || inst.instance.status === 'rejected'
+        ? inst.instance.current_node_key
+        : inst.instance.current_node_key);
+    onHighlightChange({ currentKey: current ?? null, doneKeys: done });
+  };
+
+  const runScenario = async (soNgay: number, label: string) => {
     if (!definitionCode.trim()) {
-      setError('Thiếu definition code.');
+      onToast('Thiếu mã luồng (code).', 'error');
+      return;
+    }
+    if (me <= 0) {
+      onToast('Chưa đăng nhập — không gán được người duyệt.', 'error');
       return;
     }
     setBusy(true);
-    setError(null);
     try {
+      const docId = `sim-${soNgay}-${Date.now()}`;
       const res = await approvalApi.start({
         definition_code: definitionCode.trim(),
-        source_system: 'form-web-test',
-        source_doc_type: 'manual',
-        source_doc_id: docId.trim() || `test-${Date.now()}`,
-        actor_user_id: tpUser,
+        source_system: 'form-web-sim',
+        source_doc_type: 'scenario',
+        source_doc_id: docId,
+        actor_user_id: me,
         payload: { so_ngay: soNgay },
-        assignees: {
-          truong_phong: tpUser,
-          giam_doc: gdUser,
-        },
+        assignees: roleAssignees,
       });
       setDetail(res);
+      applyHighlight(res);
+      onToast(`Đã chạy “${label}” · instance #${res.instance.id}`, 'success');
     } catch (e) {
-      setError(e instanceof ApprovalApiError ? e.message : 'Start thất bại.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const refresh = async () => {
-    if (!detail?.instance.id) return;
-    setBusy(true);
-    try {
-      setDetail(await approvalApi.getInstance(detail.instance.id));
-      setError(null);
-    } catch (e) {
-      setError(e instanceof ApprovalApiError ? e.message : 'Refresh thất bại.');
+      onToast(e instanceof ApprovalApiError ? e.message : 'Start thất bại.', 'error');
     } finally {
       setBusy(false);
     }
@@ -63,116 +107,133 @@ export function ApprovalTestPanel({ definitionCode }: Props) {
 
   const decide = async (taskId: number, action: 'approve' | 'reject') => {
     setBusy(true);
-    setError(null);
     try {
       const res = await approvalApi.decide(taskId, { action, comment: comment || null });
       setDetail(res);
+      applyHighlight(res);
+      onToast(
+        action === 'approve' ? 'Đã duyệt — chuyển bước tiếp theo.' : 'Đã từ chối phiên duyệt.',
+        action === 'approve' ? 'success' : 'info',
+      );
     } catch (e) {
-      setError(e instanceof ApprovalApiError ? e.message : 'Decide thất bại.');
+      onToast(e instanceof ApprovalApiError ? e.message : 'Decide thất bại.', 'error');
     } finally {
       setBusy(false);
     }
   };
 
-  const pending = detail?.tasks.filter((t) => t.status === 'pending') ?? [];
+  const myPending =
+    detail?.tasks.filter((t) => t.status === 'pending' && t.assignee_user_id === me) ?? [];
+  const otherPending =
+    detail?.tasks.filter((t) => t.status === 'pending' && t.assignee_user_id !== me) ?? [];
 
   return (
-    <div className="approval-test card stack">
-      <strong>Test Start / Decide</strong>
-      <p className="muted" style={{ margin: 0 }}>
-        Start dùng StaticToken; Decide dùng JWT (user phải khớp assignee).
+    <div className="approval-sim card stack">
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <strong>Mô phỏng duyệt</strong>
+        <span className="muted" style={{ fontSize: 12 }}>
+          Người duyệt test = bạn (user {me || '—'})
+        </span>
+      </div>
+      <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+        Chọn kịch bản → bước hiện tại sáng trên sơ đồ → Duyệt / Từ chối.
       </p>
-      {error && <div className="banner">{error}</div>}
       <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <label className="field">
-          so_ngay
-          <input
-            type="number"
-            value={soNgay}
-            onChange={(e) => setSoNgay(Number(e.target.value) || 0)}
-          />
-        </label>
-        <label className="field">
-          source_doc_id
-          <input value={docId} onChange={(e) => setDocId(e.target.value)} />
-        </label>
-        <label className="field">
-          truong_phong user_id
-          <input
-            type="number"
-            value={tpUser}
-            onChange={(e) => setTpUser(Number(e.target.value) || 0)}
-          />
-        </label>
-        <label className="field">
-          giam_doc user_id
-          <input
-            type="number"
-            value={gdUser}
-            onChange={(e) => setGdUser(Number(e.target.value) || 0)}
-          />
-        </label>
-        <button type="button" disabled={busy || !definitionCode} onClick={() => void runStart()}>
-          Start
+        <button
+          type="button"
+          disabled={busy || !definitionCode}
+          onClick={() => void runScenario(1, '≤ 1 ngày')}
+        >
+          Thử ≤ 1 ngày
         </button>
         <button
           type="button"
-          className="secondary"
-          disabled={busy || !detail}
-          onClick={() => void refresh()}
+          disabled={busy || !definitionCode}
+          onClick={() => void runScenario(3, '> 1 ngày')}
         >
-          Refresh
+          Thử &gt; 1 ngày
         </button>
-        <button
-          type="button"
-          className="secondary"
-          disabled={busy}
-          onClick={() => setDocId(`test-${Date.now()}`)}
-        >
-          Doc id mới
-        </button>
+        {detail && (
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy}
+            onClick={() => {
+              setDetail(null);
+              applyHighlight(null);
+            }}
+          >
+            Xóa mô phỏng
+          </button>
+        )}
       </div>
 
       {detail && (
-        <div className="stack">
-          <div className="muted">
-            instance #{detail.instance.id} · {detail.instance.status} · node{' '}
-            {detail.instance.current_node_key || '—'} · code {detail.instance.def_code}
+        <div className="approval-sim__body">
+          <div className="approval-sim__status">
+            Phiên #{detail.instance.id} ·{' '}
+            <strong>{detail.instance.status}</strong> · đang ở{' '}
+            <strong>{nodeTitle(nodes, detail.instance.current_node_key)}</strong>
           </div>
-          <label className="field">
-            comment (decide)
-            <input value={comment} onChange={(e) => setComment(e.target.value)} />
-          </label>
-          {pending.length === 0 && (
-            <p className="muted">Không còn task pending (hoặc đã completed/rejected).</p>
+
+          <ol className="approval-sim__timeline">
+            <li className="is-done">Đã gửi duyệt (so_ngay trong payload)</li>
+            {detail.decisions.map((d) => {
+              const task = detail.tasks.find((t) => t.id === d.task_id);
+              return (
+                <li key={d.id} className="is-done">
+                  {d.action === 'approve' ? 'Duyệt' : d.action === 'reject' ? 'Từ chối' : d.action}{' '}
+                  · {nodeTitle(nodes, task?.node_key)}
+                  {d.comment ? ` — ${d.comment}` : ''}
+                </li>
+              );
+            })}
+            {detail.tasks
+              .filter((t) => t.status === 'pending')
+              .map((t) => (
+                <li key={t.id} className="is-current">
+                  Đang chờ · {nodeTitle(nodes, t.node_key)} (user {t.assignee_user_id})
+                </li>
+              ))}
+            {detail.instance.status === 'completed' && (
+              <li className="is-done">Hoàn tất</li>
+            )}
+            {detail.instance.status === 'rejected' && (
+              <li className="is-error">Đã từ chối</li>
+            )}
+          </ol>
+
+          {myPending.length > 0 && (
+            <div className="stack">
+              <label className="field">
+                Ghi chú (tuỳ chọn)
+                <input value={comment} onChange={(e) => setComment(e.target.value)} />
+              </label>
+              {myPending.map((t) => (
+                <div key={t.id} className="row" style={{ justifyContent: 'space-between' }}>
+                  <span>Bạn cần xử lý: {nodeTitle(nodes, t.node_key)}</span>
+                  <div className="row">
+                    <button type="button" disabled={busy} onClick={() => void decide(t.id, 'approve')}>
+                      Duyệt
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={busy}
+                      onClick={() => void decide(t.id, 'reject')}
+                    >
+                      Từ chối
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
-          {pending.map((t) => (
-            <div key={t.id} className="row" style={{ justifyContent: 'space-between' }}>
-              <span>
-                task #{t.id} · {t.node_key} · assignee {t.assignee_user_id}
-              </span>
-              <div className="row">
-                <button type="button" disabled={busy} onClick={() => void decide(t.id, 'approve')}>
-                  Approve
-                </button>
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={busy}
-                  onClick={() => void decide(t.id, 'reject')}
-                >
-                  Reject
-                </button>
-              </div>
-            </div>
-          ))}
-          {detail.decisions.length > 0 && (
-            <div className="muted">
-              Decisions:{' '}
-              {detail.decisions
-                .map((d) => `${d.action}@${d.task_id}`)
-                .join(', ')}
-            </div>
+          {otherPending.length > 0 && myPending.length === 0 && (
+            <p className="muted">
+              Task đang chờ user khác ({otherPending.map((t) => t.assignee_user_id).join(', ')}).
+              Scenario mặc định gán tất cả role cho bạn — hãy chạy lại kịch bản.
+            </p>
           )}
         </div>
       )}

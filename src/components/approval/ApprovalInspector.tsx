@@ -17,7 +17,7 @@ type Props = {
   onChangeAssignee: (nodeKey: string, resolve_type: string, resolve_value: string) => void;
   onDeleteNode: (nodeKey: string) => void;
   onDeleteEdge: (index: number) => void;
-  onStartLink: (nodeKey: string) => void;
+  onAddBranch: (conditionNodeKey: string) => void;
 };
 
 function parseConfig(json?: string | null): Record<string, unknown> {
@@ -49,12 +49,13 @@ export function ApprovalInspector({
   onChangeAssignee,
   onDeleteNode,
   onDeleteEdge,
-  onStartLink,
+  onAddBranch,
 }: Props) {
   if (!selection) {
     return (
       <div className="approval-inspector muted">
-        Chọn node hoặc cạnh để chỉnh. Draft mới có thể thêm node từ palette trái.
+        Chọn một bước trên sơ đồ để cấu hình. Dùng nút <strong>+</strong> trên đường nối để
+        chèn bước mới.
       </div>
     );
   }
@@ -65,27 +66,16 @@ export function ApprovalInspector({
     const cond = parseCondition(edge.condition_json);
     return (
       <div className="approval-inspector stack">
-        <strong>Edge</strong>
+        <strong>Nhánh điều kiện</strong>
         <div className="muted">
-          {edge.from_node_key} → {edge.to_node_key}
+          Đi đến bước: {edge.to_node_key}
         </div>
         <label className="field">
-          sort_order
-          <input
-            type="number"
-            disabled={readOnly}
-            value={edge.sort_order}
-            onChange={(e) =>
-              onChangeEdge(selection.edge_index, { sort_order: Number(e.target.value) || 0 })
-            }
-          />
-        </label>
-        <label className="field">
-          condition field
+          Trường dữ liệu
           <input
             disabled={readOnly}
             value={cond.field ?? ''}
-            placeholder="so_ngay (trống = luôn đi)"
+            placeholder="Ví dụ: so_ngay"
             onChange={(e) => {
               const field = e.target.value.trim();
               if (!field) {
@@ -102,7 +92,7 @@ export function ApprovalInspector({
           />
         </label>
         <label className="field">
-          op
+          Phép so sánh
           <select
             disabled={readOnly || !cond.field}
             value={cond.op || '<='}
@@ -120,7 +110,7 @@ export function ApprovalInspector({
           </select>
         </label>
         <label className="field">
-          value
+          Giá trị
           <input
             type="number"
             disabled={readOnly || !cond.field}
@@ -133,7 +123,7 @@ export function ApprovalInspector({
         </label>
         {!readOnly && (
           <button type="button" className="secondary" onClick={() => onDeleteEdge(selection.edge_index)}>
-            Xóa cạnh
+            Xóa nhánh
           </button>
         )}
       </div>
@@ -147,19 +137,23 @@ export function ApprovalInspector({
 
   return (
     <div className="approval-inspector stack">
-      <strong>Node · {node.node_type}</strong>
-      <label className="field">
-        node_key
-        <input value={node.node_key} disabled />
-      </label>
+      <strong>
+        {node.node_type === 'approve'
+          ? 'Bước duyệt'
+          : node.node_type === 'condition'
+            ? 'Điều kiện phân nhánh'
+            : node.node_type === 'start'
+              ? 'Bắt đầu quy trình'
+              : 'Kết thúc quy trình'}
+      </strong>
 
       {node.node_type === 'condition' && (
         <label className="field">
-          field (payload)
+          Trường dùng để xét điều kiện
           <input
             disabled={readOnly}
             value={String(cfg.field ?? '')}
-            placeholder="so_ngay"
+            placeholder="Ví dụ: so_ngay"
             onChange={(e) => {
               const next = { ...cfg, field: e.target.value.trim() };
               onChangeNode(node.node_key, { config_json: JSON.stringify(next) });
@@ -171,11 +165,11 @@ export function ApprovalInspector({
       {node.node_type === 'approve' && (
         <>
           <label className="field">
-            label
+            Tên bước
             <input
               disabled={readOnly}
               value={String(cfg.label ?? '')}
-              placeholder="Trưởng phòng"
+              placeholder="Ví dụ: Trưởng phòng duyệt"
               onChange={(e) => {
                 const next = { ...cfg, label: e.target.value };
                 onChangeNode(node.node_key, { config_json: JSON.stringify(next) });
@@ -183,7 +177,7 @@ export function ApprovalInspector({
             />
           </label>
           <label className="field">
-            resolve_type
+            Cách xác định người duyệt
             <select
               disabled={readOnly}
               value={assignee?.resolve_type || 'role'}
@@ -195,17 +189,21 @@ export function ApprovalInspector({
                 )
               }
             >
-              <option value="role">role</option>
-              <option value="user">user</option>
-              <option value="payload">payload</option>
+              <option value="role">Theo vai trò từ hệ thống nguồn</option>
+              <option value="user">Một người cố định</option>
+              <option value="payload">Theo trường dữ liệu gửi lên</option>
             </select>
           </label>
           <label className="field">
-            resolve_value
+            {assignee?.resolve_type === 'user'
+              ? 'User ID'
+              : assignee?.resolve_type === 'payload'
+                ? 'Tên trường dữ liệu'
+                : 'Mã vai trò'}
             <input
               disabled={readOnly}
               value={assignee?.resolve_value || ''}
-              placeholder="truong_phong / giam_doc / user_id"
+              placeholder="Ví dụ: truong_phong"
               onChange={(e) =>
                 onChangeAssignee(
                   node.node_key,
@@ -218,14 +216,91 @@ export function ApprovalInspector({
         </>
       )}
 
+      {node.node_type === 'condition' && (
+        <div className="approval-branches stack">
+          <strong>Các nhánh</strong>
+          {edges
+            .map((edge, index) => ({ edge, index }))
+            .filter(({ edge }) => edge.from_node_key === node.node_key)
+            .map(({ edge, index }, branchIndex) => {
+              const condition = parseCondition(edge.condition_json);
+              return (
+                <div key={`${edge.to_node_key}-${index}`} className="approval-branch-card">
+                  <strong>Nhánh {branchIndex + 1}</strong>
+                  <input
+                    disabled={readOnly}
+                    value={condition.field ?? ''}
+                    aria-label={`Trường nhánh ${branchIndex + 1}`}
+                    placeholder="Trường dữ liệu"
+                    onChange={(event) =>
+                      onChangeEdge(index, {
+                        condition_json: JSON.stringify({
+                          ...condition,
+                          field: event.target.value.trim(),
+                          op: condition.op || '<=',
+                          value: condition.value ?? 1,
+                        }),
+                      })
+                    }
+                  />
+                  <div className="row">
+                    <select
+                      disabled={readOnly}
+                      value={condition.op || '<='}
+                      aria-label={`Phép so sánh nhánh ${branchIndex + 1}`}
+                      onChange={(event) =>
+                        onChangeEdge(index, {
+                          condition_json: JSON.stringify({
+                            ...condition,
+                            op: event.target.value,
+                          }),
+                        })
+                      }
+                    >
+                      <option value="<=">&lt;=</option>
+                      <option value=">">&gt;</option>
+                      <option value="<">&lt;</option>
+                      <option value=">=">&gt;=</option>
+                      <option value="==">=</option>
+                      <option value="!=">≠</option>
+                    </select>
+                    <input
+                      type="number"
+                      disabled={readOnly}
+                      value={condition.value ?? ''}
+                      aria-label={`Giá trị nhánh ${branchIndex + 1}`}
+                      onChange={(event) =>
+                        onChangeEdge(index, {
+                          condition_json: JSON.stringify({
+                            ...condition,
+                            value: Number(event.target.value),
+                          }),
+                        })
+                      }
+                    />
+                  </div>
+                  <small>Đi đến: {edge.to_node_key}</small>
+                  {!readOnly && (
+                    <button type="button" className="secondary" onClick={() => onDeleteEdge(index)}>
+                      Xóa nhánh
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          {!readOnly && (
+            <button type="button" className="secondary" onClick={() => onAddBranch(node.node_key)}>
+              + Thêm nhánh
+            </button>
+          )}
+        </div>
+      )}
+
       {!readOnly && (
         <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
-          <button type="button" className="secondary" onClick={() => onStartLink(node.node_key)}>
-            Nối cạnh từ đây
-          </button>
-          {node.node_type !== 'start' && (
+          {node.node_type !== 'start' && node.node_type !== 'end' && (
             <button type="button" className="secondary" onClick={() => onDeleteNode(node.node_key)}>
-              Xóa node
+              Xóa bước
             </button>
           )}
         </div>

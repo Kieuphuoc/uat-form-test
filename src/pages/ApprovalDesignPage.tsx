@@ -1,10 +1,22 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ApprovalApiError, approvalApi } from '../api/approvalApi';
 import { useAuth } from '../auth/AuthContext';
 import { ApprovalCanvas } from '../components/approval/ApprovalCanvas';
 import { ApprovalInspector } from '../components/approval/ApprovalInspector';
 import { ApprovalTestPanel } from '../components/approval/ApprovalTestPanel';
+import { useApprovalToast } from '../hooks/useApprovalToast';
+import {
+  addConditionBranch,
+  autoLayoutApprovalGraph,
+  deleteApprovalStep,
+  insertStepOnEdge,
+  mergeLayoutWithAuto,
+  removeConditionBranch,
+  validateApprovalGraph,
+  type ApprovalGraph,
+} from '../lib/approvalGraph';
+import { ApprovalHistory, type ApprovalSnapshot } from '../lib/approvalHistory';
 import type {
   ApprovalSelection,
   GraphJson,
@@ -14,7 +26,6 @@ import type {
   WfDefinitionDetail,
   WfEdgeRow,
   WfNodeRow,
-  WfNodeType,
 } from '../types/approval';
 
 function parseGraph(json?: string | null): GraphJson {
@@ -26,28 +37,11 @@ function parseGraph(json?: string | null): GraphJson {
   }
 }
 
-function ensureLayout(nodes: WfNodeRow[], graphJson?: string | null): GraphLayout {
-  const g = parseGraph(graphJson);
-  const layout = { ...(g.layout || {}) };
-  nodes.forEach((n, i) => {
-    if (!layout[n.node_key]) {
-      layout[n.node_key] = { x: 60 + (i % 3) * 200, y: 60 + Math.floor(i / 3) * 110 };
-    }
-  });
-  return layout;
-}
-
-function uniqueKey(base: string, existing: Set<string>): string {
-  if (!existing.has(base)) return base;
-  let i = 2;
-  while (existing.has(`${base}_${i}`)) i += 1;
-  return `${base}_${i}`;
-}
-
 export function ApprovalDesignPage() {
   const { id: idParam } = useParams();
   const id = Number(idParam);
   const { jwt, user, logout } = useAuth();
+  const { showToast, toastNode } = useApprovalToast();
   const [detail, setDetail] = useState<WfDefinitionDetail | null>(null);
   const [nodes, setNodes] = useState<WfNodeRow[]>([]);
   const [edges, setEdges] = useState<WfEdgeRow[]>([]);
@@ -56,47 +50,76 @@ export function ApprovalDesignPage() {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [selection, setSelection] = useState<ApprovalSelection>(null);
-  const [linkFrom, setLinkFrom] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [histTick, setHistTick] = useState(0);
+  const [simHighlight, setSimHighlight] = useState<{
+    currentKey: string | null;
+    doneKeys: string[];
+  }>({ currentKey: null, doneKeys: [] });
+  const historyRef = useRef(new ApprovalHistory());
+  const busyRef = useRef(false);
+  const readOnlyRef = useRef(false);
+  const onSaveRef = useRef<() => Promise<void>>(async () => undefined);
 
   const readOnly = detail?.definition.status !== 'draft';
+  readOnlyRef.current = readOnly;
+  busyRef.current = busy;
+
+  const validationErrors = useMemo(
+    () => validateApprovalGraph({ nodes, edges, assignees }),
+    [nodes, edges, assignees],
+  );
+
+  const applySnapshot = (s: ApprovalSnapshot) => {
+    setNodes(s.nodes);
+    setEdges(s.edges);
+    setAssignees(s.assignees);
+    setLayout(s.layout);
+    setSelection(null);
+    setHistTick((n) => n + 1);
+  };
 
   const load = useCallback(async () => {
     if (!Number.isFinite(id) || id <= 0) {
-      setError('id không hợp lệ.');
+      setLoadError('id không hợp lệ.');
       return;
     }
     try {
       const d = await approvalApi.getDefinition(id);
+      const g = parseGraph(d.definition.graph_json);
+      const nextLayout = mergeLayoutWithAuto(d.nodes, d.edges, g.layout);
       setDetail(d);
       setCode(d.definition.code);
       setName(d.definition.name);
       setNodes(d.nodes);
       setEdges(d.edges);
       setAssignees(d.assignees);
-      setLayout(ensureLayout(d.nodes, d.definition.graph_json));
-      setError(null);
+      setLayout(nextLayout);
+      setLoadError(null);
       setSelection(null);
-      setLinkFrom(null);
+      historyRef.current.reset({
+        nodes: d.nodes,
+        edges: d.edges,
+        assignees: d.assignees,
+        layout: nextLayout,
+      });
+      setHistTick((n) => n + 1);
+      if (d.definition.status === 'published') {
+        showToast(
+          `Đang xem bản published v${d.definition.version}. Tạo phiên bản mới để sửa.`,
+          'info',
+        );
+      }
     } catch (e) {
-      setError(e instanceof ApprovalApiError ? e.message : 'Không tải definition.');
+      setLoadError(e instanceof ApprovalApiError ? e.message : 'Không tải definition.');
     }
-  }, [id]);
+  }, [id, showToast]);
 
   useEffect(() => {
     if (!jwt) return;
     void load();
   }, [jwt, load]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setLinkFrom(null);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
 
   const buildSaveBody = (): SaveDefinitionRequest => {
     const graph: GraphJson = {
@@ -130,35 +153,84 @@ export function ApprovalDesignPage() {
 
   const onSave = async () => {
     if (readOnly || !detail) return;
+    if (validationErrors.length > 0) {
+      showToast(validationErrors.join(' '), 'error');
+      return;
+    }
     setBusy(true);
-    setMessage(null);
     try {
       const d = await approvalApi.updateDefinition(detail.definition.id, buildSaveBody());
+      const g = parseGraph(d.definition.graph_json);
+      const nextLayout = mergeLayoutWithAuto(d.nodes, d.edges, g.layout ?? layout);
       setDetail(d);
       setNodes(d.nodes);
       setEdges(d.edges);
       setAssignees(d.assignees);
-      setLayout(ensureLayout(d.nodes, d.definition.graph_json));
-      setMessage('Đã lưu draft.');
-      setError(null);
+      setLayout(nextLayout);
+      showToast('Đã lưu draft.', 'success');
     } catch (e) {
-      setError(e instanceof ApprovalApiError ? e.message : 'Lưu thất bại.');
+      showToast(e instanceof ApprovalApiError ? e.message : 'Lưu thất bại.', 'error');
     } finally {
       setBusy(false);
     }
   };
+  onSaveRef.current = onSave;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+      const key = e.key.toLowerCase();
+
+      if (key === 's') {
+        e.preventDefault();
+        if (readOnlyRef.current) {
+          showToast('Bản published — tạo phiên bản mới rồi mới lưu.', 'info');
+          return;
+        }
+        if (busyRef.current) return;
+        void onSaveRef.current();
+        return;
+      }
+
+      if (readOnlyRef.current) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) {
+        return;
+      }
+      if (key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        const s = historyRef.current.undo();
+        if (s) applySnapshot(s);
+        else showToast('Không còn bước Undo.', 'info');
+      } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
+        e.preventDefault();
+        const s = historyRef.current.redo();
+        if (s) applySnapshot(s);
+        else showToast('Không còn bước Redo.', 'info');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showToast]);
 
   const onPublish = async () => {
     if (!detail || readOnly) return;
+    if (validationErrors.length > 0) {
+      showToast(validationErrors.join(' '), 'error');
+      return;
+    }
     setBusy(true);
     try {
       await approvalApi.updateDefinition(detail.definition.id, buildSaveBody());
       const d = await approvalApi.publishDefinition(detail.definition.id);
       setDetail(d);
-      setMessage(`Đã publish v${d.definition.version}.`);
-      setError(null);
+      showToast(
+        `Đã publish v${d.definition.version}. Bản published cũ (cùng code) đã archive.`,
+        'success',
+      );
     } catch (e) {
-      setError(e instanceof ApprovalApiError ? e.message : 'Publish thất bại.');
+      showToast(e instanceof ApprovalApiError ? e.message : 'Publish thất bại.', 'error');
     } finally {
       setBusy(false);
     }
@@ -177,60 +249,146 @@ export function ApprovalDesignPage() {
       });
       window.location.assign(`/admin/approval/${d.definition.id}`);
     } catch (e) {
-      setError(e instanceof ApprovalApiError ? e.message : 'Clone draft thất bại.');
+      showToast(e instanceof ApprovalApiError ? e.message : 'Tạo phiên bản mới thất bại.', 'error');
       setBusy(false);
     }
   };
 
-  const addNode = (type: WfNodeType) => {
-    if (readOnly) return;
-    const keys = new Set(nodes.map((n) => n.node_key));
-    const key = uniqueKey(type === 'condition' ? 'if' : type, keys);
-    const next: WfNodeRow = {
-      node_key: key,
-      node_type: type,
-      config_json:
-        type === 'condition'
-          ? JSON.stringify({ field: 'so_ngay' })
-          : type === 'approve'
-            ? JSON.stringify({ label: key })
-            : '{}',
-      sort_order: nodes.length,
-    };
-    setNodes((prev) => [...prev, next]);
-    setLayout((prev) => ({
-      ...prev,
-      [key]: { x: 80 + (nodes.length % 4) * 40, y: 80 + nodes.length * 24 },
-    }));
-    if (type === 'approve') {
-      setAssignees((prev) => [
-        ...prev.filter((a) => a.node_key !== key),
-        { node_key: key, resolve_type: 'role', resolve_value: 'truong_phong' },
-      ]);
-    }
-    setSelection({ kind: 'node', node_key: key });
-  };
-
-  const onPickLinkTarget = (toKey: string) => {
-    if (!linkFrom || readOnly) return;
-    if (linkFrom === toKey) {
-      setLinkFrom(null);
+  /** Copy thành quy trình mới (code mới) — không vào nhóm “Bản cũ” của bản gốc. */
+  const onCopyAsNew = async () => {
+    if (!detail) return;
+    const baseCode = (code.trim() || detail.definition.code).replace(/_copy(_[a-z0-9]+)?$/i, '');
+    const suggested = `${baseCode}_copy`;
+    const newCode = window.prompt(
+      'Copy thành quy trình mới (code riêng, không phải phiên bản của bản hiện tại). Nhập mã mới:',
+      suggested,
+    );
+    if (newCode == null) return;
+    const trimmed = newCode.trim();
+    if (!trimmed) {
+      showToast('Cần nhập mã quy trình mới.', 'error');
       return;
     }
-    setEdges((prev) => {
-      const next = [
-        ...prev,
-        {
-          from_node_key: linkFrom,
-          to_node_key: toKey,
-          sort_order: prev.filter((e) => e.from_node_key === linkFrom).length,
-          condition_json: null as string | null,
-        },
-      ];
-      setSelection({ kind: 'edge', edge_index: next.length - 1 });
-      return next;
+    if (trimmed === detail.definition.code) {
+      showToast('Mã mới phải khác mã hiện tại — nếu giữ cùng code sẽ thành phiên bản (Bản cũ).', 'error');
+      return;
+    }
+    const baseName = name.trim() || detail.definition.name;
+    const newName = baseName.endsWith('(bản sao)') ? baseName : `${baseName} (bản sao)`;
+    setBusy(true);
+    try {
+      const body = buildSaveBody();
+      const d = await approvalApi.createDefinition({
+        ...body,
+        id: null,
+        code: trimmed,
+        name: newName,
+      });
+      showToast(`Đã copy → ${trimmed} (draft mới).`, 'success');
+      window.location.assign(`/admin/approval/${d.definition.id}`);
+    } catch (e) {
+      showToast(e instanceof ApprovalApiError ? e.message : 'Copy thất bại.', 'error');
+      setBusy(false);
+    }
+  };
+
+  const currentGraph = (): ApprovalGraph => ({ nodes, edges, assignees });
+
+  const applyGraph = (graph: ApprovalGraph, selectedNodeKey?: string, relayout = true) => {
+    const nextLayout = relayout
+      ? autoLayoutApprovalGraph(graph.nodes, graph.edges)
+      : mergeLayoutWithAuto(graph.nodes, graph.edges, layout);
+    setNodes(graph.nodes);
+    setEdges(graph.edges);
+    setAssignees(graph.assignees);
+    setLayout(nextLayout);
+    setSelection(selectedNodeKey ? { kind: 'node', node_key: selectedNodeKey } : null);
+    queueMicrotask(() => {
+      historyRef.current.push({
+        nodes: graph.nodes,
+        edges: graph.edges,
+        assignees: graph.assignees,
+        layout: nextLayout,
+      });
+      setHistTick((n) => n + 1);
     });
-    setLinkFrom(null);
+  };
+
+  const onInsertStep = (edgeIndex: number, type: 'approve' | 'condition') => {
+    try {
+      const result = insertStepOnEdge(currentGraph(), edgeIndex, type);
+      applyGraph(result, result.selectedNodeKey, true);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Không thể chèn bước.', 'error');
+    }
+  };
+
+  const onAddBranch = (conditionNodeKey: string) => {
+    try {
+      const result = addConditionBranch(currentGraph(), conditionNodeKey);
+      applyGraph(result, result.selectedNodeKey, true);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Không thể thêm nhánh.', 'error');
+    }
+  };
+
+  const onDeleteStep = (nodeKey: string) => {
+    try {
+      applyGraph(deleteApprovalStep(currentGraph(), nodeKey), undefined, true);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Không thể xóa bước.', 'error');
+    }
+  };
+
+  const onAutoLayout = () => {
+    if (readOnly) return;
+    const next = autoLayoutApprovalGraph(nodes, edges);
+    setLayout(next);
+    queueMicrotask(() => {
+      historyRef.current.push({ nodes, edges, assignees, layout: next });
+      setHistTick((n) => n + 1);
+    });
+  };
+
+  const onLayoutChange = (next: GraphLayout) => {
+    setLayout(next);
+    queueMicrotask(() => {
+      historyRef.current.push({ nodes, edges, assignees, layout: next });
+      setHistTick((n) => n + 1);
+    });
+  };
+
+  const onChangeNode = (nodeKey: string, patch: Partial<WfNodeRow>) => {
+    if (readOnly) return;
+    const nextNodes = nodes.map((n) => (n.node_key === nodeKey ? { ...n, ...patch } : n));
+    setNodes(nextNodes);
+    queueMicrotask(() => {
+      historyRef.current.push({ nodes: nextNodes, edges, assignees, layout });
+      setHistTick((n) => n + 1);
+    });
+  };
+
+  const onChangeEdge = (index: number, patch: Partial<WfEdgeRow>) => {
+    if (readOnly) return;
+    const nextEdges = edges.map((e, i) => (i === index ? { ...e, ...patch } : e));
+    setEdges(nextEdges);
+    queueMicrotask(() => {
+      historyRef.current.push({ nodes, edges: nextEdges, assignees, layout });
+      setHistTick((n) => n + 1);
+    });
+  };
+
+  const onChangeAssignee = (nodeKey: string, resolve_type: string, resolve_value: string) => {
+    if (readOnly) return;
+    const nextAssignees = [
+      ...assignees.filter((a) => a.node_key !== nodeKey),
+      { node_key: nodeKey, resolve_type, resolve_value },
+    ];
+    setAssignees(nextAssignees);
+    queueMicrotask(() => {
+      historyRef.current.push({ nodes, edges, assignees: nextAssignees, layout });
+      setHistTick((n) => n + 1);
+    });
   };
 
   const statusBadge = useMemo(() => {
@@ -238,10 +396,14 @@ export function ApprovalDesignPage() {
     return `${detail.definition.status} · v${detail.definition.version}`;
   }, [detail]);
 
+  const canUndo = histTick >= 0 && historyRef.current.canUndo();
+  const canRedo = histTick >= 0 && historyRef.current.canRedo();
+
   if (!jwt) return null;
 
   return (
     <div className="approval-design">
+      {toastNode}
       <header className="approval-design__bar row" style={{ justifyContent: 'space-between' }}>
         <div className="row" style={{ gap: 12 }}>
           <Link to="/admin/approval">← List</Link>
@@ -249,6 +411,37 @@ export function ApprovalDesignPage() {
           <span className="muted">{statusBadge}</span>
         </div>
         <div className="row">
+          {!readOnly && (
+            <>
+              <button
+                type="button"
+                className="secondary"
+                disabled={!canUndo}
+                onClick={() => {
+                  const s = historyRef.current.undo();
+                  if (s) applySnapshot(s);
+                  else showToast('Không còn bước Undo.', 'info');
+                }}
+              >
+                Undo
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                disabled={!canRedo}
+                onClick={() => {
+                  const s = historyRef.current.redo();
+                  if (s) applySnapshot(s);
+                  else showToast('Không còn bước Redo.', 'info');
+                }}
+              >
+                Redo
+              </button>
+              <button type="button" className="secondary" onClick={onAutoLayout}>
+                Tự sắp xếp
+              </button>
+            </>
+          )}
           <span className="muted">{user?.nickname || user?.email}</span>
           <button type="button" className="secondary" onClick={() => logout()}>
             Đăng xuất
@@ -256,8 +449,13 @@ export function ApprovalDesignPage() {
         </div>
       </header>
 
-      {error && <div className="banner">{error}</div>}
-      {message && <div className="banner banner--ok">{message}</div>}
+      {loadError && <div className="banner">{loadError}</div>}
+      {readOnly && detail?.definition.status === 'published' && (
+        <div className="banner">
+          Đang xem bản published v{detail.definition.version}. Để sửa luồng: tạo phiên bản mới
+          (copy toàn bộ graph), chỉnh sửa rồi Publish — bản published cũ sẽ được archive.
+        </div>
+      )}
 
       <div className="approval-design__body">
         <aside className="approval-design__side stack">
@@ -271,30 +469,53 @@ export function ApprovalDesignPage() {
           </label>
           {!readOnly && (
             <>
-              <strong>Palette</strong>
-              <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
-                {(['start', 'condition', 'approve', 'end'] as WfNodeType[]).map((t) => (
-                  <button key={t} type="button" className="secondary" onClick={() => addNode(t)}>
-                    + {t}
-                  </button>
-                ))}
+              <div className="approval-builder-help">
+                <strong>Cách thiết kế</strong>
+                <ol>
+                  <li>Bấm dấu + trên đường nối để thêm bước.</li>
+                  <li>Kéo node để chỉnh vị trí; mũi tên đi theo.</li>
+                  <li>Ctrl+S lưu · Ctrl+Z / Ctrl+Y Undo/Redo.</li>
+                </ol>
               </div>
-              <button type="button" disabled={busy} onClick={() => void onSave()}>
+              {validationErrors.length > 0 && (
+                <div className="approval-validation">
+                  <strong>Cần hoàn thiện</strong>
+                  <ul>
+                    {validationErrors.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <button
+                type="button"
+                disabled={busy || validationErrors.length > 0}
+                onClick={() => void onSave()}
+              >
                 Save draft
               </button>
-              <button type="button" disabled={busy} onClick={() => void onPublish()}>
+              <button
+                type="button"
+                disabled={busy || validationErrors.length > 0}
+                onClick={() => void onPublish()}
+              >
                 Publish
+              </button>
+              <button type="button" className="secondary" disabled={busy} onClick={() => void onCopyAsNew()}>
+                Copy thành quy trình mới
               </button>
             </>
           )}
           {readOnly && (
-            <button type="button" disabled={busy} onClick={() => void onCloneDraft()}>
-              Tạo bản draft mới
-            </button>
+            <>
+              <button type="button" disabled={busy} onClick={() => void onCloneDraft()}>
+                Tạo phiên bản mới (v{(detail?.definition.version ?? 0) + 1})
+              </button>
+              <button type="button" className="secondary" disabled={busy} onClick={() => void onCopyAsNew()}>
+                Copy thành quy trình mới
+              </button>
+            </>
           )}
-          <p className="muted" style={{ fontSize: 12 }}>
-            Published chỉ xem + Test. Sửa: clone draft rồi Save/Publish.
-          </p>
         </aside>
 
         <main className="approval-design__main">
@@ -303,11 +524,12 @@ export function ApprovalDesignPage() {
             edges={edges}
             layout={layout}
             selection={selection}
-            linkFrom={linkFrom}
             readOnly={readOnly}
+            highlightNodeKey={simHighlight.currentKey}
+            doneNodeKeys={simHighlight.doneKeys}
             onSelect={setSelection}
-            onMove={(key, x, y) => setLayout((prev) => ({ ...prev, [key]: { x, y } }))}
-            onPickLinkTarget={onPickLinkTarget}
+            onInsertStep={onInsertStep}
+            onLayoutChange={onLayoutChange}
           />
         </main>
 
@@ -318,41 +540,29 @@ export function ApprovalDesignPage() {
             edges={edges}
             assignees={assignees}
             readOnly={readOnly}
-            onChangeNode={(nodeKey, patch) =>
-              setNodes((prev) => prev.map((n) => (n.node_key === nodeKey ? { ...n, ...patch } : n)))
-            }
-            onChangeEdge={(index, patch) =>
-              setEdges((prev) => prev.map((e, i) => (i === index ? { ...e, ...patch } : e)))
-            }
-            onChangeAssignee={(nodeKey, resolve_type, resolve_value) =>
-              setAssignees((prev) => {
-                const rest = prev.filter((a) => a.node_key !== nodeKey);
-                return [...rest, { node_key: nodeKey, resolve_type, resolve_value }];
-              })
-            }
-            onDeleteNode={(nodeKey) => {
-              setNodes((prev) => prev.filter((n) => n.node_key !== nodeKey));
-              setEdges((prev) =>
-                prev.filter((e) => e.from_node_key !== nodeKey && e.to_node_key !== nodeKey),
-              );
-              setAssignees((prev) => prev.filter((a) => a.node_key !== nodeKey));
-              setLayout((prev) => {
-                const next = { ...prev };
-                delete next[nodeKey];
-                return next;
-              });
-              setSelection(null);
-            }}
+            onChangeNode={onChangeNode}
+            onChangeEdge={onChangeEdge}
+            onChangeAssignee={onChangeAssignee}
+            onDeleteNode={onDeleteStep}
             onDeleteEdge={(index) => {
-              setEdges((prev) => prev.filter((_, i) => i !== index));
-              setSelection(null);
+              try {
+                applyGraph(removeConditionBranch(currentGraph(), index), undefined, true);
+              } catch (e) {
+                showToast(e instanceof Error ? e.message : 'Không thể xóa nhánh.', 'error');
+              }
             }}
-            onStartLink={(nodeKey) => setLinkFrom(nodeKey)}
+            onAddBranch={onAddBranch}
           />
         </aside>
       </div>
 
-      <ApprovalTestPanel definitionCode={code || detail?.definition.code || ''} />
+      <ApprovalTestPanel
+        definitionCode={code || detail?.definition.code || ''}
+        assignees={assignees}
+        nodes={nodes}
+        onHighlightChange={setSimHighlight}
+        onToast={showToast}
+      />
     </div>
   );
 }

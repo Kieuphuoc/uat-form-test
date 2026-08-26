@@ -188,6 +188,7 @@ export function RuntimeFileImageInput({
   uploadMode,
   previewWidth,
   imageSource,
+  align,
   value,
   style,
   lan = 'v',
@@ -204,6 +205,8 @@ export function RuntimeFileImageInput({
   previewWidth?: number;
   /** image: 'camera' | 'both' (mặc định). */
   imageSource?: string;
+  /** image: left | center | right | squareCenter. */
+  align?: string;
   value: unknown;
   style?: CSSProperties;
   lan?: LangCode;
@@ -214,6 +217,10 @@ export function RuntimeFileImageInput({
   const mode = resolveUploadMode(uploadMode);
   const thumb = Math.max(24, previewWidth ?? 50);
   const cameraOnly = kind === 'image' && String(imageSource ?? '').trim().toLowerCase() === 'camera';
+  const alignRaw = String(align ?? '').trim().toLowerCase();
+  const alignCenter = alignRaw === 'center' || alignRaw === 'middle';
+  const alignSquareCenter =
+    alignRaw === 'squarecenter' || alignRaw === 'square-center' || alignRaw === 'square_center';
   const canUpload = editable && !disabled;
   const inputRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -358,46 +365,60 @@ export function RuntimeFileImageInput({
   );
 
   if (kind === 'image') {
+    const attachClass = [
+      'form-attach',
+      'form-attach--image',
+      canUpload ? 'form-attach--editable' : 'form-attach--readonly',
+      cameraOnly ? 'form-attach--camera-only' : '',
+      alignCenter || alignSquareCenter ? 'form-attach--align-center' : '',
+      alignSquareCenter ? 'form-attach--align-square-center' : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const showCaptureSlot = canUpload && items.length < max;
     return (
-      <div
-        className={`form-attach form-attach--image${canUpload ? ' form-attach--editable' : ' form-attach--readonly'}`}
-        style={style}
-      >
+      <div className={attachClass} style={style}>
         <div className="form-image-box">
-          <div className="form-image-thumbs">
-            {numbered.map(({ item, idx, n }) => (
-              <div
-                key={`${item.id || item.localId || item.name}-${n}`}
-                className="form-image-thumb-wrap"
-                style={{ width: thumb, height: thumb }}
-              >
-                <button
-                  type="button"
-                  className="form-image-thumb"
-                  title={item.name}
-                  onClick={() => openFile(item)}
+          {numbered.length > 0 ? (
+            <div className="form-image-thumbs">
+              {numbered.map(({ item, idx, n }) => (
+                <div
+                  key={`${item.id || item.localId || item.name}-${n}`}
+                  className="form-image-thumb-wrap"
+                  style={
+                    alignSquareCenter && max === 1
+                      ? undefined
+                      : { width: thumb, height: thumb }
+                  }
                 >
-                  <FormImageThumbImg item={item} alt={item.name} fallback={String(n)} />
-                </button>
-                {canUpload ? (
                   <button
                     type="button"
-                    className="form-image-remove"
-                    title={uiCopy(lan, 'removeImage')}
-                    aria-label={uiCopy(lan, 'removeImage')}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeAt(idx);
-                    }}
+                    className="form-image-thumb"
+                    title={item.name}
+                    onClick={() => openFile(item)}
                   >
-                    ×
+                    <FormImageThumbImg item={item} alt={item.name} fallback={String(n)} />
                   </button>
-                ) : null}
-              </div>
-            ))}
-          </div>
+                  {canUpload ? (
+                    <button
+                      type="button"
+                      className="form-image-remove"
+                      title={uiCopy(lan, 'removeImage')}
+                      aria-label={uiCopy(lan, 'removeImage')}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeAt(idx);
+                      }}
+                    >
+                      ×
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
 
-          {canUpload ? (
+          {showCaptureSlot ? (
             <div className="form-image-actions">
               <button
                 type="button"

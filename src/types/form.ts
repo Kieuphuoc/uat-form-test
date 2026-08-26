@@ -114,10 +114,11 @@ export type FormControlDef = {
    */
   imageSource?: 'camera' | 'both' | string;
   /**
-   * Căn control trong hàng: left | center | right.
-   * center + width x% (<100) → control một hàng riêng, rộng x% hàng.
+   * Căn control trong hàng: left | center | right | squareCenter.
+   * center/squareCenter + width x% (<100) → một hàng riêng, rộng x% hàng.
+   * squareCenter (image): khung chụp hình vuông; center|squareCenter + imageSource=camera → label/icon/text canh giữa.
    */
-  align?: 'left' | 'center' | 'right' | string;
+  align?: 'left' | 'center' | 'right' | 'squareCenter' | string;
   onChange?: string[];
   onClick?: string[];
   /** Override layout PC. Mobile bỏ qua. */

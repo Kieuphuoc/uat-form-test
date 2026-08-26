@@ -81,6 +81,23 @@ a {
   min-width: 0;
 }
 
+/* Footer pin đáy khi form ngắn (mobile / chrome / iframe). */
+.form-shell--has-footer {
+  flex: 1 1 auto;
+  min-height: 100%;
+  height: 100%;
+}
+
+.form-shell--has-footer > .form-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.form-shell--has-footer > .form-footer {
+  margin-top: auto;
+}
+
 .form-footer {
   flex-shrink: 0;
   position: sticky;
@@ -88,9 +105,10 @@ a {
   z-index: 6;
   margin-top: 8px;
   padding-top: 12px;
-  border-top: 1px solid var(--line);
-  background: var(--card, #fff);
-  box-shadow: 0 -6px 16px rgba(15, 23, 42, 0.04);
+  padding-bottom: 4px;
+  border-top: none;
+  background: transparent;
+  box-shadow: none;
 }
 
 .form-footer-inner {
@@ -258,6 +276,11 @@ label.field {
   gap: 4px;
   font-size: 13px;
   color: var(--muted);
+}
+
+label.field.field--align-center > .field-label {
+  text-align: center;
+  width: 100%;
 }
 
 input,
@@ -1752,8 +1775,9 @@ pre.json {
 }
 
 .design-root[data-theme='dark'] .form-footer {
-  background: #1e293b;
-  border-top-color: #334155;
+  background: transparent;
+  border-top: none;
+  box-shadow: none;
 }
 
 .design-root[data-theme='dark'] .design-canvas-footer {
@@ -1990,6 +2014,17 @@ pre.json {
   max-width: none;
   margin: 0;
   padding: 12px;
+  height: 100%;
+  min-height: 480px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.design-phone .shell.embedded > .form-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
 }
 
 .design-phone .modal-backdrop.embedded {
@@ -3894,6 +3929,57 @@ pre.json {
   line-height: 1;
 }
 
+/* align=center|squareCenter + imageSource=camera: icon + "Chụp ảnh" giữa */
+.form-attach--align-center.form-attach--camera-only .form-image-actions,
+.form-attach--align-square-center.form-attach--camera-only .form-image-actions {
+  justify-content: center;
+}
+
+.form-attach--align-square-center.form-attach--camera-only .form-image-action {
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+}
+
+/* align=squareCenter: khung chụp hình vuông, nội dung giữa */
+.form-attach--align-square-center .form-image-box {
+  aspect-ratio: 1 / 1;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+}
+
+.form-attach--align-square-center .form-image-thumbs {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.form-attach--align-square-center .form-image-thumb-wrap {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.form-attach--align-square-center .form-image-actions {
+  margin-top: 0;
+  padding-top: 0;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+}
+
 /* Designer dark chrome */
 .design-root[data-theme='dark'] {
   --card: #1e293b;
@@ -4053,7 +4139,7 @@ pre.json {
 .form-outer-chrome__body {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
@@ -4061,8 +4147,48 @@ pre.json {
 .form-outer-chrome__body > .shell {
   max-width: none;
   margin: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.form-outer-chrome__body > .shell > .form-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
+.form-outer-chrome__body > .shell > .form-shell > .form-scroll {
+  overflow: auto;
+}
+
+/* Native / Zalo iframe (?mobile=true): shell full viewport, footer đáy. */
+body.mobile-embed,
+body.mobile-embed #root {
+  height: 100%;
+  height: 100dvh;
+}
+
+body.mobile-embed .shell {
+  max-width: none;
+  margin: 0;
   height: 100%;
   min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+body.mobile-embed .shell > .form-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
+body.mobile-embed .shell > .form-shell > .form-scroll {
+  overflow: auto;
 }
 
 /* ===================== Trang chủ: tile dạng icon ===================== */
@@ -8356,8 +8482,9 @@ body.mobile-embed .chat-topbar {
 .approval-canvas {
   position: relative;
   min-width: 100%;
-  min-height: 400px;
+  min-height: 440px;
   user-select: none;
+  padding: 24px;
 }
 
 .approval-canvas__edges {
@@ -8372,7 +8499,7 @@ body.mobile-embed .chat-topbar {
   cursor: pointer;
 }
 
-.approval-edge line {
+.approval-edge path {
   stroke: #7a8a9a;
   stroke-width: 2;
   fill: none;
@@ -8387,7 +8514,7 @@ body.mobile-embed .chat-topbar {
   font-size: 11px;
 }
 
-.approval-edge.is-selected line {
+.approval-edge.is-selected path {
   stroke: var(--accent);
   stroke-width: 3;
 }
@@ -8419,14 +8546,41 @@ body.mobile-embed .chat-topbar {
   border: 1px solid var(--line);
   border-radius: 10px;
   box-shadow: none;
-  cursor: grab;
+  cursor: pointer;
   z-index: 1;
+  transition: border-color 120ms ease, background 120ms ease;
 }
 
 .approval-node.is-selected,
 .approval-node.is-link-from {
   border-color: var(--accent);
-  outline: 2px solid var(--accent-soft);
+  outline: 3px solid color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.approval-node.is-sim-current {
+  border-color: #0f766e;
+  outline: 3px solid rgba(15, 118, 110, 0.28);
+  box-shadow: 0 0 0 1px #0f766e inset;
+  animation: approval-sim-pulse 1.4s ease-in-out infinite;
+}
+
+.approval-node.is-sim-done {
+  opacity: 0.72;
+  border-color: #64748b;
+}
+
+.approval-node.is-sim-done.is-sim-current {
+  opacity: 1;
+}
+
+@keyframes approval-sim-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px #0f766e inset, 0 0 0 0 rgba(15, 118, 110, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 1px #0f766e inset, 0 0 0 6px rgba(15, 118, 110, 0);
+  }
 }
 
 .approval-node--start {
@@ -8460,6 +8614,111 @@ body.mobile-embed .chat-topbar {
   white-space: nowrap;
 }
 
+.approval-insert {
+  position: absolute;
+  z-index: 4;
+  transform: translate(-50%, -50%);
+}
+
+.approval-insert__plus {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--accent);
+  font-size: 19px;
+  line-height: 1;
+}
+
+.approval-insert__plus:hover {
+  background: var(--accent-soft);
+}
+
+.approval-insert__menu {
+  position: absolute;
+  left: 34px;
+  top: -8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 168px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  z-index: 8;
+}
+
+.approval-insert__menu button {
+  width: 100%;
+  padding: 7px 9px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.approval-insert__menu button:hover {
+  background: var(--accent-soft);
+}
+
+.approval-builder-help {
+  padding: 10px;
+  border-radius: 10px;
+  background: #eef6ff;
+  font-size: 12px;
+}
+
+.approval-builder-help ol {
+  margin: 7px 0 0;
+  padding-left: 18px;
+}
+
+.approval-validation {
+  padding: 10px;
+  border: 1px solid #e6d39a;
+  border-radius: 10px;
+  background: #fff8e6;
+  color: #704d00;
+  font-size: 12px;
+}
+
+.approval-validation ul {
+  margin: 7px 0 0;
+  padding-left: 18px;
+}
+
+.approval-branches {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.approval-branch-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fafbfc;
+}
+
+.approval-branch-card .row {
+  gap: 6px;
+}
+
+.approval-branch-card .row > * {
+  min-width: 0;
+  flex: 1;
+}
+
+.approval-branch-card small {
+  color: var(--muted);
+}
+
 .approval-inspector .field,
 .approval-design__side .field {
   display: flex;
@@ -8468,8 +8727,88 @@ body.mobile-embed .chat-topbar {
   font-size: 12px;
 }
 
+.approval-node.is-draggable {
+  cursor: grab;
+}
+
+.approval-node.is-draggable:active {
+  cursor: grabbing;
+}
+
+.approval-status {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.approval-status--draft {
+  background: #fff8e6;
+  color: #704d00;
+}
+
+.approval-status--published {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.approval-status--archived {
+  background: #eef2f6;
+  color: var(--muted);
+}
+
+.approval-sim,
 .approval-test {
   margin: 12px 16px 20px;
+}
+
+.approval-sim__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.approval-sim__status {
+  font-size: 13px;
+}
+
+.approval-sim__timeline {
+  margin: 0;
+  padding: 0 0 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.approval-sim__timeline li.is-done {
+  color: var(--muted);
+}
+
+.approval-sim__timeline li.is-current {
+  color: #0f766e;
+  font-weight: 600;
+}
+
+.approval-sim__timeline li.is-error {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.approval-versions-drawer {
+  width: min(480px, 100%);
+  max-height: min(70vh, 560px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--card);
+  border-radius: 12px;
 }
 
 @media (max-width: 960px) {

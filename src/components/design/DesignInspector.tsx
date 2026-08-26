@@ -1542,16 +1542,24 @@ export function DesignInspector({
         </PropRow>
         <PropRow
           label="align"
-          title="left|center|right. center + width x% (&lt;100) → một hàng, rộng x%"
+          title="left|center|right|squareCenter. center/squareCenter + width x% (&lt;100) → một hàng; squareCenter (image) = khung vuông + canh giữa"
         >
           <select
             value={
-              c.align === 'center' || c.align === 'right' || c.align === 'left' ? c.align : ''
+              c.align === 'center' ||
+              c.align === 'right' ||
+              c.align === 'left' ||
+              c.align === 'squareCenter'
+                ? c.align
+                : ''
             }
             onChange={(e) => {
               const v = e.target.value;
               patch({
-                align: v === 'left' || v === 'center' || v === 'right' ? v : undefined,
+                align:
+                  v === 'left' || v === 'center' || v === 'right' || v === 'squareCenter'
+                    ? v
+                    : undefined,
               });
             }}
           >
@@ -1559,6 +1567,9 @@ export function DesignInspector({
             <option value="left">left</option>
             <option value="center">center</option>
             <option value="right">right</option>
+            {c.type === 'image' ? (
+              <option value="squareCenter">squareCenter (vuông + giữa)</option>
+            ) : null}
           </select>
         </PropRow>
         {doc.pc?.enabled ? (

@@ -9,7 +9,15 @@ import {
   type ReactNode,
 } from 'react';
 import { fetchRuntimeForm, runAction } from '../api/formApi';
-import { alignSoloRowStyle, controlLayoutStyle, controlTextStyle, controlVisualStyle, needsAlignSoloRow } from '../lib/controlLayout';
+import {
+  alignSoloRowStyle,
+  controlLayoutStyle,
+  controlTextStyle,
+  controlVisualStyle,
+  isCenterishAlign,
+  needsAlignSoloRow,
+  normalizeControlAlign,
+} from '../lib/controlLayout';
 import {
   groupControlsByRowId,
   groupControlsForLayout,
@@ -1152,10 +1160,22 @@ export function FormRuntimeView({
       },
     };
 
+    const imageAlignCenter =
+      c.type === 'image' && isCenterishAlign(c.align);
+    const imageAlignSquare =
+      c.type === 'image' && normalizeControlAlign(c.align) === 'squareCenter';
+    const fieldClass = [
+      'field',
+      imageAlignCenter ? 'field--align-center' : '',
+      imageAlignSquare ? 'field--square-center' : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+
     return (
-      <label key={c.id} className="field" style={layoutStyle}>
+      <label key={c.id} className={fieldClass} style={layoutStyle}>
         {showLabel ? (
-          <span>
+          <span className="field-label">
             {labelText}
             {c.required ? ' *' : ''}
             {(c.type === 'file' || c.type === 'image') &&
@@ -1271,6 +1291,7 @@ export function FormRuntimeView({
               uploadMode={c.uploadMode}
               previewWidth={c.previewWidth}
               imageSource={c.imageSource}
+              align={c.align}
               value={visualFrame.values[c.id]}
               style={heightStyle}
               lan={lan}
