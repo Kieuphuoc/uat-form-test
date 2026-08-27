@@ -3988,11 +3988,19 @@ pre.json {
 }
 
 /* align=squareCenter: khung chụp hình vuông, nội dung giữa; PC không phình quá 300 */
+.form-attach--align-square-center {
+  width: min(100%, 300px);
+  max-width: 300px;
+  margin-inline: auto;
+}
+
 .form-attach--align-square-center .form-image-box {
-  aspect-ratio: 1 / 1;
-  width: 100%;
+  --form-square-size: min(300px, 100%);
+  width: var(--form-square-size);
+  height: var(--form-square-size);
   max-width: 300px;
   max-height: 300px;
+  aspect-ratio: 1 / 1;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -4008,6 +4016,7 @@ pre.json {
 
 .field--square-center.field--align-center {
   margin-inline: auto;
+  align-items: center;
 }
 
 .form-attach--align-square-center .form-image-thumbs {
@@ -4034,6 +4043,31 @@ pre.json {
   height: 100%;
   align-items: center;
   justify-content: center;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.form-attach--align-square-center .form-image-action {
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 8px;
+}
+
+/* Zalo Mini App iframe (?mobile=true): WebView có thể không áp aspect-ratio → ép width+height vuông */
+body.mobile-embed label.field.field--square-center {
+  width: 100%;
+  max-width: none;
+}
+
+body.mobile-embed .form-attach--align-square-center {
+  width: min(300px, calc(100vw - 32px));
+}
+
+body.mobile-embed .form-attach--align-square-center .form-image-box {
+  --form-square-size: min(300px, calc(100vw - 32px));
+  width: var(--form-square-size);
+  height: var(--form-square-size);
 }
 
 /* Designer dark chrome */
