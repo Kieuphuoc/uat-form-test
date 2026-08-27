@@ -127,6 +127,35 @@ a {
   background: rgba(248, 250, 252, 0.95);
 }
 
+.design-canvas-header {
+  margin-bottom: 12px;
+  padding: 10px 8px 8px;
+  border-radius: 10px;
+  border: 1px dashed var(--line);
+  background: rgba(248, 250, 252, 0.95);
+}
+
+.design-canvas-header-bar {
+  margin-bottom: 0;
+  align-items: flex-start;
+}
+
+.design-canvas-header-bar .design-canvas-title {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.design-canvas-header-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 55%;
+}
+
 .design-canvas-footer-label {
   font-size: 0.75rem;
   margin-bottom: 6px;
@@ -695,11 +724,13 @@ table.data tr.selected {
 
 .modal-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
   grid-column: 1 / -1;
+  flex-wrap: nowrap;
+  min-width: 0;
 }
 
 .modal-header h2 {
@@ -711,6 +742,7 @@ table.data tr.selected {
   min-width: 0;
   display: flex;
   align-items: center;
+  overflow: hidden;
 }
 
 .modal-header-actions {
@@ -1780,7 +1812,8 @@ pre.json {
   box-shadow: none;
 }
 
-.design-root[data-theme='dark'] .design-canvas-footer {
+.design-root[data-theme='dark'] .design-canvas-footer,
+.design-root[data-theme='dark'] .design-canvas-header {
   background: rgba(30, 41, 59, 0.9);
   border-color: #334155;
 }
@@ -1966,12 +1999,15 @@ pre.json {
 .form-title-with-mode {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   max-width: 100%;
+  flex-wrap: nowrap;
+  line-height: 1.2;
 }
 
 .form-title-with-mode__text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1979,13 +2015,22 @@ pre.json {
 
 .form-mode-title-icon {
   flex-shrink: 0;
-  font-size: 0.92em;
-  line-height: 1;
-  opacity: 0.9;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  line-height: 0;
+  opacity: 0.85;
+  color: inherit;
+}
+
+.form-mode-title-icon svg {
+  display: block;
 }
 
 .form-mode-title-icon--new {
-  font-weight: 800;
+  opacity: 0.9;
 }
 
 .design-viewport-toggle {
@@ -3942,16 +3987,27 @@ pre.json {
   padding: 8px;
 }
 
-/* align=squareCenter: khung chụp hình vuông, nội dung giữa */
+/* align=squareCenter: khung chụp hình vuông, nội dung giữa; PC không phình quá 300 */
 .form-attach--align-square-center .form-image-box {
   aspect-ratio: 1 / 1;
   width: 100%;
+  max-width: 300px;
+  max-height: 300px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 12px;
+  margin-inline: auto;
+}
+
+.field--square-center {
+  max-width: 300px;
+}
+
+.field--square-center.field--align-center {
+  margin-inline: auto;
 }
 
 .form-attach--align-square-center .form-image-thumbs {
@@ -4074,24 +4130,35 @@ pre.json {
 .form-outer-chrome__left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
 }
 
 .form-outer-chrome__back {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border: 0;
   border-radius: 8px;
   background: transparent;
   color: inherit;
-  font-size: 22px;
-  line-height: 1;
+  padding: 0;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 0;
   cursor: pointer;
 }
 
 .form-outer-chrome__back:hover {
   background: rgba(255, 255, 255, 0.1);
+}
+
+.form-outer-chrome__back svg {
+  display: block;
 }
 
 .form-outer-chrome__mark {
@@ -4104,13 +4171,15 @@ pre.json {
 
 .form-outer-chrome__title {
   margin: 0;
+  padding: 0;
   font-size: 14px;
   font-weight: 800;
   letter-spacing: -0.02em;
-  display: inline-flex;
+  line-height: 1.2;
+  display: flex;
   align-items: center;
-  gap: 8px;
   min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
 }
 

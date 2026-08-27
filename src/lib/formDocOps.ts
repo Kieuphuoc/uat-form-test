@@ -242,16 +242,15 @@ function groupControls(controls: FormControlDef[]): DesignControlGroup[] {
   return groupControlsForDesign(controls);
 }
 
-/** Di chuyển nhóm trong một vùng body|footer (indices theo groups của vùng đó). */
+/** Di chuyển nhóm trong một vùng header|body|footer (indices theo groups của vùng đó). */
 export function moveControlGroupToInsertIndexInZone(
   doc: FormDocument,
-  zone: 'body' | 'footer',
+  zone: 'header' | 'body' | 'footer',
   fromGroupIndex: number,
   insertIndexAfterRemoval: number,
 ): FormDocument {
   const { header, body, footer } = splitControlsByPlacement(doc.controls);
-  const zoneControls = zone === 'footer' ? footer : body;
-  const other = zone === 'footer' ? body : footer;
+  const zoneControls = zone === 'header' ? header : zone === 'footer' ? footer : body;
   const groups = groupControls(zoneControls);
   if (fromGroupIndex < 0 || fromGroupIndex >= groups.length) return doc;
   const next = [...groups];
@@ -260,8 +259,13 @@ export function moveControlGroupToInsertIndexInZone(
   const to = Math.max(0, Math.min(insertIndexAfterRemoval, next.length));
   next.splice(to, 0, g);
   const flat = next.flatMap(flattenDesignGroup);
-  const mid = zone === 'footer' ? [...other, ...flat] : [...flat, ...other];
-  return renumberOrders({ ...doc, controls: [...header, ...mid] });
+  const controls =
+    zone === 'header'
+      ? [...flat, ...body, ...footer]
+      : zone === 'footer'
+        ? [...header, ...body, ...flat]
+        : [...header, ...flat, ...footer];
+  return renumberOrders({ ...doc, controls });
 }
 
 /** Di chuyển nhóm tới vị trí `toGroupIndex` trong list **sau khi đã remove** nguồn (0..n-1). */

@@ -1400,30 +1400,40 @@ export function FormRuntimeView({
         }`}
         style={pcActive ? pcGridContainerStyle(pcCols) : undefined}
       >
-      {!useOuterChrome &&
-        !isModal &&
-        !isDrawerSplit &&
-        !onClose &&
-        visualFrame.form.layout !== 'drawer' &&
-        !isListLayout && (
-        <h1 style={pcActive ? { gridColumn: '1 / -1' } : undefined}>
-          <FormTitleWithMode
-            mode={visualFrame.formMode}
-            text={resolveLocalizedText(visualFrame.form.title, lan)}
-          />
-        </h1>
-      )}
-      {!useOuterChrome &&
-        !isModal &&
-        !isDrawerSplit &&
-        !onClose &&
-        visualFrame.form.layout === 'drawer' && (
-        <h1 className="form-drawer-title">
-          <FormTitleWithMode
-            mode={visualFrame.formMode}
-            text={resolveLocalizedText(visualFrame.form.title, lan)}
-          />
-        </h1>
+      {!useOuterChrome && !isModal && !isDrawerSplit && !onClose && (
+        <div
+          className={`modal-header${headerControls.length ? ' modal-header--has-actions' : ''}`}
+          style={pcActive ? { gridColumn: '1 / -1' } : undefined}
+        >
+          <h2>
+            <FormTitleWithMode
+              mode={visualFrame.formMode}
+              text={resolveLocalizedText(visualFrame.form.title, lan)}
+            />
+          </h2>
+          {headerControls.length > 0 ? (
+            <div className="modal-header-actions">
+              {headerControls.map((hc) => {
+                if (!isControlVisible(hc, visualFrame.formMode)) return null;
+                const ht = resolveLocalizedText(hc.text, lan) || resolveLocalizedText(hc.label, lan);
+                return (
+                  <button
+                    key={hc.id}
+                    type="button"
+                    className="modal-header-link"
+                    disabled={busy || hc.enabled === false}
+                    onClick={() => {
+                      if (hc.linkFormId?.trim()) void openLinkedForm(hc.linkFormId.trim());
+                      else if (hc.onClick?.length) void runActions(hc.onClick);
+                    }}
+                  >
+                    {ht || hc.id}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
       )}
       {isModal && !isDrawerSplit && (
         <div
@@ -1472,7 +1482,10 @@ export function FormRuntimeView({
         </div>
       )}
       {onClose && !isModal && (
-        <div className="modal-header" style={pcActive ? { gridColumn: '1 / -1' } : undefined}>
+        <div
+          className={`modal-header${headerControls.length ? ' modal-header--has-actions' : ''}`}
+          style={pcActive ? { gridColumn: '1 / -1' } : undefined}
+        >
           <h2>
             <FormTitleWithMode
               mode={visualFrame.formMode}
@@ -1480,6 +1493,24 @@ export function FormRuntimeView({
             />
           </h2>
           <div className="modal-header-actions">
+            {headerControls.map((hc) => {
+              if (!isControlVisible(hc, visualFrame.formMode)) return null;
+              const ht = resolveLocalizedText(hc.text, lan) || resolveLocalizedText(hc.label, lan);
+              return (
+                <button
+                  key={hc.id}
+                  type="button"
+                  className="modal-header-link"
+                  disabled={busy || hc.enabled === false}
+                  onClick={() => {
+                    if (hc.linkFormId?.trim()) void openLinkedForm(hc.linkFormId.trim());
+                    else if (hc.onClick?.length) void runActions(hc.onClick);
+                  }}
+                >
+                  {ht || hc.id}
+                </button>
+              );
+            })}
             <button
               type="button"
               className="modal-close"

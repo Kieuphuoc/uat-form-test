@@ -56,7 +56,7 @@ type Props = {
   onInsertColumn?: (listId: string, field: string) => void;
   onDeleteColumn: (listId: string, field: string) => void;
   onMoveGroupToInsertIndex: (
-    zone: 'body' | 'footer',
+    zone: 'header' | 'body' | 'footer',
     fromGroupIndex: number,
     insertIndexAfterRemoval: number,
   ) => void;
@@ -94,37 +94,37 @@ export function DesignCanvas({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [draggingGroup, setDraggingGroup] = useState<number | null>(null);
-  const [dragZone, setDragZone] = useState<'body' | 'footer' | null>(null);
+  const [dragZone, setDragZone] = useState<'header' | 'body' | 'footer' | null>(null);
   /** Visual line index 0..n (n+1 lines). */
   const [dropLine, setDropLine] = useState<number | null>(null);
   /** Override collapsed theo groupId trên canvas. */
   const [groupCollapsed, setGroupCollapsed] = useState<Record<string, boolean>>({});
   const editRef = useRef<HTMLInputElement>(null);
   const dragFromRef = useRef<number | null>(null);
-  const dragZoneRef = useRef<'body' | 'footer' | null>(null);
+  const dragZoneRef = useRef<'header' | 'body' | 'footer' | null>(null);
   /** Insert index after removing dragged group (0..n-1). */
   const insertAtRef = useRef<number | null>(null);
+  const headerGroupElsRef = useRef<(HTMLElement | null)[]>([]);
   const bodyGroupElsRef = useRef<(HTMLElement | null)[]>([]);
   const footerGroupElsRef = useRef<(HTMLElement | null)[]>([]);
   const moveRef = useRef(onMoveGroupToInsertIndex);
   const dragColumn = useRef<{ listId: string; field: string } | null>(null);
   moveRef.current = onMoveGroupToInsertIndex;
 
-  const { header: headerControls, body: bodyOnly, footer: footerControls } = useMemo(
+  const { header: headerControls, body: bodyControls, footer: footerControls } = useMemo(
     () => splitControlsByPlacement(doc.controls),
     [doc.controls],
   );
   const pcActive = isPcLayoutActive(doc, { viewportMode: viewport });
   const pcCols = pcColumnCount(doc, { viewportMode: viewport });
-  /** Design: header controls hiện cùng vùng body (có type badge). */
-  const bodyControls = useMemo(
-    () => [...headerControls, ...bodyOnly],
-    [headerControls, bodyOnly],
-  );
+  const headerGroups = useMemo(() => groupControlsForDesign(headerControls), [headerControls]);
   const bodyGroups = useMemo(() => groupControlsForDesign(bodyControls), [bodyControls]);
   const footerGroups = useMemo(() => groupControlsForDesign(footerControls), [footerControls]);
   const lists = useMemo(() => [...doc.lists].sort((a, b) => a.order - b.order), [doc.lists]);
 
+  useEffect(() => {
+    headerGroupElsRef.current.length = headerGroups.length;
+  }, [headerGroups.length]);
   useEffect(() => {
     bodyGroupElsRef.current.length = bodyGroups.length;
   }, [bodyGroups.length]);
@@ -168,8 +168,13 @@ export function DesignCanvas({
   }, [editingId]);
 
   const resolveInsertFromY = useCallback(
-    (clientY: number, fromIndex: number, zone: 'body' | 'footer') => {
-      const els = zone === 'footer' ? footerGroupElsRef.current : bodyGroupElsRef.current;
+    (clientY: number, fromIndex: number, zone: 'header' | 'body' | 'footer') => {
+      const els =
+        zone === 'header'
+          ? headerGroupElsRef.current
+          : zone === 'footer'
+            ? footerGroupElsRef.current
+            : bodyGroupElsRef.current;
       // Sortable: bỏ qua group đang kéo, tìm vị trí chèn trong list còn lại.
       for (let i = 0; i < els.length; i++) {
         if (i === fromIndex) continue;
@@ -202,7 +207,7 @@ export function DesignCanvas({
   const startGroupDrag = (
     e: ReactPointerEvent<HTMLSpanElement>,
     groupIndex: number,
-    zone: 'body' | 'footer',
+    zone: 'header' | 'body' | 'footer',
   ) => {
     e.preventDefault();
     e.stopPropagation();
@@ -541,7 +546,7 @@ export function DesignCanvas({
     );
   };
 
-  const renderDropLine = (slot: number, zone: 'body' | 'footer') => (
+  const renderDropLine = (slot: number, zone: 'header' | 'body' | 'footer') => (
     <div
       key={`${zone}:slot:${slot}`}
       className={`design-drop-slot${
@@ -648,7 +653,7 @@ export function DesignCanvas({
   const renderGroup = (
     g: DesignControlGroup,
     groupIndex: number,
-    zone: 'body' | 'footer',
+    zone: 'header' | 'body' | 'footer',
   ) => {
     const controls = g.kind === 'single' ? [g.control] : g.controls;
     const anySelected = controls.some((c) => isSelected({ kind: 'control', id: c.id }));
@@ -668,7 +673,12 @@ export function DesignCanvas({
           : g.kind === 'group'
             ? `group:${g.groupId}`
             : `inc:${g.fragmentId}`;
-    const elsRef = zone === 'footer' ? footerGroupElsRef : bodyGroupElsRef;
+    const elsRef =
+      zone === 'header'
+        ? headerGroupElsRef
+        : zone === 'footer'
+          ? footerGroupElsRef
+          : bodyGroupElsRef;
 
     return (
       <div
@@ -929,27 +939,63 @@ export function DesignCanvas({
       <div className={viewport === 'pc' ? 'design-pc design-canvas-pc' : 'design-phone design-canvas-phone'}>
         <div className="shell embedded">
           <div className="form-shell form-shell--design">
+            <div className="design-canvas-header">
+              <div className="design-canvas-footer-label muted">Header (nút trên chrome)</div>
+              <div
+                className={`modal-header design-canvas-header-bar${
+                  headerGroups.length ? ' modal-header--has-actions' : ''
+                }`}
+              >
+                <h1
+                  className={
+                    isSelected({ kind: 'form' })
+                      ? 'design-canvas-title selected'
+                      : 'design-canvas-title'
+                  }
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelect({ kind: 'form' });
+                  }}
+                >
+                  {resolveLocalizedText(doc.title, 'v') || doc.id}
+                </h1>
+                <div
+                  className={`design-canvas-header-actions design-canvas-groups${
+                    draggingGroup != null && dragZone === 'header' ? ' is-dragging' : ''
+                  }`}
+                >
+                  {renderDropLine(0, 'header')}
+                  {headerGroups.map((g, i) => {
+                    const wrapKey =
+                      g.kind === 'single'
+                        ? `wrap:hd:${g.control.id}`
+                        : g.kind === 'row'
+                          ? `wrap:hd:${g.rowId}`
+                          : g.kind === 'group'
+                            ? `wrap:hd:group:${g.groupId}`
+                            : `wrap:hd:inc:${g.fragmentId}`;
+                    return (
+                      <div key={wrapKey}>
+                        {renderGroup(g, i, 'header')}
+                        {renderDropLine(i + 1, 'header')}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              {headerGroups.length === 0 && (
+                <p className="muted design-canvas-footer-empty">
+                  Đặt placement = header trên control (button…).
+                </p>
+              )}
+            </div>
+
             <div
               className={`form-scroll ${
                 doc.layout === 'drawer' ? 'form-drawer' : pcActive ? 'form-pc-grid' : 'stack'
               }`}
               style={pcActive ? pcGridContainerStyle(pcCols) : undefined}
             >
-            <h1
-              className={
-                isSelected({ kind: 'form' })
-                  ? `design-canvas-title selected${doc.layout === 'drawer' ? ' form-drawer-title' : ''}`
-                  : `design-canvas-title${doc.layout === 'drawer' ? ' form-drawer-title' : ''}`
-              }
-              style={pcActive ? { gridColumn: '1 / -1' } : undefined}
-              onClick={(e) => {
-                e.stopPropagation();
-                onSelect({ kind: 'form' });
-              }}
-            >
-              {resolveLocalizedText(doc.title, 'v') || doc.id}
-            </h1>
-
             <div
               className={`design-canvas-groups${
                 draggingGroup != null && dragZone === 'body' ? ' is-dragging' : ''

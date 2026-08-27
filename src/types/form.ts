@@ -19,9 +19,10 @@ export type FormControlDef = {
   /**
    * Vùng render:
    * - `body` (mặc định): trong vùng scroll, trước list
+   * - `header`: nút trên thanh title / chrome (modal header, AppShell)
    * - `footer`: thanh cố định cuối form (sau list), luôn hiện khi scroll
    */
-  placement?: 'body' | 'footer' | string;
+  placement?: 'body' | 'header' | 'footer' | string;
   /**
    * Controls cùng groupId (kề nhau theo order) gom thành accordion
    * (header + icon expand/collapse).

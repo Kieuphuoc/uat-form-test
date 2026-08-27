@@ -26,7 +26,7 @@ export type FormChromeState = {
   title: string;
   canBack: boolean;
   headerActions?: FormChromeAction[];
-  /** view | edit | new — icon trái tiêu đề. */
+  /** view | edit | new — icon nhỏ sát phải title. */
   formMode?: string;
 };
 

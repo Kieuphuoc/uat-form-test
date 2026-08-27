@@ -24,30 +24,17 @@ export function getApprovalApiBase(): string {
   return (v && v.length > 0 ? v : 'http://localhost:5410').replace(/\/$/, '');
 }
 
-function getApprovalStaticToken(): string {
-  const v = (import.meta.env.VITE_APPROVAL_STATIC_TOKEN as string | undefined)?.trim();
-  return v && v.length > 0 ? v : 'static-approval-dev-change-me';
-}
-
-async function approvalFetch<T>(
-  path: string,
-  init?: RequestInit,
-  auth: 'jwt' | 'static' = 'jwt',
-): Promise<T> {
+async function approvalFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
 
-  if (auth === 'static') {
-    headers.set('Authorization', `Bearer ${getApprovalStaticToken()}`);
-  } else {
-    const jwt = getJwt();
-    if (!jwt || isJwtExpired(jwt)) {
-      throw new ApprovalApiError('Phiên đăng nhập đã hết hạn.', 401);
-    }
-    headers.set('Authorization', `Bearer ${jwt}`);
+  const jwt = getJwt();
+  if (!jwt || isJwtExpired(jwt)) {
+    throw new ApprovalApiError('Phiên đăng nhập đã hết hạn.', 401);
   }
+  headers.set('Authorization', `Bearer ${jwt}`);
 
   const res = await fetch(`${getApprovalApiBase()}${path}`, { ...init, headers });
   const text = await res.text();
@@ -104,11 +91,10 @@ export const approvalApi = {
     }),
 
   start: (body: StartApprovalRequest) =>
-    approvalFetch<WfInstanceDetail>(
-      '/api/internal/approvals/start',
-      { method: 'POST', body: JSON.stringify(body) },
-      'static',
-    ),
+    approvalFetch<WfInstanceDetail>('/api/approvals/instances/start', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   getInstance: (id: number) =>
     approvalFetch<WfInstanceDetail>(`/api/approvals/instances/${id}`),
