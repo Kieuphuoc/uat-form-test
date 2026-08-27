@@ -3987,7 +3987,7 @@ pre.json {
   padding: 8px;
 }
 
-/* align=squareCenter: khung chụp hình vuông, nội dung giữa; PC không phình quá 300 */
+/* align=squareCenter: khung chụp hình vuông, canh giữa; max 300 */
 .form-attach--align-square-center {
   width: min(100%, 300px);
   max-width: 300px;
@@ -4011,7 +4011,11 @@ pre.json {
 }
 
 .field--square-center {
+  width: 100%;
   max-width: 300px;
+  margin-inline: auto;
+  align-items: center;
+  box-sizing: border-box;
 }
 
 .field--square-center.field--align-center {
@@ -4054,18 +4058,22 @@ pre.json {
   padding: 4px 8px;
 }
 
-/* Zalo Mini App iframe (?mobile=true): WebView có thể không áp aspect-ratio → ép width+height vuông */
-body.mobile-embed label.field.field--square-center {
+/* mobile=true (iframe Mini App / mobile-app): giữ canh giữa như desktop, ép height vuông */
+body.mobile-embed .field--square-center {
   width: 100%;
-  max-width: none;
+  max-width: 300px;
+  margin-inline: auto;
+  align-items: center;
 }
 
 body.mobile-embed .form-attach--align-square-center {
-  width: min(300px, calc(100vw - 32px));
+  width: min(300px, 100%);
+  max-width: 300px;
+  margin-inline: auto;
 }
 
 body.mobile-embed .form-attach--align-square-center .form-image-box {
-  --form-square-size: min(300px, calc(100vw - 32px));
+  --form-square-size: min(300px, 100%);
   width: var(--form-square-size);
   height: var(--form-square-size);
 }
