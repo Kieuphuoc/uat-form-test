@@ -16,8 +16,7 @@ import {
   IconUsersAdd,
 } from '../components/AppIcons';
 import type { ZaloSource, ZaloStaffUser, ZaloUserGroup } from '../lib/zaloChat';
-
-const SOURCE_KEY = 'arito-zalo:source-id';
+import { persistZaloAccountId, resolveZaloAccount } from '../lib/zaloAccount';
 
 function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof ChatApiError) return error.message;
@@ -30,7 +29,8 @@ function errorMessage(error: unknown, fallback: string): string {
  */
 export function ZaloUsersPage() {
   const [sources, setSources] = useState<ZaloSource[]>([]);
-  const [sourceId, setSourceId] = useState(() => window.localStorage.getItem(SOURCE_KEY) || '');
+  const [infraSourceId, setInfraSourceId] = useState('');
+  const [accountId, setAccountId] = useState('');
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   const sourceMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -51,7 +51,7 @@ export function ZaloUsersPage() {
   const [copiedUid, setCopiedUid] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
 
-  const sourceName = sources.find((s) => s.id === sourceId)?.name || sourceId;
+  const sourceName = sources.find((s) => s.id === accountId)?.name || accountId;
   const activeGroup = groups.find((g) => g.id === activeGroupId) ?? null;
   const memberIds = useMemo(() => new Set(members.map((m) => m.id)), [members]);
   const formOpen = creating || !!editing;
@@ -101,14 +101,14 @@ export function ZaloUsersPage() {
     let cancelled = false;
     void zaloApi
       .listSources()
-      .then((items) => {
+      .then((response) => {
         if (cancelled) return;
+        const items = response.items ?? [];
+        setInfraSourceId(response.infra_source_id || '');
         setSources(items);
-        const saved = window.localStorage.getItem(SOURCE_KEY) || '';
-        const next = items.some((s) => s.id === saved) ? saved : items[0]?.id || '';
-        setSourceId(next);
-        if (next) window.localStorage.setItem(SOURCE_KEY, next);
-        if (items.length === 0) setLoading(false);
+        const resolved = resolveZaloAccount(items);
+        setAccountId(resolved.accountId);
+        if (resolved.error || items.length === 0) setLoading(false);
       })
       .catch((e) => {
         if (!cancelled) {
@@ -133,13 +133,13 @@ export function ZaloUsersPage() {
   }, []);
 
   useEffect(() => {
-    if (!sourceId) return;
-    window.localStorage.setItem(SOURCE_KEY, sourceId);
+    if (!infraSourceId || !accountId) return;
+    persistZaloAccountId(accountId);
     let cancelled = false;
     setLoading(true);
     setActiveGroupId(null);
     setMembers([]);
-    Promise.all([loadGroups(sourceId), zaloApi.listUsers(sourceId)])
+    Promise.all([loadGroups(infraSourceId), zaloApi.listUsers(infraSourceId)])
       .then(([groupItems, userItems]) => {
         if (cancelled) return;
         setUsers(userItems);
@@ -154,28 +154,28 @@ export function ZaloUsersPage() {
     return () => {
       cancelled = true;
     };
-  }, [loadGroups, onToast, sourceId]);
+  }, [accountId, infraSourceId, loadGroups, onToast]);
 
   useEffect(() => {
-    if (!sourceId || !activeGroupId) {
+    if (!infraSourceId || !activeGroupId) {
       setMembers([]);
       return;
     }
-    void loadMembers(sourceId, activeGroupId).catch((e) =>
+    void loadMembers(infraSourceId, activeGroupId).catch((e) =>
       onToast(errorMessage(e, 'Không tải được thành viên nhóm.')),
     );
-  }, [activeGroupId, loadMembers, onToast, sourceId]);
+  }, [activeGroupId, infraSourceId, loadMembers, onToast]);
 
   useEffect(() => {
-    if (!sourceId) return;
+    if (!infraSourceId) return;
     const timer = window.setTimeout(() => {
       void zaloApi
-        .listUsers(sourceId, userQuery.trim())
+        .listUsers(infraSourceId, userQuery.trim())
         .then(setUsers)
         .catch(() => undefined);
     }, 280);
     return () => window.clearTimeout(timer);
-  }, [sourceId, userQuery]);
+  }, [infraSourceId, userQuery]);
 
   const closeForm = () => {
     setCreating(false);
@@ -200,16 +200,16 @@ export function ZaloUsersPage() {
 
   const saveGroup = async () => {
     const name = draftName.trim();
-    if (!name || busy || !sourceId) return;
+    if (!name || busy || !infraSourceId) return;
     setBusy(true);
     try {
       const body = { name, groupType: draftType, description: draftDesc.trim() || undefined };
       if (editing) {
-        const saved = await zaloApi.updateUserGroup(sourceId, editing.id, body);
+        const saved = await zaloApi.updateUserGroup(infraSourceId, editing.id, body);
         setGroups((prev) => prev.map((g) => (g.id === saved.id ? { ...g, ...saved } : g)));
         onToast('Đã cập nhật nhóm');
       } else {
-        const saved = await zaloApi.createUserGroup(sourceId, body);
+        const saved = await zaloApi.createUserGroup(infraSourceId, body);
         setGroups((prev) => [...prev, saved]);
         setActiveGroupId(saved.id);
         onToast('Đã tạo nhóm');
@@ -223,10 +223,10 @@ export function ZaloUsersPage() {
   };
 
   const confirmDelete = async () => {
-    if (!deleteGroup || busy || !sourceId) return;
+    if (!deleteGroup || busy || !infraSourceId) return;
     setBusy(true);
     try {
-      await zaloApi.deleteUserGroup(sourceId, deleteGroup.id);
+      await zaloApi.deleteUserGroup(infraSourceId, deleteGroup.id);
       setGroups((prev) => prev.filter((g) => g.id !== deleteGroup.id));
       if (activeGroupId === deleteGroup.id) setActiveGroupId(null);
       onToast('Đã xóa nhóm');
@@ -239,10 +239,10 @@ export function ZaloUsersPage() {
   };
 
   const addMember = async (user: ZaloStaffUser) => {
-    if (!sourceId || !activeGroupId || memberIds.has(user.id) || busy) return;
+    if (!infraSourceId || !activeGroupId || memberIds.has(user.id) || busy) return;
     setBusy(true);
     try {
-      await zaloApi.addUserGroupMember(sourceId, activeGroupId, user.id);
+      await zaloApi.addUserGroupMember(infraSourceId, activeGroupId, user.id);
       setMembers((prev) => [...prev, user]);
       setGroups((prev) =>
         prev.map((g) =>
@@ -257,10 +257,10 @@ export function ZaloUsersPage() {
   };
 
   const removeMember = async (user: ZaloStaffUser) => {
-    if (!sourceId || !activeGroupId || busy) return;
+    if (!infraSourceId || !activeGroupId || busy) return;
     setBusy(true);
     try {
-      await zaloApi.removeUserGroupMember(sourceId, activeGroupId, user.id);
+      await zaloApi.removeUserGroupMember(infraSourceId, activeGroupId, user.id);
       setMembers((prev) => prev.filter((m) => m.id !== user.id));
       setGroups((prev) =>
         prev.map((g) =>
@@ -304,10 +304,10 @@ export function ZaloUsersPage() {
                   type="button"
                   key={source.id}
                   role="option"
-                  aria-selected={sourceId === source.id}
-                  className={sourceId === source.id ? 'is-active' : undefined}
+                  aria-selected={accountId === source.id}
+                  className={accountId === source.id ? 'is-active' : undefined}
                   onClick={() => {
-                    setSourceId(source.id);
+                    setAccountId(source.id);
                     setSourceMenuOpen(false);
                   }}
                 >
@@ -327,7 +327,7 @@ export function ZaloUsersPage() {
               type="button"
               className="chat-icon-btn"
               title="Thêm nhóm"
-              disabled={!sourceId}
+              disabled={!infraSourceId}
               onClick={beginCreate}
             >
               <IconPlus size={16} />

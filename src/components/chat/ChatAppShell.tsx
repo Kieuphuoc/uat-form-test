@@ -16,6 +16,7 @@ import {
   subscribeZaloInbox,
   watchZaloSource,
 } from '../../lib/chatTransport';
+import { resolveZaloAccount } from '../../lib/zaloAccount';
 import { IconBell, IconChat, IconDatabase, IconLogout, IconSettings, IconUsers, IconZalo } from '../AppIcons';
 import { ChatAvatar } from './ChatAvatar';
 import { DataSelectionDialog } from './DataSelectionDialog';
@@ -99,7 +100,6 @@ export function ChatAppShell() {
       setZaloToast('');
       return;
     }
-    const SOURCE_KEY = 'arito-zalo:source-id';
     let cancelled = false;
     const badgeSub = subscribeZaloBadge(setZaloBadge);
     const inboxSub = subscribeZaloInbox((event) => {
@@ -112,13 +112,17 @@ export function ChatAppShell() {
     });
     void zaloApi
       .listSources()
-      .then(async (items) => {
+      .then(async (response) => {
+        const items = response.items ?? [];
         if (cancelled || items.length === 0) return;
-        const saved = window.localStorage.getItem(SOURCE_KEY) || '';
-        const next = items.some((s) => s.id === saved) ? saved : items[0].id;
-        watchZaloSource(next);
-        const conversations = await zaloApi.listConversations(next);
-        if (!cancelled) seedZaloUnread(next, conversations);
+        const resolved = resolveZaloAccount(items);
+        if (!resolved.accountId || !response.infra_source_id) return;
+        watchZaloSource(resolved.accountId);
+        const conversations = await zaloApi.listConversations(
+          response.infra_source_id,
+          resolved.accountId,
+        );
+        if (!cancelled) seedZaloUnread(resolved.accountId, conversations);
       })
       .catch(() => undefined);
     return () => {

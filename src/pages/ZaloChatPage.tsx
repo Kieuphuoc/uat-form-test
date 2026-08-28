@@ -29,6 +29,10 @@ import {
   watchZaloSource,
 } from '../lib/chatTransport';
 import {
+  persistZaloAccountId,
+  resolveZaloAccount,
+} from '../lib/zaloAccount';
+import {
   emptyZaloInbox,
   mergeZaloMessages,
   zaloDayLabel,
@@ -66,7 +70,6 @@ type Pane = 'list' | 'thread' | 'info';
 
 const LIST_WIDTH_KEY = 'arito-zalo:list-width';
 const INFO_WIDTH_KEY = 'arito-zalo:info-width';
-const SOURCE_KEY = 'arito-zalo:source-id';
 const PAGE_SIZE = 50;
 const POLL_MS = 15_000;
 
@@ -251,7 +254,8 @@ export function ZaloChatPage() {
   const { mobile } = useAuth();
   const navigate = useNavigate();
   const [sources, setSources] = useState<ZaloSource[]>([]);
-  const [sourceId, setSourceId] = useState<string>(() => window.localStorage.getItem(SOURCE_KEY) || '');
+  const [infraSourceId, setInfraSourceId] = useState('');
+  const [accountId, setAccountId] = useState('');
   const [data, setData] = useState<ZaloInboxData>(() => emptyZaloInbox());
   const [activeId, setActiveId] = useState<string | null>(null);
   const [pane, setPane] = useState<Pane>('list');
@@ -283,7 +287,8 @@ export function ZaloChatPage() {
   const sendingRef = useRef(false);
   const loadingMoreRef = useRef(false);
   const activeIdRef = useRef<string | null>(null);
-  const sourceIdRef = useRef(sourceId);
+  const infraSourceIdRef = useRef(infraSourceId);
+  const accountIdRef = useRef(accountId);
   const messagesRef = useRef(data.messages);
   const conversationsRef = useRef(data.conversations);
   const sourceMenuRef = useRef<HTMLDivElement | null>(null);
@@ -303,10 +308,14 @@ export function ZaloChatPage() {
   }, [activeId]);
 
   useEffect(() => {
-    sourceIdRef.current = sourceId;
-    if (sourceId) window.localStorage.setItem(SOURCE_KEY, sourceId);
-    watchZaloSource(sourceId);
-  }, [sourceId]);
+    infraSourceIdRef.current = infraSourceId;
+  }, [infraSourceId]);
+
+  useEffect(() => {
+    accountIdRef.current = accountId;
+    if (accountId) persistZaloAccountId(accountId);
+    watchZaloSource(accountId);
+  }, [accountId]);
 
   useEffect(() => {
     messagesRef.current = data.messages;
@@ -331,16 +340,16 @@ export function ZaloChatPage() {
     };
   }, []);
 
-  const refreshList = useCallback(async (id: string) => {
+  const refreshList = useCallback(async (infraId: string, accId: string) => {
     setListLoading(true);
     try {
       const [conversations, labels, folderMap] = await Promise.all([
-        zaloApi.listConversations(id),
-        zaloApi.listLabels(id).catch(() => []),
-        zaloApi.getFolderMap(id).catch(() => ({})),
+        zaloApi.listConversations(infraId, accId),
+        zaloApi.listLabels(infraId, accId).catch(() => []),
+        zaloApi.getFolderMap(infraId, accId).catch(() => ({})),
       ]);
       setData((prev) => ({ ...prev, conversations, labels, folderMap }));
-      seedZaloUnread(id, conversations);
+      seedZaloUnread(accId, conversations);
       setError(null);
     } catch (e) {
       setError(errorMessage(e, 'Không tải được hộp thư Zalo.'));
@@ -349,12 +358,12 @@ export function ZaloChatPage() {
     }
   }, []);
 
-  const loadThread = useCallback(async (id: string, conversationId: string, silent = false) => {
+  const loadThread = useCallback(async (infraId: string, accId: string, conversationId: string, silent = false) => {
     if (!silent) setThreadLoading(true);
     try {
       const [items, members] = await Promise.all([
-        zaloApi.listMessages(id, conversationId, { limit: PAGE_SIZE }),
-        zaloApi.listMembers(id, conversationId).catch(() => []),
+        zaloApi.listMessages(infraId, accId, conversationId, { limit: PAGE_SIZE }),
+        zaloApi.listMembers(infraId, accId, conversationId).catch(() => []),
       ]);
       setData((prev) => ({
         ...prev,
@@ -362,7 +371,7 @@ export function ZaloChatPage() {
         members: { ...prev.members, [conversationId]: members },
       }));
       setHasMore((prev) => ({ ...prev, [conversationId]: items.length >= PAGE_SIZE }));
-      void zaloApi.markRead(id, conversationId).catch(() => undefined);
+      void zaloApi.markRead(infraId, accId, conversationId).catch(() => undefined);
     } catch (e) {
       if (!silent) showToast(errorMessage(e, 'Không tải được tin nhắn.'));
     } finally {
@@ -370,13 +379,13 @@ export function ZaloChatPage() {
     }
   }, [showToast]);
 
-  const pollThread = useCallback(async (id: string, conversationId: string) => {
+  const pollThread = useCallback(async (infraId: string, accId: string, conversationId: string) => {
     const current = messagesRef.current[conversationId] || [];
     const newest = current[current.length - 1]?.id;
     try {
       const items = newest
-        ? await zaloApi.listMessages(id, conversationId, { afterId: newest, limit: PAGE_SIZE })
-        : await zaloApi.listMessages(id, conversationId, { limit: PAGE_SIZE });
+        ? await zaloApi.listMessages(infraId, accId, conversationId, { afterId: newest, limit: PAGE_SIZE })
+        : await zaloApi.listMessages(infraId, accId, conversationId, { limit: PAGE_SIZE });
       if (items.length === 0) return;
       const known = new Set(current.map((msg) => msg.id));
       const added = items.reduce((sum, msg) => sum + (msg.id && !known.has(msg.id) ? 1 : 0), 0);
@@ -397,9 +406,9 @@ export function ZaloChatPage() {
     }
   }, []);
 
-  const refreshConversations = useCallback(async (id: string, pollActiveIfChanged = false) => {
+  const refreshConversations = useCallback(async (infraId: string, accId: string, pollActiveIfChanged = false) => {
     try {
-      const conversations = await zaloApi.listConversations(id);
+      const conversations = await zaloApi.listConversations(infraId, accId);
       const current = activeIdRef.current;
       const shouldPoll =
         pollActiveIfChanged
@@ -407,9 +416,9 @@ export function ZaloChatPage() {
         && conversationPulse(conversationsRef.current.find((c) => c.id === current))
           !== conversationPulse(conversations.find((c) => c.id === current));
       setData((prev) => ({ ...prev, conversations }));
-      seedZaloUnread(id, conversations);
+      seedZaloUnread(accId, conversations);
       setError(null);
-      if (shouldPoll && current) void pollThread(id, current);
+      if (shouldPoll && current) void pollThread(infraId, accId, current);
     } catch {
       // Poll list lỗi im lặng; lần sau thử lại.
     }
@@ -419,21 +428,22 @@ export function ZaloChatPage() {
     let cancelled = false;
     void zaloApi
       .listSources()
-      .then((items) => {
+      .then((response) => {
         if (cancelled) return;
+        const items = response.items ?? [];
+        setInfraSourceId(response.infra_source_id || '');
         setSources(items);
-        const saved = window.localStorage.getItem(SOURCE_KEY) || '';
-        const next = items.some((s) => s.id === saved) ? saved : items[0]?.id || '';
-        setSourceId(next);
-        if (items.length === 0) {
+        const resolved = resolveZaloAccount(items);
+        setAccountId(resolved.accountId);
+        if (resolved.error || items.length === 0) {
           setListLoading(false);
-          setError('Công ty chưa bật tài khoản Zalo.');
+          setError(resolved.error || 'Chưa có phân quyền tài khoản Zalo.');
         }
       })
       .catch((e) => {
         if (!cancelled) {
           setListLoading(false);
-          setError(errorMessage(e, 'Không tải được danh sách nguồn Zalo.'));
+          setError(errorMessage(e, 'Không tải được danh sách tài khoản Zalo.'));
         }
       });
     return () => {
@@ -442,40 +452,42 @@ export function ZaloChatPage() {
   }, []);
 
   useEffect(() => {
-    if (!sourceId) return;
+    if (!infraSourceId || !accountId) return;
     setActiveId(null);
     setData(emptyZaloInbox());
     setHasMore({});
     setNewMsgCount(0);
     setPane('list');
-    void refreshList(sourceId);
-  }, [sourceId, refreshList]);
+    void refreshList(infraSourceId, accountId);
+  }, [infraSourceId, accountId, refreshList]);
 
   useEffect(() => {
     setNewMsgCount(0);
   }, [activeId]);
 
   useEffect(() => {
-    if (!sourceId) return;
+    if (!infraSourceId || !accountId) return;
     const timer = window.setInterval(() => {
-      void refreshConversations(sourceId, true);
+      void refreshConversations(infraSourceId, accountId, true);
     }, POLL_MS);
     return () => window.clearInterval(timer);
-  }, [sourceId, refreshConversations]);
+  }, [infraSourceId, accountId, refreshConversations]);
 
   useEffect(() => {
     const notifyTimer = { id: 0 as number, pollActive: false };
     const sub = subscribeZaloInbox((event) => {
-      const sid = sourceIdRef.current;
-      if (!sid || event.source_id !== sid) return;
+      const accId = accountIdRef.current;
+      if (!accId || event.source_id !== accId) return;
       if (event.conversation_id === activeIdRef.current) notifyTimer.pollActive = true;
       if (notifyTimer.id) window.clearTimeout(notifyTimer.id);
       notifyTimer.id = window.setTimeout(() => {
+        const infraId = infraSourceIdRef.current;
         const shouldPoll = notifyTimer.pollActive;
         notifyTimer.pollActive = false;
-        void refreshConversations(sid);
+        if (!infraId || !accId) return;
+        void refreshConversations(infraId, accId);
         const current = activeIdRef.current;
-        if (shouldPoll && current) void pollThread(sid, current);
+        if (shouldPoll && current) void pollThread(infraId, accId, current);
       }, 250);
       if (event.notify && event.conversation_id !== activeIdRef.current) {
         const who = event.conversation_name || 'Zalo';
@@ -522,11 +534,11 @@ export function ZaloChatPage() {
   const members = conv ? data.members[conv.id] || [] : [];
   const assigned = conv ? zaloHasFolder(data.folderMap, conv.zalo_thread_id) : false;
   const folderLabel = conv ? zaloFolderText(data.folderMap, conv.zalo_thread_id) : null;
-  const sourceName = sources.find((s) => s.id === sourceId)?.name || 'Zalo';
+  const sourceName = sources.find((s) => s.id === accountId)?.name || 'Zalo';
   const firstConversationId = filtered[0]?.id;
 
   useEffect(() => {
-    if (activeId || listLoading || !sourceId || !firstConversationId) return;
+    if (activeId || listLoading || !infraSourceId || !accountId || !firstConversationId) return;
     setActiveId(firstConversationId);
     setPendingQuote(null);
     setData((prev) => ({
@@ -536,8 +548,8 @@ export function ZaloChatPage() {
       ),
     }));
     if (!mobile) setPane('thread');
-    void loadThread(sourceId, firstConversationId);
-  }, [activeId, firstConversationId, listLoading, loadThread, mobile, sourceId]);
+    void loadThread(infraSourceId, accountId, firstConversationId);
+  }, [accountId, activeId, firstConversationId, infraSourceId, listLoading, loadThread, mobile]);
 
   useEffect(() => {
     if (skipScrollRef.current) {
@@ -559,14 +571,14 @@ export function ZaloChatPage() {
     }));
     setPendingQuote(null);
     setPane('thread');
-    if (sourceId) void loadThread(sourceId, id);
+    if (infraSourceId && accountId) void loadThread(infraSourceId, accountId, id);
   };
 
   const toggleAi = async () => {
-    if (!conv || !sourceId) return;
+    if (!conv || !infraSourceId || !accountId) return;
     const next = conv.ai_enabled === false;
     try {
-      await zaloApi.setAi(sourceId, conv.id, next);
+      await zaloApi.setAi(infraSourceId, accountId, conv.id, next);
       setData((prev) => ({
         ...prev,
         conversations: prev.conversations.map((c) =>
@@ -580,13 +592,13 @@ export function ZaloChatPage() {
   };
 
   const toggleLabel = async (labelId: string) => {
-    if (!conv || !sourceId) return;
+    if (!conv || !infraSourceId || !accountId) return;
     const meta = data.labels.find((l) => l.id === labelId);
     if (!meta) return;
     const on = (conv.zalo_labels || []).some((x) => x.id === labelId);
     try {
-      if (on) await zaloApi.removeLabel(sourceId, conv.id, labelId);
-      else await zaloApi.addLabel(sourceId, conv.id, labelId);
+      if (on) await zaloApi.removeLabel(infraSourceId, accountId, conv.id, labelId);
+      else await zaloApi.addLabel(infraSourceId, accountId, conv.id, labelId);
       setData((prev) => ({
         ...prev,
         conversations: prev.conversations.map((c) => {
@@ -615,7 +627,7 @@ export function ZaloChatPage() {
   };
 
   const saveFolder = async () => {
-    if (!conv || !sourceId || savingFolder) return;
+    if (!conv || !infraSourceId || !accountId || savingFolder) return;
     const rag = (folderDraft.ragFolderId || '').trim();
     const faq = (folderDraft.faqFolderId || '').trim();
     const label = (folderDraft.label || '').trim();
@@ -626,9 +638,9 @@ export function ZaloChatPage() {
     }
     setSavingFolder(true);
     try {
-      await zaloApi.setNotifyGrace(sourceId, conv.zalo_thread_id, minutes);
+      await zaloApi.setNotifyGrace(infraSourceId, accountId, conv.zalo_thread_id, minutes);
       if (!rag && !faq) {
-        await zaloApi.deleteFolderMap(sourceId, conv.zalo_thread_id);
+        await zaloApi.deleteFolderMap(infraSourceId, accountId, conv.zalo_thread_id);
         setData((prev) => {
           const folderMap = { ...prev.folderMap };
           delete folderMap[conv.zalo_thread_id];
@@ -642,7 +654,7 @@ export function ZaloChatPage() {
         });
       } else {
         const next: ZaloFolderConfig = { ragFolderId: rag, faqFolderId: faq, label };
-        await zaloApi.saveFolderMap(sourceId, conv.zalo_thread_id, next);
+        await zaloApi.saveFolderMap(infraSourceId, accountId, conv.zalo_thread_id, next);
         setData((prev) => ({
           ...prev,
           folderMap: { ...prev.folderMap, [conv.zalo_thread_id]: next },
@@ -685,7 +697,7 @@ export function ZaloChatPage() {
   };
 
   const loadMore = async () => {
-    if (!conv || !sourceId || loadingMoreRef.current) return;
+    if (!conv || !infraSourceId || !accountId || loadingMoreRef.current) return;
     if (!hasMore[conv.id]) return;
     const oldest = messages[0]?.id;
     if (!oldest) return;
@@ -694,7 +706,7 @@ export function ZaloChatPage() {
     loadingMoreRef.current = true;
     skipScrollRef.current = true;
     try {
-      const extra = await zaloApi.listMessages(sourceId, conv.id, { beforeId: oldest, limit: PAGE_SIZE });
+      const extra = await zaloApi.listMessages(infraSourceId, accountId, conv.id, { beforeId: oldest, limit: PAGE_SIZE });
       setData((prev) => ({
         ...prev,
         messages: {
@@ -716,13 +728,14 @@ export function ZaloChatPage() {
 
   const sendMessage = useCallback(async (payload: ZaloSendPayload) => {
     const conversationId = activeIdRef.current;
-    const sid = sourceIdRef.current;
-    if (!conversationId || !sid || sendingRef.current) return;
+    const infraId = infraSourceIdRef.current;
+    const accId = accountIdRef.current;
+    if (!conversationId || !infraId || !accId || sendingRef.current) return;
     if (!payload.text.trim() && payload.files.length === 0) return;
     sendingRef.current = true;
     setSending(true);
     try {
-      const saved = await zaloApi.sendMessage(sid, conversationId, payload);
+      const saved = await zaloApi.sendMessage(infraId, accId, conversationId, payload);
       let next = saved;
       if (payload.files.length && !(next.files && next.files.length)) {
         next = {
@@ -761,7 +774,7 @@ export function ZaloChatPage() {
           [conversationId]: mergeZaloMessages(prev.messages[conversationId] || [], next.id ? [next] : []),
         },
       }));
-      if (!next.id) void loadThread(sid, conversationId, true);
+      if (!next.id) void loadThread(infraId, accId, conversationId, true);
       setPendingQuote(null);
     } catch (e) {
       showToast(errorMessage(e, 'Không gửi được tin nhắn.'));
@@ -778,9 +791,10 @@ export function ZaloChatPage() {
     const el = threadRef.current;
     if (el) el.scrollTop = el.scrollHeight;
     setNewMsgCount(0);
-    const sid = sourceIdRef.current;
+    const infraId = infraSourceIdRef.current;
+    const accId = accountIdRef.current;
     const cid = activeIdRef.current;
-    if (sid && cid) void zaloApi.markRead(sid, cid).catch(() => undefined);
+    if (infraId && accId && cid) void zaloApi.markRead(infraId, accId, cid).catch(() => undefined);
   }, []);
 
   const jumpToQuoted = useCallback((quote: ZaloQuote) => {
@@ -887,15 +901,15 @@ export function ZaloChatPage() {
                         type="button"
                         key={source.id}
                         role="option"
-                        aria-selected={sourceId === source.id}
-                        className={sourceId === source.id ? 'is-active' : undefined}
+                        aria-selected={accountId === source.id}
+                        className={accountId === source.id ? 'is-active' : undefined}
                         onClick={() => {
-                          setSourceId(source.id);
+                          setAccountId(source.id);
                           setSourceMenuOpen(false);
                         }}
                       >
                         <span>{source.name}</span>
-                        {sourceId === source.id && unreadConvCount > 0 && (
+                        {accountId === source.id && unreadConvCount > 0 && (
                           <span className="chat-badge">{unreadConvCount > 99 ? '99+' : unreadConvCount}</span>
                         )}
                       </button>

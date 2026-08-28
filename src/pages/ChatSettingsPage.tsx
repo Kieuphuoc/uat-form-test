@@ -408,12 +408,12 @@ export function ChatSettingsPage() {
       <section className="chat-settings-section">
         <h3>Tài khoản Zalo</h3>
         <p className="muted">
-          Danh sách lấy từ cấu hình server. Bật theo từng công ty thì hiện trang Zalo trên header.
+          Danh sách lấy từ Zalo Admin API (/api/accounts). Bật theo từng công ty thì hiện trang Zalo trên header.
           Công ty chưa khai báo mặc định tắt.
         </p>
 
         {draft.zalo_accounts.length === 0 && (
-          <p className="chat-hint">Chưa khai báo tài khoản Zalo trên Chat.Api (Zalo:Sources).</p>
+          <p className="chat-hint">Chưa có tài khoản Zalo trên Node hoặc không kết nối được Zalo Admin API.</p>
         )}
 
         <div className="chat-bot-list">

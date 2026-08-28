@@ -346,17 +346,28 @@ export function mapZaloFolderMap(raw: unknown): Record<string, ZaloFolderConfig>
   return out;
 }
 
-async function zaloFetch<T>(path: string, init?: RequestInit): Promise<T> {
+export type ZaloSourcesResponse = {
+  infra_source_id: string;
+  items: ZaloSource[];
+};
+
+type ZaloFetchOptions = RequestInit & {
+  accountId?: string;
+};
+
+async function zaloFetch<T>(path: string, init?: ZaloFetchOptions): Promise<T> {
   const jwt = getJwt();
   if (!jwt || isJwtExpired(jwt)) throw new ChatApiError('Phiên đăng nhập đã hết hạn.', 401);
 
-  const headers = new Headers(init?.headers);
+  const { accountId, ...requestInit } = init ?? {};
+  const headers = new Headers(requestInit.headers);
   headers.set('Authorization', `Bearer ${jwt}`);
-  if (init?.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
+  if (accountId) headers.set('X-Account-Id', accountId);
+  if (requestInit.body && !(requestInit.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
 
-  const res = await fetch(`${getChatApiBase()}${path}`, { ...init, headers });
+  const res = await fetch(`${getChatApiBase()}${path}`, { ...requestInit, headers });
   const text = await res.text();
   let body: unknown = null;
   try {
@@ -377,14 +388,25 @@ async function zaloFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const zaloApi = {
-  listSources: () =>
-    zaloFetch<{ items: ZaloSource[] }>('/api/zalo/sources').then((r) => r.items ?? []),
+  listSources: () => zaloFetch<ZaloSourcesResponse>('/api/zalo/sources'),
 
-  listConversations: async (sourceId: string) =>
-    asArray(await zaloFetch<unknown>(`/api/zalo/${sourceId}/conversations`)).map(mapZaloConversation),
+  listAccounts: async (infraSourceId: string) =>
+    asArray(await zaloFetch<unknown>(`/api/zalo/${infraSourceId}/accounts`)).map((raw) => {
+      const row = asRecord(raw);
+      return {
+        id: str(row.id ?? row._id),
+        name: str(row.display_name ?? row.displayName ?? row.name, str(row.id ?? row._id)),
+      } satisfies ZaloSource;
+    }),
+
+  listConversations: async (infraSourceId: string, accountId: string) =>
+    asArray(
+      await zaloFetch<unknown>(`/api/zalo/${infraSourceId}/conversations`, { accountId }),
+    ).map(mapZaloConversation),
 
   listMessages: async (
-    sourceId: string,
+    infraSourceId: string,
+    accountId: string,
     conversationId: string,
     query?: { limit?: number; beforeId?: string; afterId?: string },
   ) => {
@@ -394,65 +416,72 @@ export const zaloApi = {
     if (query?.afterId) qs.set('afterId', query.afterId);
     const suffix = qs.toString() ? `?${qs}` : '';
     return asArray(
-      await zaloFetch<unknown>(`/api/zalo/${sourceId}/conversations/${encodeURIComponent(conversationId)}/messages${suffix}`),
+      await zaloFetch<unknown>(
+        `/api/zalo/${infraSourceId}/conversations/${encodeURIComponent(conversationId)}/messages${suffix}`,
+        { accountId },
+      ),
     ).map(mapZaloMessage);
   },
 
-  listMembers: async (sourceId: string, conversationId: string) =>
+  listMembers: async (infraSourceId: string, accountId: string, conversationId: string) =>
     asArray(
-      await zaloFetch<unknown>(`/api/zalo/${sourceId}/conversations/${encodeURIComponent(conversationId)}/members`),
+      await zaloFetch<unknown>(
+        `/api/zalo/${infraSourceId}/conversations/${encodeURIComponent(conversationId)}/members`,
+        { accountId },
+      ),
     ).map(mapZaloMember),
 
-  listLabels: async (sourceId: string) =>
-    asArray(await zaloFetch<unknown>(`/api/zalo/${sourceId}/labels`)).map(mapZaloLabel),
+  listLabels: async (infraSourceId: string, accountId: string) =>
+    asArray(await zaloFetch<unknown>(`/api/zalo/${infraSourceId}/labels`, { accountId })).map(mapZaloLabel),
 
-  getFolderMap: async (sourceId: string) =>
-    mapZaloFolderMap(await zaloFetch<unknown>(`/api/zalo/${sourceId}/group-folder-map`)),
+  getFolderMap: async (infraSourceId: string, accountId: string) =>
+    mapZaloFolderMap(await zaloFetch<unknown>(`/api/zalo/${infraSourceId}/group-folder-map`, { accountId })),
 
-  markRead: (sourceId: string, conversationId: string) =>
+  markRead: (infraSourceId: string, accountId: string, conversationId: string) =>
     zaloFetch<unknown>(
-      `/api/zalo/${sourceId}/conversations/${encodeURIComponent(conversationId)}/read`,
-      { method: 'PATCH' },
+      `/api/zalo/${infraSourceId}/conversations/${encodeURIComponent(conversationId)}/read`,
+      { method: 'PATCH', accountId },
     ),
 
-  setAi: (sourceId: string, conversationId: string, enabled: boolean) =>
+  setAi: (infraSourceId: string, accountId: string, conversationId: string, enabled: boolean) =>
     zaloFetch<unknown>(
-      `/api/zalo/${sourceId}/conversations/${encodeURIComponent(conversationId)}/ai`,
-      { method: 'PATCH', body: JSON.stringify({ enabled }) },
+      `/api/zalo/${infraSourceId}/conversations/${encodeURIComponent(conversationId)}/ai`,
+      { method: 'PATCH', body: JSON.stringify({ enabled }), accountId },
     ),
 
-  setNotifyGrace: (sourceId: string, groupId: string, minutes: number) =>
+  setNotifyGrace: (infraSourceId: string, accountId: string, groupId: string, minutes: number) =>
     zaloFetch<unknown>(
-      `/api/zalo/${sourceId}/groups/${encodeURIComponent(groupId)}/notify-grace`,
-      { method: 'PATCH', body: JSON.stringify({ minutes }) },
+      `/api/zalo/${infraSourceId}/groups/${encodeURIComponent(groupId)}/notify-grace`,
+      { method: 'PATCH', body: JSON.stringify({ minutes }), accountId },
     ),
 
-  addLabel: (sourceId: string, conversationId: string, labelId: string) =>
+  addLabel: (infraSourceId: string, accountId: string, conversationId: string, labelId: string) =>
     zaloFetch<unknown>(
-      `/api/zalo/${sourceId}/conversations/${encodeURIComponent(conversationId)}/labels`,
-      { method: 'POST', body: JSON.stringify({ labelId }) },
+      `/api/zalo/${infraSourceId}/conversations/${encodeURIComponent(conversationId)}/labels`,
+      { method: 'POST', body: JSON.stringify({ labelId }), accountId },
     ),
 
-  removeLabel: (sourceId: string, conversationId: string, labelId: string) =>
+  removeLabel: (infraSourceId: string, accountId: string, conversationId: string, labelId: string) =>
     zaloFetch<unknown>(
-      `/api/zalo/${sourceId}/conversations/${encodeURIComponent(conversationId)}/labels/${encodeURIComponent(labelId)}`,
-      { method: 'DELETE' },
+      `/api/zalo/${infraSourceId}/conversations/${encodeURIComponent(conversationId)}/labels/${encodeURIComponent(labelId)}`,
+      { method: 'DELETE', accountId },
     ),
 
-  saveFolderMap: (sourceId: string, groupId: string, body: ZaloFolderConfig) =>
+  saveFolderMap: (infraSourceId: string, accountId: string, groupId: string, body: ZaloFolderConfig) =>
     zaloFetch<unknown>(
-      `/api/zalo/${sourceId}/group-folder-map/${encodeURIComponent(groupId)}`,
-      { method: 'PUT', body: JSON.stringify(body) },
+      `/api/zalo/${infraSourceId}/group-folder-map/${encodeURIComponent(groupId)}`,
+      { method: 'PUT', body: JSON.stringify(body), accountId },
     ),
 
-  deleteFolderMap: (sourceId: string, groupId: string) =>
+  deleteFolderMap: (infraSourceId: string, accountId: string, groupId: string) =>
     zaloFetch<unknown>(
-      `/api/zalo/${sourceId}/group-folder-map/${encodeURIComponent(groupId)}`,
-      { method: 'DELETE' },
+      `/api/zalo/${infraSourceId}/group-folder-map/${encodeURIComponent(groupId)}`,
+      { method: 'DELETE', accountId },
     ),
 
   sendMessage: async (
-    sourceId: string,
+    infraSourceId: string,
+    accountId: string,
     conversationId: string,
     payload: {
       text: string;
@@ -467,26 +496,26 @@ export const zaloApi = {
     if (payload.mentions?.length) form.append('mentions', JSON.stringify(payload.mentions));
     for (const file of payload.files ?? []) form.append('files', file);
     const raw = await zaloFetch<unknown>(
-      `/api/zalo/${sourceId}/conversations/${encodeURIComponent(conversationId)}/messages`,
-      { method: 'POST', body: form },
+      `/api/zalo/${infraSourceId}/conversations/${encodeURIComponent(conversationId)}/messages`,
+      { method: 'POST', body: form, accountId },
     );
     const rec = asRecord(raw);
     return mapZaloMessage(rec.message ?? rec.data ?? raw);
   },
 
-  listUsers: async (sourceId: string, search = '') => {
+  listUsers: async (infraSourceId: string, search = '') => {
     const qs = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : '';
-    return asArray(await zaloFetch<unknown>(`/api/zalo/${sourceId}/users${qs}`)).map(mapZaloStaffUser);
+    return asArray(await zaloFetch<unknown>(`/api/zalo/${infraSourceId}/users${qs}`)).map(mapZaloStaffUser);
   },
 
-  listUserGroups: async (sourceId: string) =>
-    asArray(await zaloFetch<unknown>(`/api/zalo/${sourceId}/user-groups`)).map(mapZaloUserGroup),
+  listUserGroups: async (infraSourceId: string) =>
+    asArray(await zaloFetch<unknown>(`/api/zalo/${infraSourceId}/user-groups`)).map(mapZaloUserGroup),
 
   createUserGroup: async (
-    sourceId: string,
+    infraSourceId: string,
     body: { name: string; groupType: 'internal' | 'external'; description?: string },
   ) => {
-    const raw = await zaloFetch<unknown>(`/api/zalo/${sourceId}/user-groups`, {
+    const raw = await zaloFetch<unknown>(`/api/zalo/${infraSourceId}/user-groups`, {
       method: 'POST',
       body: JSON.stringify(body),
     });
@@ -495,11 +524,11 @@ export const zaloApi = {
   },
 
   updateUserGroup: async (
-    sourceId: string,
+    infraSourceId: string,
     groupId: string,
     body: { name: string; groupType: 'internal' | 'external'; description?: string },
   ) => {
-    const path = `/api/zalo/${sourceId}/user-groups/${encodeURIComponent(groupId)}`;
+    const path = `/api/zalo/${infraSourceId}/user-groups/${encodeURIComponent(groupId)}`;
     try {
       return mapZaloUserGroup(await zaloFetch<unknown>(path, { method: 'PATCH', body: JSON.stringify(body) }));
     } catch (error) {
@@ -508,25 +537,25 @@ export const zaloApi = {
     }
   },
 
-  deleteUserGroup: (sourceId: string, groupId: string) =>
-    zaloFetch<unknown>(`/api/zalo/${sourceId}/user-groups/${encodeURIComponent(groupId)}`, {
+  deleteUserGroup: (infraSourceId: string, groupId: string) =>
+    zaloFetch<unknown>(`/api/zalo/${infraSourceId}/user-groups/${encodeURIComponent(groupId)}`, {
       method: 'DELETE',
     }),
 
-  listUserGroupMembers: async (sourceId: string, groupId: string) =>
+  listUserGroupMembers: async (infraSourceId: string, groupId: string) =>
     asArray(
-      await zaloFetch<unknown>(`/api/zalo/${sourceId}/user-groups/${encodeURIComponent(groupId)}/members`),
+      await zaloFetch<unknown>(`/api/zalo/${infraSourceId}/user-groups/${encodeURIComponent(groupId)}/members`),
     ).map(mapZaloStaffUser),
 
-  addUserGroupMember: (sourceId: string, groupId: string, userId: string) =>
-    zaloFetch<unknown>(`/api/zalo/${sourceId}/user-groups/${encodeURIComponent(groupId)}/members`, {
+  addUserGroupMember: (infraSourceId: string, groupId: string, userId: string) =>
+    zaloFetch<unknown>(`/api/zalo/${infraSourceId}/user-groups/${encodeURIComponent(groupId)}/members`, {
       method: 'POST',
       body: JSON.stringify({ userId }),
     }),
 
-  removeUserGroupMember: (sourceId: string, groupId: string, userId: string) =>
+  removeUserGroupMember: (infraSourceId: string, groupId: string, userId: string) =>
     zaloFetch<unknown>(
-      `/api/zalo/${sourceId}/user-groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}`,
+      `/api/zalo/${infraSourceId}/user-groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}`,
       { method: 'DELETE' },
     ),
 };
