@@ -558,4 +558,22 @@ export const zaloApi = {
       `/api/zalo/${infraSourceId}/user-groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}`,
       { method: 'DELETE' },
     ),
+
+  registerNotification: (infraSourceId: string, accountId: string, conversationId: string) =>
+    zaloFetch<{ registered: boolean }>(
+      `/api/zalo/${infraSourceId}/conversations/${encodeURIComponent(conversationId)}/notification-register`,
+      { method: 'POST', accountId },
+    ),
+
+  unregisterNotification: (infraSourceId: string, accountId: string, conversationId: string) =>
+    zaloFetch<{ registered: boolean }>(
+      `/api/zalo/${infraSourceId}/conversations/${encodeURIComponent(conversationId)}/notification-unregister`,
+      { method: 'POST', accountId },
+    ),
+
+  getNotificationStatus: (infraSourceId: string, accountId: string, conversationId: string) =>
+    zaloFetch<{ registered: boolean }>(
+      `/api/zalo/${infraSourceId}/conversations/${encodeURIComponent(conversationId)}/notification-status`,
+      { accountId },
+    ),
 };

@@ -279,6 +279,9 @@ export function ZaloChatPage() {
   const [listWidth, setListWidth] = useState(() => storedWidth(LIST_WIDTH_KEY, 320));
   const [infoWidth, setInfoWidth] = useState(() => storedWidth(INFO_WIDTH_KEY, 300));
   const [newMsgCount, setNewMsgCount] = useState(0);
+  const [notiRegistered, setNotiRegistered] = useState(false);
+  const [notiLoading, setNotiLoading] = useState(false);
+  const [notiToggling, setNotiToggling] = useState(false);
 
   const toastTimer = useRef<number | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
@@ -563,6 +566,7 @@ export function ZaloChatPage() {
 
   const selectConversation = (id: string) => {
     setActiveId(id);
+    setNotiRegistered(false);
     setData((prev) => ({
       ...prev,
       conversations: prev.conversations.map((c) =>
@@ -572,6 +576,46 @@ export function ZaloChatPage() {
     setPendingQuote(null);
     setPane('thread');
     if (infraSourceId && accountId) void loadThread(infraSourceId, accountId, id);
+  };
+
+  useEffect(() => {
+    if (!conv || !infraSourceId || !accountId) return;
+    let cancelled = false;
+    setNotiLoading(true);
+    void zaloApi
+      .getNotificationStatus(infraSourceId, accountId, conv.id)
+      .then((res) => {
+        if (!cancelled) setNotiRegistered(res.registered);
+      })
+      .catch(() => {
+        if (!cancelled) setNotiRegistered(false);
+      })
+      .finally(() => {
+        if (!cancelled) setNotiLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conv?.id, infraSourceId, accountId]);
+
+  const toggleNotification = async () => {
+    if (!conv || !infraSourceId || !accountId || notiToggling) return;
+    setNotiToggling(true);
+    try {
+      if (notiRegistered) {
+        await zaloApi.unregisterNotification(infraSourceId, accountId, conv.id);
+        setNotiRegistered(false);
+        showToast('Đã hủy đăng ký thông báo');
+      } else {
+        await zaloApi.registerNotification(infraSourceId, accountId, conv.id);
+        setNotiRegistered(true);
+        showToast('Đã đăng ký thông báo Zalo');
+      }
+    } catch (e) {
+      showToast(errorMessage(e, 'Không cập nhật đăng ký thông báo.'));
+    } finally {
+      setNotiToggling(false);
+    }
   };
 
   const toggleAi = async () => {
@@ -1239,6 +1283,30 @@ export function ZaloChatPage() {
                   <button type="button" className="zalo-info-copy" onClick={() => void copyThread()}>
                     <code>{conv.zalo_thread_id}</code>
                     {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+                  </button>
+                  <button
+                    type="button"
+                    className={`zalo-ai-row${notiRegistered ? ' is-on' : ''}`}
+                    disabled={notiLoading || notiToggling}
+                    onClick={() => void toggleNotification()}
+                  >
+                    <span>
+                      <strong>
+                        {notiLoading
+                          ? 'Đang kiểm tra...'
+                          : notiRegistered
+                            ? 'Đã đăng ký thông báo'
+                            : 'Chưa đăng ký thông báo'}
+                      </strong>
+                      <small>
+                        {notiRegistered
+                          ? 'Nhận thông báo ARITO qua hội thoại này (kênh zalo_conversation).'
+                          : 'Đăng ký để nhận thông báo ARITO qua hội thoại Zalo này.'}
+                      </small>
+                    </span>
+                    <span className={`zalo-ai-switch${notiRegistered ? ' is-on' : ''}`}>
+                      <span>{notiRegistered ? 'ON' : 'OFF'}</span>
+                    </span>
                   </button>
                 </section>
 
