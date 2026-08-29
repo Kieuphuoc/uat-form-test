@@ -59,7 +59,7 @@ export function ChatBotCreatePage() {
           (item) => item.folder_id.toLowerCase() === editingId.toLowerCase(),
         );
         if (!bot) {
-          setError('Không tìm thấy chatbot.');
+          setError('Không tìm thấy Chatbots.');
           return;
         }
         setType(normalizeBotType(bot.type));
@@ -72,7 +72,7 @@ export function ChatBotCreatePage() {
         setActive(bot.active !== false);
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Không tải được chatbot.');
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Không tải được Chatbots.');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -106,7 +106,7 @@ export function ChatBotCreatePage() {
         (bot) => bot.folder_id.toLowerCase() !== editingId.toLowerCase(),
       );
       if (nextBots.length === current.ai_chatbots.length) {
-        setError('Không tìm thấy chatbot.');
+        setError('Không tìm thấy Chatbots.');
         setDeleteConfirmOpen(false);
         return;
       }
@@ -127,7 +127,7 @@ export function ChatBotCreatePage() {
       setDeleteConfirmOpen(false);
       goBack();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Không xóa được chatbot.');
+      setError(e instanceof Error ? e.message : 'Không xóa được Chatbots.');
       setDeleteConfirmOpen(false);
     } finally {
       setDeleting(false);
@@ -197,7 +197,7 @@ export function ChatBotCreatePage() {
         ? bots.findIndex((bot) => bot.folder_id.toLowerCase() === editingId.toLowerCase())
         : -1;
       if (isEdit && selfIndex < 0) {
-        setError('Không tìm thấy chatbot.');
+        setError('Không tìm thấy Chatbots.');
         setSaving(false);
         return;
       }
@@ -266,7 +266,7 @@ export function ChatBotCreatePage() {
       );
       goBack();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Không lưu được chatbot.');
+      setError(e instanceof Error ? e.message : 'Không lưu được Chatbots.');
     } finally {
       setSaving(false);
     }
@@ -279,7 +279,7 @@ export function ChatBotCreatePage() {
           <IconBack size={18} />
         </button>
         <div>
-          <h2>{isEdit ? 'Sửa chatbot' : 'Thêm chatbot'}</h2>
+          <h2>{isEdit ? 'Sửa Chatbots' : 'Thêm Chatbots'}</h2>
           <p className="muted">
             {isEdit
               ? 'Sửa thông tin rồi bấm Lưu. Có thể đổi RAG / Files / FAQ; không đổi sang AI nhúng.'
@@ -290,7 +290,7 @@ export function ChatBotCreatePage() {
           <button
             type="button"
             className="chat-icon-btn chat-page-card-head-action is-danger"
-            title="Xóa chatbot"
+            title="Xóa Chatbots"
             disabled={busy}
             onClick={() => setDeleteConfirmOpen(true)}
           >
@@ -300,7 +300,7 @@ export function ChatBotCreatePage() {
       </header>
 
       <section className="chat-settings-section">
-        {loading && <p className="chat-hint">Đang tải chatbot…</p>}
+        {loading && <p className="chat-hint">Đang tải Chatbots…</p>}
         <label className="chat-settings-field">
           <span>Loại</span>
           <select
@@ -360,7 +360,7 @@ export function ChatBotCreatePage() {
               />
             </label>
             <p className="muted">
-              Folder trên File.Api cần bật AI đúng mode (RAG / Files / FAQ) thì chatbot mới trả lời được.
+              Folder trên File.Api cần bật AI đúng mode (RAG / Files / FAQ) thì Chatbots mới trả lời được.
             </p>
           </>
         )}
@@ -370,7 +370,7 @@ export function ChatBotCreatePage() {
           <input
             value={title}
             disabled={busy}
-            placeholder="Tên chatbot"
+            placeholder="Tên Chatbots"
             onChange={(e) => setTitle(e.target.value)}
           />
         </label>
@@ -441,11 +441,11 @@ export function ChatBotCreatePage() {
 
       <ChatConfirmDialog
         open={deleteConfirmOpen}
-        title="Xóa chatbot?"
+        title="Xóa Chatbots?"
         message={
           title.trim()
-            ? `Chatbot "${title.trim()}" sẽ bị gỡ khỏi danh sách công ty. Hội thoại cũ vẫn có thể mở; thao tác này không thể hoàn tác.`
-            : 'Chatbot sẽ bị gỡ khỏi danh sách công ty. Hội thoại cũ vẫn có thể mở; thao tác này không thể hoàn tác.'
+            ? `Chatbots "${title.trim()}" sẽ bị gỡ khỏi danh sách công ty. Hội thoại cũ vẫn có thể mở; thao tác này không thể hoàn tác.`
+            : 'Chatbots sẽ bị gỡ khỏi danh sách công ty. Hội thoại cũ vẫn có thể mở; thao tác này không thể hoàn tác.'
         }
         confirmLabel="Xóa"
         busy={deleting}

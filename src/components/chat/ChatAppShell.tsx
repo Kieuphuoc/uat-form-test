@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { chatApi, type ChatMe } from '../../api/chatApi';
 import { zaloApi } from '../../api/zaloApi';
@@ -30,6 +30,7 @@ const JWT_STORAGE_KEY = 'arito_form_jwt';
 function headerSelectPath(id: string): string | null {
   const key = id.trim().toLowerCase();
   if (key === 'contacts' || key === 'contact' || key === 'danhba') return '/chat/contacts';
+  if (key === 'oa' || key === 'zalo-oa' || key === 'zalo-oa-chat') return '/chat/oa';
   if (key === 'zalo' || key === 'zalo-chat' || key === 'zalochat') return '/chat/zalo';
   if (key === 'zalo-users' || key === 'zalousers' || key === 'nhomzalo' || key === 'zalogroups') {
     return '/chat/zalo/users';
@@ -57,7 +58,18 @@ export function ChatAppShell() {
   const menuRef = useRef<HTMLDivElement>(null);
   const zaloToastTimer = useRef<number | null>(null);
   const unitIdRef = useRef<number | null>(null);
-  const zaloEnabled = !!me?.zalo_enabled;
+  const zaloChatEnabled = !!me?.zalo_enabled && me?.can_use_zalo_chat !== false;
+  const oaChatEnabled = !!me && me.can_use_oa_chat !== false;
+  const chatAreaKey = useMemo(() => {
+    const path = location.pathname;
+    if (!path.startsWith('/chat')) return null;
+    if (path.startsWith('/chat/contacts')) return 'contacts';
+    if (path.startsWith('/chat/settings')) return 'settings';
+    if (path.startsWith('/chat/zalo/users')) return 'zalo-users';
+    if (path.startsWith('/chat/zalo')) return 'zalo';
+    if (path.startsWith('/chat/oa')) return 'oa';
+    return 'chat';
+  }, [location.pathname]);
 
   const refreshChatMe = useCallback(async () => {
     try {
@@ -95,7 +107,7 @@ export function ChatAppShell() {
   }, []);
 
   useEffect(() => {
-    if (!zaloEnabled) {
+    if (!zaloChatEnabled) {
       setZaloBadge(0);
       setZaloToast('');
       return;
@@ -104,7 +116,7 @@ export function ChatAppShell() {
     const badgeSub = subscribeZaloBadge(setZaloBadge);
     const inboxSub = subscribeZaloInbox((event) => {
       if (!event.notify) return;
-      if (window.location.pathname.startsWith('/chat/zalo')) return;
+      if (window.location.pathname.startsWith('/chat/zalo') || window.location.pathname.startsWith('/chat/oa')) return;
       const text = `${event.conversation_name || event.source_name || 'Zalo'}: ${event.preview || 'Tin nhắn mới'}`;
       setZaloToast(text);
       if (zaloToastTimer.current) window.clearTimeout(zaloToastTimer.current);
@@ -131,27 +143,19 @@ export function ChatAppShell() {
       inboxSub.stop();
       if (zaloToastTimer.current) window.clearTimeout(zaloToastTimer.current);
     };
-  }, [zaloEnabled]);
+  }, [zaloChatEnabled]);
 
   useEffect(() => {
+    if (!chatAreaKey) return;
     void refreshChatMe();
-  }, [jwt, refreshChatMe]);
+  }, [jwt, chatAreaKey, refreshChatMe]);
 
   useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void refreshChatMe();
-    };
     const onStorage = (event: StorageEvent) => {
       if (event.key === JWT_STORAGE_KEY) void refreshChatMe();
     };
-    document.addEventListener('visibilitychange', onVisible);
-    window.addEventListener('focus', onVisible);
     window.addEventListener('storage', onStorage);
-    return () => {
-      document.removeEventListener('visibilitychange', onVisible);
-      window.removeEventListener('focus', onVisible);
-      window.removeEventListener('storage', onStorage);
-    };
+    return () => window.removeEventListener('storage', onStorage);
   }, [refreshChatMe]);
 
   useEffect(() => {
@@ -170,18 +174,24 @@ export function ChatAppShell() {
       const path = headerSelectPath(typeof raw.id === 'string' ? raw.id : '');
       if (!path) return;
       if (path === '/chat/settings' && !me?.is_admin) return;
-      if ((path === '/chat/zalo' || path === '/chat/zalo/users') && !me?.zalo_enabled) return;
+      if ((path === '/chat/zalo' || path === '/chat/zalo/users') && !zaloChatEnabled) return;
+      if (path === '/chat/oa' && !oaChatEnabled) return;
       navigateChat(navigate, path);
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
-  }, [navigate, me?.is_admin, me?.zalo_enabled]);
+  }, [navigate, me?.is_admin, zaloChatEnabled, oaChatEnabled]);
 
   useEffect(() => {
-    if (!me || me.zalo_enabled) return;
-    if (!location.pathname.startsWith('/chat/zalo')) return;
-    navigateChat(navigate, '/chat', { replace: true });
-  }, [me, location.pathname, navigate]);
+    if (!me) return;
+    if (location.pathname.startsWith('/chat/zalo') && !zaloChatEnabled) {
+      navigateChat(navigate, '/chat', { replace: true });
+      return;
+    }
+    if (location.pathname.startsWith('/chat/oa') && !oaChatEnabled) {
+      navigateChat(navigate, '/chat', { replace: true });
+    }
+  }, [me, zaloChatEnabled, oaChatEnabled, location.pathname, navigate]);
 
   const displayName =
     me?.nickname || user?.nickname || me?.email || user?.email || 'Bạn';
@@ -211,13 +221,19 @@ export function ChatAppShell() {
               <IconUsers size={17} />
               <span>Danh bạ</span>
             </NavLink>
-            {zaloEnabled ? (
+            {zaloChatEnabled ? (
               <NavLink to="/chat/zalo" end className={navClass}>
                 <IconZalo size={17} />
                 <span>Zalo</span>
                 {zaloBadge > 0 && (
                   <span className="chat-shell-nav-badge">{zaloBadge > 99 ? '99+' : zaloBadge}</span>
                 )}
+              </NavLink>
+            ) : null}
+            {oaChatEnabled ? (
+              <NavLink to="/chat/oa" className={navClass}>
+                <IconZalo size={17} />
+                <span>OA</span>
               </NavLink>
             ) : null}
           </nav>
@@ -323,7 +339,7 @@ export function ChatAppShell() {
       </div>
 
       {dataSelectOpen && <DataSelectionDialog onClose={() => setDataSelectOpen(false)} />}
-      {zaloEnabled && zaloToast && !location.pathname.startsWith('/chat/zalo') && (
+      {zaloChatEnabled && zaloToast && !location.pathname.startsWith('/chat/zalo') && !location.pathname.startsWith('/chat/oa') && (
         <div className="zalo-toast">{zaloToast}</div>
       )}
     </div>

@@ -89,7 +89,7 @@ export function ConversationList({
                   imageSrc={isBot ? botAvatarUrl(c.bot_avatar_url) : null}
                 />
                 {isBot && (
-                  <span className="chat-list-kind-badge chat-list-kind-badge--bot" title="AI Chatbot">
+                  <span className="chat-list-kind-badge chat-list-kind-badge--bot" title="AI Chatbots">
                     <IconBot size={10} />
                   </span>
                 )}
@@ -117,7 +117,7 @@ export function ConversationList({
                 </span>
                 <span className="chat-list-preview">
                   {isBot && c.bot_active === false
-                    ? 'Chatbot đã tắt'
+                    ? 'Chatbots đã tắt'
                     : isEmbedBot(c)
                       ? c.last_preview || c.bot_description || 'AI nhúng'
                       : `${c.last_sender_name ? `${c.last_sender_name}: ` : ''}${c.last_preview || 'Chưa có tin nhắn'}`}

@@ -217,7 +217,7 @@ export function MessageThread({
   const canAttach = canSend && !isBot;
   const botSrc = isBot ? botAvatarUrl(conversation.bot_avatar_url) : null;
   const blockReason = botDisabled
-    ? 'Chatbot đã tắt. Bạn vẫn xem được lịch sử.'
+    ? 'Chatbots đã tắt. Bạn vẫn xem được lịch sử.'
     : conversation.kind === 'direct' && relation && !relation.can_send
       ? relation.send_block_reason || 'Không thể gửi tin nhắn.'
       : null;
@@ -330,8 +330,8 @@ export function MessageThread({
               ? `${conversation.member_count} thành viên`
               : isBot
                 ? botDisabled
-                  ? 'Chatbot đã tắt — chỉ xem lịch sử'
-                  : conversation.bot_description || 'AI Chatbot'
+                  ? 'Chatbots đã tắt — chỉ xem lịch sử'
+                  : conversation.bot_description || 'AI Chatbots'
                 : 'Tin nhắn riêng'}
           </span>
         </button>

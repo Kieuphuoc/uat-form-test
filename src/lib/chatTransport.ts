@@ -6,6 +6,7 @@ import {
 } from '@microsoft/signalr';
 import { chatApi, getChatApiBase, type ChatMessage, type Conversation, type ConversationNotifyMode } from '../api/chatApi';
 import { getJwt } from '../api/client';
+import type { OaConversation, OaMessage } from '../api/oaApi';
 
 export type ChatSubscription = { stop: () => void };
 export type ChatPlatform = 'web' | 'mobile';
@@ -47,8 +48,18 @@ export type ZaloInboxEvent = {
   notify?: boolean;
 };
 
+export type OaInboxEvent = {
+  conversation: OaConversation;
+  notify?: boolean;
+};
+
 type ConversationReadListener = {
   callback: (event: ConversationReadEvent) => void;
+};
+
+type OaMessageListener = {
+  threadId: number;
+  callback: (message: OaMessage) => void;
 };
 
 let platform: ChatPlatform = 'web';
@@ -68,6 +79,9 @@ const conversationListeners = new Set<ConversationListener>();
 const contactListeners = new Set<ContactListener>();
 const conversationReadListeners = new Set<ConversationReadListener>();
 const zaloInboxListeners = new Set<(event: ZaloInboxEvent) => void>();
+const oaInboxListeners = new Set<(event: OaInboxEvent) => void>();
+const oaMessageListeners = new Set<OaMessageListener>();
+const oaConversationListeners = new Set<() => void>();
 const zaloBadgeListeners = new Set<(count: number) => void>();
 const zaloUnread = new Map<string, number>();
 let zaloWatchSource = '';
@@ -86,6 +100,9 @@ function hasListeners(): boolean {
     + contactListeners.size
     + conversationReadListeners.size
     + zaloInboxListeners.size
+    + oaInboxListeners.size
+    + oaMessageListeners.size
+    + oaConversationListeners.size
     + zaloBadgeListeners.size
     > 0
   );
@@ -215,6 +232,19 @@ function buildConnection(): HubConnection {
   hub.on('zalo.inbox.updated', (event: ZaloInboxEvent) => {
     applyZaloInboxEvent(event);
     if (event?.notify) void showZaloDesktopNotification(event);
+  });
+  hub.on('oa.inbox.updated', (event: OaInboxEvent) => {
+    for (const listener of oaInboxListeners) listener(event);
+    for (const listener of oaConversationListeners) listener();
+  });
+  hub.on('oa.message.created', (message: OaMessage) => {
+    for (const listener of oaMessageListeners) {
+      if (listener.threadId === message.thread_id) listener.callback(message);
+    }
+    for (const listener of oaConversationListeners) listener();
+  });
+  hub.on('oa.conversation.updated', () => {
+    for (const listener of oaConversationListeners) listener();
   });
   hub.onreconnecting(() => stopHeartbeat());
   hub.onreconnected(() => {
@@ -537,6 +567,43 @@ export function subscribeZaloBadge(onCount: (count: number) => void): ChatSubscr
   return {
     stop: () => {
       zaloBadgeListeners.delete(onCount);
+      scheduleStopIfUnused();
+    },
+  };
+}
+
+export function subscribeOaInbox(onEvent: (event: OaInboxEvent) => void): ChatSubscription {
+  oaInboxListeners.add(onEvent);
+  void ensureStarted();
+  return {
+    stop: () => {
+      oaInboxListeners.delete(onEvent);
+      scheduleStopIfUnused();
+    },
+  };
+}
+
+export function subscribeOaConversations(onChanged: () => void): ChatSubscription {
+  oaConversationListeners.add(onChanged);
+  void ensureStarted();
+  return {
+    stop: () => {
+      oaConversationListeners.delete(onChanged);
+      scheduleStopIfUnused();
+    },
+  };
+}
+
+export function subscribeOaMessages(
+  threadId: number,
+  onMessage: (message: OaMessage) => void,
+): ChatSubscription {
+  const listener: OaMessageListener = { threadId, callback: onMessage };
+  oaMessageListeners.add(listener);
+  void ensureStarted();
+  return {
+    stop: () => {
+      oaMessageListeners.delete(listener);
       scheduleStopIfUnused();
     },
   };

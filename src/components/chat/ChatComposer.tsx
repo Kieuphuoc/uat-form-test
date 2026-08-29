@@ -427,7 +427,7 @@ export const ChatComposer = memo(function ChatComposer({
               ? 'Đang chờ AI trả lời…'
               : canSend
                 ? isBot
-                  ? 'Hỏi chatbot…'
+                  ? 'Hỏi Chatbots…'
                   : 'Nhập tin nhắn…'
                 : blockReason || 'Không thể gửi tin…'
           }

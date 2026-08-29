@@ -31,7 +31,11 @@ function readChrome(raw: unknown): Chrome | null {
       if (!id) continue;
       headerActions.push({
         id,
-        label: typeof a.label === 'string' && a.label.trim() ? a.label.trim() : id,
+        label: typeof a.label === 'string' ? a.label.trim() : '',
+        icon:
+          typeof a.icon === 'string' && a.icon.trim()
+            ? a.icon.trim()
+            : undefined,
       });
     }
   }
@@ -110,16 +114,23 @@ export function FormOuterChrome({ fallbackTitle = 'Arito Form', children }: Prop
         </div>
         {chrome.headerActions.length > 0 ? (
           <div className="form-outer-chrome__actions">
-            {chrome.headerActions.map((a) => (
+            {chrome.headerActions.map((a) => {
+              const icon = a.icon || (a.label ? undefined : '⬜');
+              const iconOnly = !a.label;
+              return (
               <button
                 key={a.id}
                 type="button"
-                className="form-outer-chrome__link"
+                className={`form-outer-chrome__link${iconOnly ? ' form-outer-chrome__link--icon' : ''}`}
+                aria-label={a.label || icon || a.id}
+                title={a.label || icon || a.id}
                 onClick={() => postFormHeaderAction(a.id)}
               >
-                {a.label}
+                {icon ? <span className={`form-outer-chrome__link-icon${a.icon ? '' : ' form-outer-chrome__link-icon--blank'}`} aria-hidden>{icon}</span> : null}
+                {a.label ? <span className="form-outer-chrome__link-text">{a.label}</span> : null}
               </button>
-            ))}
+              );
+            })}
           </div>
         ) : null}
       </header>

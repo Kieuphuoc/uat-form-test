@@ -10,6 +10,7 @@ import { ChatPage } from './pages/ChatPage';
 import { ChatSettingsPage } from './pages/ChatSettingsPage';
 import { ChatBotCreatePage } from './pages/ChatBotCreatePage';
 import { ContactsPage } from './pages/ContactsPage';
+import { OaChatPage } from './pages/OaChatPage';
 import { ZaloChatPage } from './pages/ZaloChatPage';
 import { ZaloUsersPage } from './pages/ZaloUsersPage';
 import { DesignPage } from './pages/DesignPage';
@@ -57,6 +58,8 @@ export function App() {
         <Route path="contacts" element={<ContactsPage />} />
         <Route path="zalo/users" element={<ZaloUsersPage />} />
         <Route path="zalo" element={<ZaloChatPage />} />
+        <Route path="oa" element={<OaChatPage />} />
+        <Route path="oa/:conversationId" element={<OaChatPage />} />
         <Route path="settings" element={<ChatSettingsPage />} />
         <Route path="settings/bots/new" element={<ChatBotCreatePage />} />
         <Route path="settings/bots/:folderId" element={<ChatBotCreatePage />} />

@@ -127,7 +127,7 @@ export function UserPickerDialog({
           <div className="chat-chips">
             {selected.map((u) => (
               <button key={u.user_id} type="button" className="chat-chip" onClick={() => toggle(u)}>
-                {u.nickname || u.email || `User ${u.user_id}`}
+                {u.nickname || u.email || `Người dùng ${u.user_id}`}
                 <IconClose size={12} />
               </button>
             ))}
@@ -152,7 +152,7 @@ export function UserPickerDialog({
               >
                 <ChatAvatar name={u.nickname || u.email} avatarId={u.avatar_id} size={36} />
                 <span className="chat-user-main">
-                  <span className="chat-user-name">{u.nickname || `User ${u.user_id}`}</span>
+                  <span className="chat-user-name">{u.nickname || `Người dùng ${u.user_id}`}</span>
                   <span className="chat-user-sub">{u.department || u.email || u.phone || ''}</span>
                 </span>
                 {multi && <span className="chat-check">{checked ? '✓' : ''}</span>}

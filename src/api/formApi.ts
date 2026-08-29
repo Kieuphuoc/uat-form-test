@@ -3,6 +3,9 @@ import {
   getRuntimeCache,
   setRuntimeCache,
 } from '../lib/formRuntimeCache';
+
+/** Dev: luôn fetch JSON mới từ Form.Api (tránh localStorage giữ spec cũ sau khi sửa Content/MobileForms). */
+const useRuntimeFormCache = !import.meta.env.DEV;
 import type {
   AdminAppSummary,
   ClientFormDto,
@@ -12,7 +15,7 @@ import type {
 
 export async function fetchRuntimeApp(slug: string, preview = false): Promise<ApiResult<RuntimeAppResponse>> {
   const cacheParts = ['app', slug, preview ? '1' : '0'];
-  if (!preview) {
+  if (useRuntimeFormCache && !preview) {
     const hit = getRuntimeCache<RuntimeAppResponse>(cacheParts);
     if (hit) return { success: true, data: hit };
   }
@@ -21,7 +24,7 @@ export async function fetchRuntimeApp(slug: string, preview = false): Promise<Ap
   const res = await apiFetch<RuntimeAppResponse>(
     `/v1/form/runtime/apps/${encodeURIComponent(slug)}${q}`,
   );
-  if (!preview && res.success && res.data) {
+  if (useRuntimeFormCache && !preview && res.success && res.data) {
     setRuntimeCache(cacheParts, res.data);
   }
   return res;
@@ -40,7 +43,7 @@ export async function fetchRuntimeForm(
     state?: Record<string, unknown>;
   };
   const cacheParts = ['form', slug, formId, preview ? '1' : '0'];
-  if (!preview) {
+  if (useRuntimeFormCache && !preview) {
     const hit = getRuntimeCache<FormPayload>(cacheParts);
     if (hit) return { success: true as const, data: hit };
   }
@@ -52,7 +55,7 @@ export async function fetchRuntimeForm(
   const res = await apiFetch<FormPayload>(
     `/v1/form/runtime/apps/${encodeURIComponent(slug)}/forms/${encodeURIComponent(formId)}${q}`,
   );
-  if (!preview && res.success && res.data) {
+  if (useRuntimeFormCache && !preview && res.success && res.data) {
     setRuntimeCache(cacheParts, res.data);
   }
   return res;

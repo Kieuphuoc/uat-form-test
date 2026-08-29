@@ -115,6 +115,29 @@ a {
   gap: 10px;
 }
 
+.form-footer-inner--row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.form-footer-inner--row > .form-btn,
+.form-footer-inner--row > .form-control-row {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+}
+
+.form-footer-inner--row > .form-control-row > .form-btn {
+  width: 100%;
+}
+
+.form-footer .form-btn__icon {
+  margin-inline-end: 4px;
+}
+
 .form-footer .form-control-row {
   align-items: center;
 }
@@ -307,6 +330,25 @@ label.field {
   color: var(--muted);
 }
 
+label.field.field--checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+label.field.field--checkbox > input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--accent, #2f6fed);
+}
+
+label.field.field--checkbox > .field-label {
+  margin: 0;
+}
+
 label.field.field--align-center > .field-label {
   text-align: center;
   width: 100%;
@@ -392,6 +434,21 @@ table.data td {
   border-bottom: 1px solid var(--line);
   text-align: left;
   padding: 8px 6px;
+}
+
+.form-list table.data th,
+.form-list table.data td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  vertical-align: top;
+}
+
+.form-list-cell-text {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 table.data tr.clickable {
@@ -573,17 +630,17 @@ table.data tr.selected {
 .form-list-item-line1 {
   font-weight: 700;
   font-size: 14px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .form-list-item-line2 {
   font-size: 13px;
   color: var(--muted, #667);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .form-list-item-meta {
@@ -591,9 +648,9 @@ table.data tr.selected {
   font-size: 12px;
   max-width: 30%;
   text-align: right;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .toast {
@@ -761,6 +818,15 @@ table.data tr.selected {
   padding: 6px 4px;
   cursor: pointer;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.modal-header-link--icon {
+  padding: 6px 8px;
+  min-width: 32px;
+  justify-content: center;
 }
 
 .modal-close {
@@ -1996,6 +2062,14 @@ pre.json {
   width: 100%;
 }
 
+.form-grid-table th,
+.form-grid-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  vertical-align: top;
+}
+
 .form-title-with-mode {
   display: inline-flex;
   align-items: center;
@@ -3181,6 +3255,16 @@ pre.json {
   line-height: 1.2;
 }
 
+.form-btn--icon-only {
+  min-width: 44px;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+.form-btn__icon--blank {
+  opacity: 0.28;
+}
+
 /* —— Custom date / time pickers (không native Android/iOS) —— */
 .form-date-picker {
   position: relative;
@@ -4247,6 +4331,24 @@ body.mobile-embed .form-attach--align-square-center .form-image-box {
   background: rgba(255, 255, 255, 0.1);
 }
 
+.form-outer-chrome__link--icon {
+  font-size: 16px;
+  line-height: 1;
+  padding: 6px 10px;
+}
+
+.form-outer-chrome__link-icon {
+  display: inline-block;
+}
+
+.form-outer-chrome__link-icon--blank {
+  opacity: 0.28;
+}
+
+.form-outer-chrome__link-text {
+  display: inline-block;
+}
+
 .form-outer-chrome__body {
   flex: 1;
   min-height: 0;
@@ -5097,6 +5199,44 @@ body.mobile-embed .shell > .form-shell > .form-scroll {
   white-space: nowrap;
 }
 
+.chat-contact-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.chat-admin-unit-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  color: #b45309;
+  background: #fffbeb;
+}
+
+.chat-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.chat-permission-list {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.chat-permission-list > strong {
+  font-size: 13px;
+  color: #0f172a;
+}
+
 .chat-contact-badge {
   display: inline-flex;
   align-self: flex-start;
@@ -5485,6 +5625,48 @@ body.mobile-embed .shell > .form-shell > .form-scroll {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+}
+
+.chat-settings-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.chat-settings-section-toggle:hover .chat-settings-section-title {
+  color: #001854;
+}
+
+.chat-settings-section-chevron {
+  display: inline-flex;
+  width: 1em;
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.chat-settings-section-title {
+  margin: 0;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.chat-settings-section-body {
+  margin-top: 8px;
+}
+
+.chat-settings-section.is-collapsed .chat-settings-section-body {
+  display: none;
 }
 
 .chat-settings-toggles {
@@ -8540,6 +8722,111 @@ body.mobile-embed .chat-topbar {
 .zalo-chat .chat-attach:hover {
   background: #eef2f6;
   color: var(--text);
+}
+
+/* ===================== Chat OA Phase 1 ===================== */
+
+.oa-chat .chat-panel--thread {
+  display: flex;
+  flex-direction: column;
+}
+
+.oa-thread {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.oa-message {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 8px 12px;
+}
+
+.oa-message--mine {
+  justify-content: flex-end;
+}
+
+.oa-message--theirs {
+  justify-content: flex-start;
+}
+
+.oa-message-main {
+  max-width: min(70%, 640px);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.oa-message--mine .oa-message-main {
+  align-items: flex-end;
+}
+
+.oa-message-sender {
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.oa-message-bubble {
+  padding: 9px 12px;
+  border: 1px solid var(--chat-theirs-border);
+  border-radius: 14px;
+  background: var(--chat-theirs-bg);
+  color: var(--chat-theirs-fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.oa-message--mine .oa-message-bubble {
+  border-color: transparent;
+  background: var(--chat-mine-bg);
+  color: var(--chat-mine-fg);
+}
+
+.oa-message-bubble small {
+  display: block;
+  margin-top: 4px;
+  opacity: 0.65;
+  font-size: 11px;
+  text-align: right;
+}
+
+.chat-composer-block {
+  flex: 1 0 100%;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 12px;
+}
+
+.oa-info-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.oa-info-list div {
+  display: grid;
+  gap: 2px;
+}
+
+.oa-info-list dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.oa-info-list dd {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  word-break: break-word;
+}
+
+.oa-info-line {
+  margin: 0 0 8px;
 }
 
 /* —— Approval Hub designer —— */

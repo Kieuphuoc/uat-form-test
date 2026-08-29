@@ -149,6 +149,8 @@ export type ClientActionMeta = {
   mode?: string;
   formMode?: string;
   url?: string;
+  values?: Record<string, string>;
+  replaceForm?: boolean;
 };
 
 export type FormListColumnDef = {
@@ -291,6 +293,7 @@ export type RuntimeUiDirective = {
     formId: string;
     mode?: string;
     formMode?: string;
+    replaceForm?: boolean;
     returnMap?: Record<string, string>;
     values?: Record<string, unknown>;
     state?: Record<string, unknown>;

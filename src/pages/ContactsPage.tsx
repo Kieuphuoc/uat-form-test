@@ -9,9 +9,11 @@ import {
   type ChatUser,
   type ContactItem,
   type Conversation,
+  type UnitChatPermissions,
+  type UnitChatPermissionWrite,
 } from '../api/chatApi';
 import { ChatAvatar } from '../components/chat/ChatAvatar';
-import { IconBlock, IconChat, IconClose, IconSettings, IconUsersAdd } from '../components/AppIcons';
+import { IconBlock, IconChat, IconClose, IconSettings, IconShield, IconUsersAdd } from '../components/AppIcons';
 import { navigateChat } from '../lib/chatNav';
 import { subscribeContacts } from '../lib/chatTransport';
 
@@ -27,6 +29,37 @@ function relationLabel(item: ContactItem): string {
   return item.relation;
 }
 
+function permissionWrite(perms: UnitChatPermissions): UnitChatPermissionWrite {
+  return {
+    can_use_ai_chat: perms.permission_items.ai_bots.some((item) => item.enabled),
+    can_use_zalo_chat: perms.permission_items.zalo_accounts.some((item) => item.enabled),
+    can_use_oa_chat: perms.can_use_oa_chat,
+    permission_items: perms.permission_items,
+  };
+}
+
+function togglePermissionItem(
+  perms: UnitChatPermissions,
+  group: 'ai_bots' | 'zalo_accounts',
+  id: string,
+  enabled: boolean,
+): UnitChatPermissions {
+  const permissionItems = {
+    ai_bots: perms.permission_items.ai_bots.map((item) =>
+      item.id === id && group === 'ai_bots' ? { ...item, enabled } : item,
+    ),
+    zalo_accounts: perms.permission_items.zalo_accounts.map((item) =>
+      item.id === id && group === 'zalo_accounts' ? { ...item, enabled } : item,
+    ),
+  };
+  return {
+    ...perms,
+    permission_items: permissionItems,
+    can_use_ai_chat: permissionItems.ai_bots.some((item) => item.enabled),
+    can_use_zalo_chat: permissionItems.zalo_accounts.some((item) => item.enabled),
+  };
+}
+
 export function ContactsPage() {
   const { me } = useOutletContext<ShellContext>();
   const navigate = useNavigate();
@@ -34,7 +67,8 @@ export function ContactsPage() {
   const unitId = me?.unit_id ?? 0;
   const companyName =
     me?.unit?.unit_name || me?.unit?.unit_code || (unitId > 0 ? `Công ty #${unitId}` : null);
-  const showBots = !!me?.ai_chatbot_enabled;
+  const showBots = !!me?.ai_chatbot_enabled && me?.can_use_ai_chat !== false;
+  const canManagePermissions = !!me?.can_manage_chat_permissions;
   const requested = (params.get('tab') as Tab | null) ?? null;
   const tab: Tab =
     requested === 'bots' && showBots
@@ -63,6 +97,10 @@ export function ContactsPage() {
   const [groups, setGroups] = useState<Conversation[]>([]);
   const [groupBusy, setGroupBusy] = useState(false);
   const [newGroupTitle, setNewGroupTitle] = useState('');
+  const [permUser, setPermUser] = useState<ChatUser | null>(null);
+  const [permDraft, setPermDraft] = useState<UnitChatPermissions | null>(null);
+  const [permBusy, setPermBusy] = useState(false);
+  const [permError, setPermError] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSearch(query.trim()), 300);
@@ -140,7 +178,7 @@ export function ContactsPage() {
       const conversation = await chatApi.openBot(folderId);
       navigateChat(navigate, `/chat/${conversation.id}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Không mở được chatbot.');
+      setError(e instanceof Error ? e.message : 'Không mở được Chatbots.');
     } finally {
       setBusyFolderId(null);
     }
@@ -220,17 +258,63 @@ export function ContactsPage() {
     }
   };
 
+  const openPermissions = async (user: ChatUser) => {
+    setPermUser(user);
+    setPermDraft(null);
+    setPermError(null);
+    setPermBusy(true);
+    try {
+      setPermDraft(await chatApi.getUnitChatPermissions(user.user_id));
+    } catch (e) {
+      setPermError(e instanceof Error ? e.message : 'Không tải được quyền.');
+    } finally {
+      setPermBusy(false);
+    }
+  };
+
+  const savePermissions = async () => {
+    if (!permUser || !permDraft) return;
+    setPermBusy(true);
+    setPermError(null);
+    try {
+      const saved = await chatApi.saveUnitChatPermissions(permUser.user_id, permissionWrite(permDraft));
+      setPermDraft(saved);
+      setPermUser(null);
+    } catch (e) {
+      setPermError(e instanceof Error ? e.message : 'Không lưu được quyền.');
+    } finally {
+      setPermBusy(false);
+    }
+  };
+
+  const resetPermissions = async () => {
+    if (!permUser) return;
+    setPermBusy(true);
+    setPermError(null);
+    try {
+      setPermDraft(await chatApi.resetUnitChatPermissions(permUser.user_id));
+    } catch (e) {
+      setPermError(e instanceof Error ? e.message : 'Không xóa được quyền riêng.');
+    } finally {
+      setPermBusy(false);
+    }
+  };
+
   const placeholder = useMemo(
     () =>
       tab === 'company'
         ? 'Tìm theo tên, email, điện thoại…'
         : tab === 'bots'
-          ? 'Tìm chatbot…'
+          ? 'Tìm Chatbots…'
           : 'Tìm trong danh bạ của bạn…',
     [tab],
   );
 
-  const renderActionButtons = (user: ChatUser | ContactItem, showChat: boolean) => (
+  const renderActionButtons = (
+    user: ChatUser | ContactItem,
+    showChat: boolean,
+    showPermissions = false,
+  ) => (
     <div className="chat-contact-actions">
       {showChat && (
         <button
@@ -241,6 +325,21 @@ export function ContactsPage() {
           title="Chat"
         >
           <IconChat size={18} />
+        </button>
+      )}
+      {showPermissions && canManagePermissions && (
+        <button
+          type="button"
+          className="chat-icon-btn"
+          disabled={permBusy || !!user.is_admin_unit}
+          onClick={() => void openPermissions(user)}
+          title={
+            user.is_admin_unit
+              ? 'Quản trị viên công ty dùng quyền mặc định công ty'
+              : 'Phân quyền Chatbots'
+          }
+        >
+          <IconShield size={18} />
         </button>
       )}
       <button
@@ -264,7 +363,7 @@ export function ContactsPage() {
             {tab === 'company'
               ? companyName || 'Danh bạ công ty'
               : tab === 'bots'
-                ? 'Chatbot AI của công ty'
+                ? 'Chatbots AI của công ty'
                 : 'Liên hệ đã kết nối, yêu cầu chờ duyệt và đã chặn.'}
           </p>
         </div>
@@ -309,7 +408,7 @@ export function ContactsPage() {
             className={tab === 'bots' ? 'active' : undefined}
             onClick={() => setTab('bots')}
           >
-            AI Chatbot
+            AI Chatbots
           </button>
         )}
       </div>
@@ -335,7 +434,7 @@ export function ContactsPage() {
           <p className="chat-hint">Chưa có liên hệ trong danh bạ của bạn.</p>
         )}
         {!loading && tab === 'bots' && botItems.length === 0 && (
-          <p className="chat-hint">Chưa có chatbot nào được khai báo.</p>
+          <p className="chat-hint">Chưa có Chatbots nào được khai báo.</p>
         )}
 
         {tab === 'company' &&
@@ -343,12 +442,19 @@ export function ContactsPage() {
             <div key={u.user_id} className="chat-contact-row">
               <ChatAvatar name={u.nickname || u.email} avatarId={u.avatar_id} size={40} />
               <div className="chat-contact-main">
-                <strong>{u.nickname || u.email || u.username || `User ${u.user_id}`}</strong>
+                <strong className="chat-contact-name">
+                  {u.nickname || u.email || u.username || `Người dùng ${u.user_id}`}
+                  {u.is_admin_unit ? (
+                    <span className="chat-admin-unit-badge" title="Quản trị viên công ty">
+                      <IconShield size={14} />
+                    </span>
+                  ) : null}
+                </strong>
                 <span className="muted">
                   {[u.email, u.phone].filter(Boolean).join(' · ') || '—'}
                 </span>
               </div>
-              {renderActionButtons(u, true)}
+              {renderActionButtons(u, true, true)}
             </div>
           ))}
 
@@ -362,7 +468,7 @@ export function ContactsPage() {
               />
               <div className="chat-contact-main">
                 <strong>
-                  {item.nickname || item.email || item.username || `User ${item.user_id}`}
+                  {item.nickname || item.email || item.username || `Người dùng ${item.user_id}`}
                 </strong>
                 <span className="muted">
                   {[item.email, item.phone].filter(Boolean).join(' · ') || '—'}
@@ -516,6 +622,128 @@ export function ContactsPage() {
               <button type="button" disabled={groupBusy} onClick={() => void createGroupWithUser()}>
                 Tạo nhóm và thêm
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {permUser && (
+        <div className="chat-modal-backdrop" role="presentation" onClick={() => !permBusy && setPermUser(null)}>
+          <div
+            className="chat-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Phân quyền Chatbots"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="chat-modal-head">
+              <strong>
+                Quyền Chatbots — {permUser.nickname || permUser.email || permUser.user_id}
+              </strong>
+              <button
+                type="button"
+                className="chat-icon-btn"
+                disabled={permBusy}
+                onClick={() => setPermUser(null)}
+              >
+                <IconClose size={18} />
+              </button>
+            </header>
+            <div className="chat-modal-body">
+              {permBusy && !permDraft && <p className="chat-hint">Đang tải quyền…</p>}
+              {permError && <div className="chat-error">{permError}</div>}
+              {permDraft && (
+                <>
+                  <p className="muted">
+                    {permDraft.source === 'user'
+                      ? 'Đang dùng quyền riêng của người dùng.'
+                      : permDraft.source === 'default'
+                        ? 'Đang theo mặc định công ty — lưu sẽ tạo quyền riêng.'
+                        : 'Chưa khai báo — đang bật hết. Lưu sẽ tạo quyền riêng.'}
+                  </p>
+                  <div className="chat-permission-list">
+                    <strong>AI Chatbots</strong>
+                    {permDraft.permission_items.ai_bots.length === 0 && (
+                      <p className="chat-hint">Chưa có AI Chatbots trong cấu hình công ty.</p>
+                    )}
+                    {permDraft.permission_items.ai_bots.map((item) => (
+                      <label key={item.id} className="chat-settings-toggle">
+                        <input
+                          type="checkbox"
+                          checked={item.enabled}
+                          disabled={permBusy || item.active === false}
+                          onChange={(e) =>
+                            setPermDraft(
+                              togglePermissionItem(permDraft, 'ai_bots', item.id, e.target.checked),
+                            )
+                          }
+                        />
+                        <span>
+                          <strong>{item.name || item.id}</strong>
+                          <small>{item.id}{item.active === false ? ' · Đã tắt trong cấu hình' : ''}</small>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="chat-permission-list">
+                    <strong>Tài khoản Zalo</strong>
+                    {permDraft.permission_items.zalo_accounts.length === 0 && (
+                      <p className="chat-hint">Chưa có tài khoản Zalo trong cấu hình công ty.</p>
+                    )}
+                    {permDraft.permission_items.zalo_accounts.map((item) => (
+                      <label key={item.id} className="chat-settings-toggle">
+                        <input
+                          type="checkbox"
+                          checked={item.enabled}
+                          disabled={permBusy || item.active === false}
+                          onChange={(e) =>
+                            setPermDraft(
+                              togglePermissionItem(
+                                permDraft,
+                                'zalo_accounts',
+                                item.id,
+                                e.target.checked,
+                              ),
+                            )
+                          }
+                        />
+                        <span>
+                          <strong>{item.name || item.id}</strong>
+                          <small>{item.id}{item.active === false ? ' · Đã tắt trong cấu hình' : ''}</small>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  <label className="chat-settings-toggle">
+                    <input
+                      type="checkbox"
+                      checked={permDraft.can_use_oa_chat}
+                      disabled={permBusy}
+                      onChange={(e) =>
+                        setPermDraft({ ...permDraft, can_use_oa_chat: e.target.checked })
+                      }
+                    />
+                    <span>
+                      <strong>OA Chatbots</strong>
+                      <small>Hiện /chat/oa. Tắt thì ẩn menu OA.</small>
+                    </span>
+                  </label>
+                  <div className="chat-modal-actions">
+                    {permDraft.is_explicit && permDraft.source === 'user' && (
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={permBusy}
+                        onClick={() => void resetPermissions()}
+                      >
+                        Dùng mặc định công ty
+                      </button>
+                    )}
+                    <button type="button" disabled={permBusy} onClick={() => void savePermissions()}>
+                      Lưu quyền
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import { fetchRuntimeForm, runAction } from '../api/formApi';
+import { buildShowFormSeed, isShowFormAction } from '../lib/showFormAction';
 import {
   alignSoloRowStyle,
   controlLayoutStyle,
@@ -137,6 +138,24 @@ type Props = {
 
 export { groupControlsByRowId };
 
+const BLANK_BUTTON_ICON = '⬜';
+
+function formOnLoadActionIds(form: ClientFormDto): string[] {
+  return (form.onLoad ?? []).map((id) => id.trim()).filter(Boolean);
+}
+
+/** text rỗng → chỉ icon; không icon thì dùng icon trắng. Không fallback sang id. */
+function resolveButtonFace(
+  c: FormControlDef,
+  lan: LangCode,
+): { icon: string; text: string; aria: string } {
+  const label = resolveLocalizedText(c.label, lan).trim();
+  const resolvedText = resolveLocalizedText(c.text, lan).trim();
+  const text = c.text != null ? resolvedText : label;
+  const icon = (c.icon ?? '').trim() || (text ? '' : BLANK_BUTTON_ICON);
+  return { icon, text, aria: text || icon || c.id };
+}
+
 function asInputValue(v: unknown): string {
   if (v == null) return '';
   if (typeof v === 'string') return v;
@@ -187,7 +206,7 @@ function renderListCell(col: FormListColumnDef, row: Record<string, unknown>): R
     const id = asInputValue(raw);
     return id ? <ListRowMediaThumb value={raw} size={28} fallback="🖼" /> : null;
   }
-  return asInputValue(raw);
+  return <span className="form-list-cell-text">{asInputValue(raw)}</span>;
 }
 
 function joinRowFields(
@@ -587,6 +606,40 @@ export function FormRuntimeView({
     [],
   );
 
+  const applyOpenForm = useCallback(
+    async (
+      frames: StackFrame[],
+      openForm: {
+        formId: string;
+        mode?: string | null;
+        formMode?: string | null;
+        replaceForm?: boolean;
+        returnMap?: Record<string, string>;
+        values?: Record<string, unknown>;
+        state?: Record<string, unknown>;
+      },
+    ): Promise<{ frames: StackFrame[]; working: StackFrame } | null> => {
+      const loaded = await fetchRuntimeForm(slug, openForm.formId, preview);
+      if (!loaded.success || !loaded.data) {
+        showToast(loaded.error || uiCopy(lan, 'cannotOpenForm'), 'error');
+        return null;
+      }
+      const newFrame = buildFrame(loaded.data.form, {
+        values: { ...(loaded.data.values ?? {}), ...(openForm.values ?? {}) },
+        state: { ...(loaded.data.state ?? {}), ...(openForm.state ?? {}) },
+        datasets: loaded.data.datasets,
+        formMode: openForm.formMode,
+        returnMap: openForm.returnMap,
+        uiMode: openForm.mode?.trim() || undefined,
+      });
+      const nextFrames = openForm.replaceForm
+        ? [...frames.slice(0, -1), newFrame]
+        : [...frames, newFrame];
+      return { frames: nextFrames, working: newFrame };
+    },
+    [slug, preview, showToast, lan],
+  );
+
   const runActions = useCallback(
     async (
       actionIds: string[],
@@ -606,8 +659,10 @@ export function FormRuntimeView({
           working = { ...working, state: { ...working.state, ...statePatch } };
         }
         let frames = [...stack.slice(0, -1), working];
+        const pending = [...actionIds];
 
-        for (const actionId of actionIds) {
+        while (pending.length) {
+          const actionId = pending.shift()!;
           const meta = working.form.actions?.[actionId];
           if ((meta?.type ?? '').trim().toLowerCase() === 'getgps') {
             try {
@@ -707,6 +762,50 @@ export function FormRuntimeView({
             continue;
           }
 
+          if (isShowFormAction(meta)) {
+            const formId = meta?.formId?.trim();
+            if (!formId) {
+              showToast(uiCopy(lan, 'actionFailed'), 'error');
+              setStack(frames);
+              return;
+            }
+            let seed = buildShowFormSeed(meta?.values, {
+              values: working.values,
+              state: working.state,
+              row: rowContext,
+            });
+            if (!meta?.values && rowContext) {
+              const resolved = await runAction(slug, actionId, {
+                formId: working.formId,
+                controlValues: stripAttachmentPreviewUrls(working.values),
+                state: working.state,
+                rowContext,
+              });
+              if (resolved.success && resolved.data?.ui?.openForm) {
+                seed = {
+                  values: { ...seed.values, ...(resolved.data.ui.openForm.values ?? {}) },
+                  state: { ...seed.state, ...(resolved.data.ui.openForm.state ?? {}) },
+                };
+              }
+            }
+            const opened = await applyOpenForm(frames, {
+              formId,
+              mode: meta?.mode,
+              formMode: meta?.formMode,
+              replaceForm: meta?.replaceForm,
+              values: seed.values,
+              state: seed.state,
+            });
+            if (!opened) {
+              setStack(frames);
+              return;
+            }
+            frames = opened.frames;
+            working = opened.working;
+            pending.unshift(...formOnLoadActionIds(working.form));
+            continue;
+          }
+
           const res = await runAction(slug, actionId, {
             formId: working.formId,
             controlValues: stripAttachmentPreviewUrls(working.values),
@@ -727,24 +826,22 @@ export function FormRuntimeView({
           if (ui?.message?.text) showToast(ui.message.text, ui.message.level || 'info');
 
           if (ui?.openForm?.formId) {
-            const loaded = await fetchRuntimeForm(slug, ui.openForm.formId, preview);
-            if (!loaded.success || !loaded.data) {
-              showToast(loaded.error || uiCopy(lan, 'cannotOpenForm'), 'error');
+            const opened = await applyOpenForm(frames, {
+              formId: ui.openForm.formId,
+              mode: ui.openForm.mode,
+              formMode: ui.openForm.formMode,
+              replaceForm: ui.openForm.replaceForm,
+              returnMap: ui.openForm.returnMap,
+              values: ui.openForm.values,
+              state: ui.openForm.state,
+            });
+            if (!opened) {
               setStack(frames);
               return;
             }
-            frames = [
-              ...frames,
-              buildFrame(loaded.data.form, {
-                values: { ...(loaded.data.values ?? {}), ...(ui.openForm.values ?? {}) },
-                state: { ...(loaded.data.state ?? {}), ...(ui.openForm.state ?? {}) },
-                datasets: loaded.data.datasets,
-                formMode: ui.openForm.formMode,
-                returnMap: ui.openForm.returnMap,
-                uiMode: ui.openForm.mode,
-              }),
-            ];
-            working = frames[frames.length - 1]!;
+            frames = opened.frames;
+            working = opened.working;
+            pending.unshift(...formOnLoadActionIds(working.form));
           }
 
           if (ui?.close) {
@@ -770,7 +867,7 @@ export function FormRuntimeView({
         setBusy(false);
       }
     },
-    [stack, slug, preview, mergeResult, showToast, lan, onClose],
+    [stack, slug, preview, mergeResult, showToast, lan, onClose, applyOpenForm],
   );
 
   const openLinkedForm = useCallback(
@@ -951,10 +1048,6 @@ export function FormRuntimeView({
     () => groupControlsForLayout(bodyControls, lan),
     [bodyControls, lan],
   );
-  const footerGroups = useMemo(
-    () => groupControlsForLayout(footerControls, lan),
-    [footerControls, lan],
-  );
   const lists = useMemo(
     () => [...visualFrame.form.lists].sort((a, b) => a.order - b.order),
     [visualFrame.form.lists],
@@ -966,10 +1059,10 @@ export function FormRuntimeView({
     const title = resolveLocalizedText(chromeFrame.form.title, lan) || chromeFrame.form.id;
     const headerActions = headerControls
       .filter((hc) => isControlVisible(hc, visualFrame.formMode))
-      .map((hc) => ({
-        id: hc.id,
-        label: resolveLocalizedText(hc.text, lan) || resolveLocalizedText(hc.label, lan) || hc.id,
-      }));
+      .map((hc) => {
+        const face = resolveButtonFace(hc, lan);
+        return { id: hc.id, label: face.text, icon: face.icon || undefined };
+      });
     emitFormChrome({
       title,
       canBack: stack.length > 1,
@@ -1115,6 +1208,7 @@ export function FormRuntimeView({
 
     if (c.type === 'iconButton') {
       const bg = c.color?.trim() || '#2f6fed';
+      const face = resolveButtonFace(c, lan);
       return (
         <button
           key={c.id}
@@ -1122,20 +1216,22 @@ export function FormRuntimeView({
           className="form-icon-btn"
           disabled={busy || c.enabled === false}
           style={layoutStyle}
+          aria-label={face.aria}
           onClick={() => {
             if (c.linkFormId?.trim()) void openLinkedForm(c.linkFormId.trim());
             else if (c.onClick?.length) void runActions(c.onClick);
           }}
         >
           <span className="form-icon-btn__tile" style={{ background: bg }}>
-            {c.icon || '⬜'}
+            {c.icon?.trim() || face.icon}
           </span>
-          <span className="form-icon-btn__label">{textText || labelText || c.id}</span>
+          {face.text ? <span className="form-icon-btn__label">{face.text}</span> : null}
         </button>
       );
     }
 
     if (c.type === 'button') {
+      const face = resolveButtonFace(c, lan);
       const btnStyle: CSSProperties = {
         ...visualStyle,
         ...(c.color?.trim() ? { background: c.color.trim(), borderColor: c.color.trim() } : {}),
@@ -1144,17 +1240,55 @@ export function FormRuntimeView({
         <button
           key={c.id}
           type="button"
-          className={`form-btn${inRow ? ' form-row-item' : ''}`}
+          className={`form-btn${inRow ? ' form-row-item' : ''}${face.text ? '' : ' form-btn--icon-only'}`}
           disabled={busy || c.enabled === false}
           style={btnStyle}
+          aria-label={face.aria}
+          title={face.aria}
           onClick={() => {
             if (c.linkFormId?.trim()) void openLinkedForm(c.linkFormId.trim());
             else void runActions(c.onClick ?? []);
           }}
         >
-          {c.icon ? <span className="form-btn__icon">{c.icon}</span> : null}
-          <span className="form-btn__text">{textText || labelText || c.id}</span>
+          {face.icon ? (
+            <span
+              className={`form-btn__icon${(c.icon ?? '').trim() ? '' : ' form-btn__icon--blank'}`}
+              aria-hidden
+            >
+              {face.icon}
+            </span>
+          ) : null}
+          {face.text ? <span className="form-btn__text">{face.text}</span> : null}
         </button>
+      );
+    }
+
+    if (c.type === 'checkbox') {
+      return (
+        <label
+          key={c.id}
+          className={`field field--checkbox${inRow ? ' form-row-item' : ''}`}
+          style={layoutStyle}
+        >
+          <input
+            id={c.id}
+            type="checkbox"
+            disabled={disabled}
+            checked={truthyCell(visualFrame.values[c.id])}
+            onChange={(e) => {
+              if (!editable) return;
+              const v = e.target.checked;
+              setValue(c.id, v);
+              if (c.onChange?.length) void runActions(c.onChange, undefined, { [c.id]: v });
+            }}
+          />
+          {showLabel ? (
+            <span className="field-label">
+              {labelText}
+              {c.required ? ' *' : ''}
+            </span>
+          ) : null}
+        </label>
       );
     }
 
@@ -1396,10 +1530,36 @@ export function FormRuntimeView({
     );
   };
 
-  const footerNodes = footerGroups.map(renderLayoutGroup).filter(Boolean);
+  const footerNodes = footerControls
+    .filter((c) => isControlVisible(c, visualFrame.formMode))
+    .sort((a, b) => a.order - b.order)
+    .map((c) => renderControl(c, true))
+    .filter(Boolean);
   const hasFooter = footerNodes.length > 0;
   /** list = list-only chrome (không card/border, không tiêu đề list + chọn tất cả). */
   const isListLayout = (visualFrame.form.layout || '').toLowerCase() === 'list';
+
+  const renderHeaderActionBtn = (hc: FormControlDef) => {
+    if (!isControlVisible(hc, visualFrame.formMode)) return null;
+    const face = resolveButtonFace(hc, lan);
+    return (
+      <button
+        key={hc.id}
+        type="button"
+        className={`modal-header-link${face.text ? '' : ' modal-header-link--icon'}`}
+        disabled={busy || hc.enabled === false}
+        aria-label={face.aria}
+        title={face.aria}
+        onClick={() => {
+          if (hc.linkFormId?.trim()) void openLinkedForm(hc.linkFormId.trim());
+          else if (hc.onClick?.length) void runActions(hc.onClick);
+        }}
+      >
+        {face.icon ? <span aria-hidden>{face.icon}</span> : null}
+        {face.text ? <span>{face.text}</span> : null}
+      </button>
+    );
+  };
 
   const body = (
     <div className={`form-shell${hasFooter ? ' form-shell--has-footer' : ''}`}>
@@ -1426,24 +1586,7 @@ export function FormRuntimeView({
           </h2>
           {headerControls.length > 0 ? (
             <div className="modal-header-actions">
-              {headerControls.map((hc) => {
-                if (!isControlVisible(hc, visualFrame.formMode)) return null;
-                const ht = resolveLocalizedText(hc.text, lan) || resolveLocalizedText(hc.label, lan);
-                return (
-                  <button
-                    key={hc.id}
-                    type="button"
-                    className="modal-header-link"
-                    disabled={busy || hc.enabled === false}
-                    onClick={() => {
-                      if (hc.linkFormId?.trim()) void openLinkedForm(hc.linkFormId.trim());
-                      else if (hc.onClick?.length) void runActions(hc.onClick);
-                    }}
-                  >
-                    {ht || hc.id}
-                  </button>
-                );
-              })}
+              {headerControls.map(renderHeaderActionBtn)}
             </div>
           ) : null}
         </div>
@@ -1460,24 +1603,7 @@ export function FormRuntimeView({
             />
           </h2>
           <div className="modal-header-actions">
-            {headerControls.map((hc) => {
-              if (!isControlVisible(hc, visualFrame.formMode)) return null;
-              const ht = resolveLocalizedText(hc.text, lan) || resolveLocalizedText(hc.label, lan);
-              return (
-                <button
-                  key={hc.id}
-                  type="button"
-                  className="modal-header-link"
-                  disabled={busy || hc.enabled === false}
-                  onClick={() => {
-                    if (hc.linkFormId?.trim()) void openLinkedForm(hc.linkFormId.trim());
-                    else if (hc.onClick?.length) void runActions(hc.onClick);
-                  }}
-                >
-                  {ht || hc.id}
-                </button>
-              );
-            })}
+            {headerControls.map(renderHeaderActionBtn)}
             <button
               type="button"
               className="modal-close"
@@ -1506,24 +1632,7 @@ export function FormRuntimeView({
             />
           </h2>
           <div className="modal-header-actions">
-            {headerControls.map((hc) => {
-              if (!isControlVisible(hc, visualFrame.formMode)) return null;
-              const ht = resolveLocalizedText(hc.text, lan) || resolveLocalizedText(hc.label, lan);
-              return (
-                <button
-                  key={hc.id}
-                  type="button"
-                  className="modal-header-link"
-                  disabled={busy || hc.enabled === false}
-                  onClick={() => {
-                    if (hc.linkFormId?.trim()) void openLinkedForm(hc.linkFormId.trim());
-                    else if (hc.onClick?.length) void runActions(hc.onClick);
-                  }}
-                >
-                  {ht || hc.id}
-                </button>
-              );
-            })}
+            {headerControls.map(renderHeaderActionBtn)}
             <button
               type="button"
               className="modal-close"
@@ -1862,7 +1971,7 @@ export function FormRuntimeView({
       </div>
       {hasFooter ? (
         <div className="form-footer" role="group" aria-label="Footer">
-          <div className="form-footer-inner stack">{footerNodes}</div>
+          <div className="form-footer-inner form-footer-inner--row">{footerNodes}</div>
         </div>
       ) : null}
     </div>

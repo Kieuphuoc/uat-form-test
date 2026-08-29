@@ -46,7 +46,7 @@ export function BotEmbedThread({ conversation, error, onBack, onOpenInfo }: Prop
           <span className="chat-thread-name">{conversation.title}</span>
           <span className="chat-thread-sub">
             {disabled
-              ? 'Chatbot đã tắt'
+              ? 'Chatbots đã tắt'
               : conversation.bot_description || 'AI nhúng — không lưu lịch sử'}
           </span>
         </button>
@@ -66,8 +66,8 @@ export function BotEmbedThread({ conversation, error, onBack, onOpenInfo }: Prop
       ) : (
         <div className="chat-bot-embed-empty">
           {disabled
-            ? 'Chatbot đã tắt. Bật lại trong Cài đặt để dùng.'
-            : 'Chưa có link nhúng cho chatbot này.'}
+            ? 'Chatbots đã tắt. Bật lại trong Cài đặt để dùng.'
+            : 'Chưa có link nhúng cho Chatbots này.'}
         </div>
       )}
     </div>

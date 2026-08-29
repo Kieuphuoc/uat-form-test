@@ -6,6 +6,7 @@ import { FormOuterChrome } from '../components/FormOuterChrome';
 import { FormRuntimeHost } from '../components/FormRuntimeView';
 import { useUiLan } from '../hooks/useUiLan';
 import { emitFormDebugLog, isFormDebugEnabled } from '../lib/formDebug';
+import { clearRuntimeFormCacheForSlug } from '../lib/formRuntimeCache';
 import { uiCopy } from '../lib/uiCopy';
 import { notifyParentAuthLost } from '../lib/embedAuthBridge';
 import type { ClientFormDto } from '../types/form';
@@ -56,6 +57,10 @@ export function RuntimePage() {
     authLostNotifiedRef.current = true;
     notifyParentAuthLost('missing');
   }, [status, jwt, mobile]);
+
+  useEffect(() => {
+    if (import.meta.env.DEV && slug) clearRuntimeFormCacheForSlug(slug);
+  }, [slug]);
 
   useEffect(() => {
     if (status !== 'ready' || !slug) return;

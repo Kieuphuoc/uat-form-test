@@ -1,7 +1,15 @@
-import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from 'react';
 import { Navigate, useNavigate, useOutletContext } from 'react-router-dom';
 import { notificationApi, type NotificationDevice } from '../api/notificationApi';
-import { botAvatarUrl, botTypeLabel, chatApi, isEmbedBot, normalizeBotType, type ChatAppSettings, type ChatMe, type DesktopNotificationMode } from '../api/chatApi';
+import { botAvatarUrl, botTypeLabel, chatApi, isEmbedBot, normalizeBotType, type ChatAppSettings, type ChatMe, type DesktopNotificationMode, type UnitChatPermissions, type UnitChatPermissionWrite } from '../api/chatApi';
 import { applyDesktopNotificationMode } from '../lib/chatTransport';
 import { navigateChat } from '../lib/chatNav';
 import { CHAT_THEMES, normalizeChatTheme } from '../lib/chatThemes';
@@ -47,6 +55,90 @@ function snapshot(settings: ChatAppSettings): string {
   });
 }
 
+function permissionWrite(perms: UnitChatPermissions): UnitChatPermissionWrite {
+  return {
+    can_use_ai_chat: perms.permission_items.ai_bots.some((item) => item.enabled),
+    can_use_zalo_chat: perms.permission_items.zalo_accounts.some((item) => item.enabled),
+    can_use_oa_chat: perms.can_use_oa_chat,
+    permission_items: perms.permission_items,
+  };
+}
+
+type SettingsSectionId =
+  | 'notifications'
+  | 'admin'
+  | 'default-perms'
+  | 'ai-bots'
+  | 'zalo'
+  | 'theme';
+
+const DEFAULT_SECTION_OPEN: Record<SettingsSectionId, boolean> = {
+  notifications: true,
+  admin: false,
+  'default-perms': false,
+  'ai-bots': true,
+  zalo: true,
+  theme: false,
+};
+
+function SettingsSection({
+  id,
+  title,
+  open,
+  onToggle,
+  children,
+}: {
+  id: SettingsSectionId;
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <section className={`chat-settings-section${open ? '' : ' is-collapsed'}`}>
+      <div className="chat-settings-section-head">
+        <button
+          type="button"
+          className="chat-settings-section-toggle"
+          aria-expanded={open}
+          aria-controls={`chat-settings-section-${id}`}
+          onClick={onToggle}
+        >
+          <span className="chat-settings-section-chevron" aria-hidden>
+            {open ? '▾' : '▸'}
+          </span>
+          <span className="chat-settings-section-title">{title}</span>
+        </button>
+      </div>
+      <div id={`chat-settings-section-${id}`} className="chat-settings-section-body" hidden={!open}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function togglePermissionItem(
+  perms: UnitChatPermissions,
+  group: 'ai_bots' | 'zalo_accounts',
+  id: string,
+  enabled: boolean,
+): UnitChatPermissions {
+  const permissionItems = {
+    ai_bots: perms.permission_items.ai_bots.map((item) =>
+      item.id === id && group === 'ai_bots' ? { ...item, enabled } : item,
+    ),
+    zalo_accounts: perms.permission_items.zalo_accounts.map((item) =>
+      item.id === id && group === 'zalo_accounts' ? { ...item, enabled } : item,
+    ),
+  };
+  return {
+    ...perms,
+    permission_items: permissionItems,
+    can_use_ai_chat: permissionItems.ai_bots.some((item) => item.enabled),
+    can_use_zalo_chat: permissionItems.zalo_accounts.some((item) => item.enabled),
+  };
+}
+
 export function ChatSettingsPage() {
   const { me, setMe } = useOutletContext<ShellContext>();
   const navigate = useNavigate();
@@ -63,6 +155,9 @@ export function ChatSettingsPage() {
   const [serverLoading, setServerLoading] = useState(true);
   const [draft, setDraft] = useState<ChatAppSettings>(() => emptySettings());
   const [dataSelectOpen, setDataSelectOpen] = useState(false);
+  const [defaultPerms, setDefaultPerms] = useState<UnitChatPermissions | null>(null);
+  const [defaultPermBusy, setDefaultPermBusy] = useState(false);
+  const [sectionOpen, setSectionOpen] = useState(DEFAULT_SECTION_OPEN);
   const lastSaved = useRef('');
   const lastSavedSettings = useRef<ChatAppSettings | null>(null);
 
@@ -135,6 +230,11 @@ export function ChatSettingsPage() {
       setDraft(lastSavedSettings.current);
       setDevices(registeredDevices);
       await applyDesktopNotificationMode(settings.desktop_notification);
+      try {
+        setDefaultPerms(await chatApi.getDefaultUnitChatPermissions());
+      } catch {
+        setDefaultPerms(null);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Không tải được cài đặt.');
     } finally {
@@ -146,6 +246,24 @@ export function ChatSettingsPage() {
     if (!isAdmin) return;
     void loadServerSettings();
   }, [isAdmin, loadServerSettings, unitId]);
+
+  const saveDefaultPerms = async (nextPerms: UnitChatPermissions) => {
+    if (!hasCompany || !defaultPerms) return;
+    const previous = defaultPerms;
+    setDefaultPerms(nextPerms);
+    setDefaultPermBusy(true);
+    setError(null);
+    try {
+      const saved = await chatApi.saveDefaultUnitChatPermissions(permissionWrite(nextPerms));
+      setDefaultPerms(saved);
+      setMessage('Đã lưu quyền mặc định công ty.');
+    } catch (e) {
+      setDefaultPerms(previous);
+      setError(e instanceof Error ? e.message : 'Không lưu được quyền mặc định.');
+    } finally {
+      setDefaultPermBusy(false);
+    }
+  };
 
   const saveNow = (next: ChatAppSettings) => {
     setDraft(next);
@@ -217,8 +335,12 @@ export function ChatSettingsPage() {
         <p className="chat-hint">Bấm icon bên phải tiêu đề để đổi công ty rồi cấu hình Chat.</p>
       )}
 
-      <section className="chat-settings-section">
-        <h3>Thông báo Chat</h3>
+      <SettingsSection
+        id="notifications"
+        title="Thông báo Chat"
+        open={sectionOpen.notifications}
+        onToggle={() => setSectionOpen((prev) => ({ ...prev, notifications: !prev.notifications }))}
+      >
         {serverLoading && <p className="chat-hint">Đang tải cấu hình…</p>}
         <label className="chat-settings-field">
           <span className="chat-settings-label-row">
@@ -279,10 +401,14 @@ export function ChatSettingsPage() {
             ))}
           </div>
         )}
-      </section>
+      </SettingsSection>
 
-      <section className="chat-settings-section">
-        <h3>Cấu hình quản trị</h3>
+      <SettingsSection
+        id="admin"
+        title="Cấu hình quản trị"
+        open={sectionOpen.admin}
+        onToggle={() => setSectionOpen((prev) => ({ ...prev, admin: !prev.admin }))}
+      >
         <p className="muted">
           Domain được khai báo sẽ chat không bị giới hạn 3 tin lần đầu. Thời hạn thu hồi tính bằng phút.
         </p>
@@ -333,10 +459,95 @@ export function ChatSettingsPage() {
             />
           </label>
         </div>
-      </section>
+      </SettingsSection>
 
-      <section className="chat-settings-section">
-        <h3>AI Chatbot</h3>
+      <SettingsSection
+        id="default-perms"
+        title="Quyền Chatbots mặc định"
+        open={sectionOpen['default-perms']}
+        onToggle={() =>
+          setSectionOpen((prev) => ({ ...prev, 'default-perms': !prev['default-perms'] }))
+        }
+      >
+        <p className="muted">
+          Áp cho mọi người dùng chưa được phân quyền riêng. Admin công ty vẫn gán từng người ở Danh bạ.
+        </p>
+        {defaultPerms ? (
+          <>
+            <div className="chat-permission-list">
+              <strong>AI Chatbots</strong>
+              {defaultPerms.permission_items.ai_bots.length === 0 && (
+                <p className="chat-hint">Chưa có AI Chatbots trong cấu hình công ty.</p>
+              )}
+              {defaultPerms.permission_items.ai_bots.map((item) => (
+                <label key={item.id} className="chat-settings-toggle">
+                  <input
+                    type="checkbox"
+                    checked={item.enabled}
+                    disabled={disabled || defaultPermBusy || item.active === false}
+                    onChange={(e) =>
+                      void saveDefaultPerms(
+                        togglePermissionItem(defaultPerms, 'ai_bots', item.id, e.target.checked),
+                      )
+                    }
+                  />
+                  <span>
+                    <strong>{item.name || item.id}</strong>
+                    <small>{item.id}{item.active === false ? ' · Đã tắt trong cấu hình' : ''}</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <div className="chat-permission-list">
+              <strong>Tài khoản Zalo</strong>
+              {defaultPerms.permission_items.zalo_accounts.length === 0 && (
+                <p className="chat-hint">Chưa có tài khoản Zalo trong cấu hình công ty.</p>
+              )}
+              {defaultPerms.permission_items.zalo_accounts.map((item) => (
+                <label key={item.id} className="chat-settings-toggle">
+                  <input
+                    type="checkbox"
+                    checked={item.enabled}
+                    disabled={disabled || defaultPermBusy || item.active === false}
+                    onChange={(e) =>
+                      void saveDefaultPerms(
+                        togglePermissionItem(defaultPerms, 'zalo_accounts', item.id, e.target.checked),
+                      )
+                    }
+                  />
+                  <span>
+                    <strong>{item.name || item.id}</strong>
+                    <small>{item.id}{item.active === false ? ' · Đã tắt trong cấu hình' : ''}</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <label className="chat-settings-toggle">
+              <input
+                type="checkbox"
+                checked={defaultPerms.can_use_oa_chat}
+                disabled={disabled || defaultPermBusy}
+                onChange={(e) =>
+                  void saveDefaultPerms({ ...defaultPerms, can_use_oa_chat: e.target.checked })
+                }
+              />
+              <span>
+                <strong>OA Chatbots</strong>
+                <small>Hiện /chat/oa.</small>
+              </span>
+            </label>
+          </>
+        ) : (
+          !serverLoading && <p className="chat-hint">Không tải được quyền mặc định công ty.</p>
+        )}
+      </SettingsSection>
+
+      <SettingsSection
+        id="ai-bots"
+        title="AI Chatbots"
+        open={sectionOpen['ai-bots']}
+        onToggle={() => setSectionOpen((prev) => ({ ...prev, 'ai-bots': !prev['ai-bots'] }))}
+      >
         <p className="muted">
           Bấm bot để sửa tên, link, mô tả. Chỉ checkbox mới bật/tắt. Bot tắt ẩn khỏi Danh bạ; hội
           thoại cũ vẫn mở được. AI RAG / Files / FAQ hỏi qua FolderId trên File.Api. AI nhúng chỉ
@@ -344,7 +555,9 @@ export function ChatSettingsPage() {
         </p>
 
         {draft.ai_chatbots.length === 0 && (
-          <p className="chat-hint">Chưa có chatbot. Bấm Thêm chatbot để khai báo RAG, Files, FAQ hoặc AI nhúng.</p>
+          <p className="chat-hint">
+            Chưa có Chatbots. Bấm Thêm Chatbots để khai báo RAG, Files, FAQ hoặc AI nhúng.
+          </p>
         )}
 
         <div className="chat-bot-list">
@@ -359,7 +572,7 @@ export function ChatSettingsPage() {
                   className="chat-bot-row-main"
                   disabled={disabled}
                   onClick={() => navigateChat(navigate, `/chat/settings/bots/${encodeURIComponent(id)}`)}
-                  title="Sửa chatbot"
+                  title="Sửa Chatbots"
                 >
                   <ChatAvatar
                     name={bot.title || 'AI'}
@@ -368,7 +581,7 @@ export function ChatSettingsPage() {
                   />
                   <span className="chat-bot-row-meta">
                     <strong>
-                      {bot.title || bot.folder_id || 'Chatbot'}
+                      {bot.title || bot.folder_id || 'Chatbots'}
                       <span className={`chat-bot-type-tag chat-bot-type-tag--${normalizeBotType(bot.type)}`}>
                         {botTypeLabel(bot)}
                       </span>
@@ -401,12 +614,16 @@ export function ChatSettingsPage() {
           disabled={disabled}
           onClick={() => navigateChat(navigate, '/chat/settings/bots/new')}
         >
-          Thêm chatbot
+          Thêm Chatbots
         </button>
-      </section>
+      </SettingsSection>
 
-      <section className="chat-settings-section">
-        <h3>Tài khoản Zalo</h3>
+      <SettingsSection
+        id="zalo"
+        title="Tài khoản Zalo"
+        open={sectionOpen.zalo}
+        onToggle={() => setSectionOpen((prev) => ({ ...prev, zalo: !prev.zalo }))}
+      >
         <p className="muted">
           Danh sách lấy từ Zalo Admin API (/api/accounts). Bật theo từng công ty thì hiện trang Zalo trên header.
           Công ty chưa khai báo mặc định tắt.
@@ -444,10 +661,14 @@ export function ChatSettingsPage() {
             );
           })}
         </div>
-      </section>
+      </SettingsSection>
 
-      <section className="chat-settings-section">
-        <h3>Giao diện tin nhắn</h3>
+      <SettingsSection
+        id="theme"
+        title="Giao diện tin nhắn"
+        open={sectionOpen.theme}
+        onToggle={() => setSectionOpen((prev) => ({ ...prev, theme: !prev.theme }))}
+      >
         <p className="muted">
           Áp dụng cho cả công ty: màu tin của bạn, tin người khác, nền khung chat.
         </p>
@@ -472,7 +693,7 @@ export function ChatSettingsPage() {
             );
           })}
         </div>
-      </section>
+      </SettingsSection>
 
       {error && <div className="chat-error">{error}</div>}
       {message && <div className="chat-hint">{message}</div>}

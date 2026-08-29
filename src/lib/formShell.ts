@@ -19,6 +19,7 @@ export type OpenShellTarget =
 export type FormChromeAction = {
   id: string;
   label: string;
+  icon?: string;
 };
 
 export type FormChromeState = {

@@ -84,6 +84,7 @@ export type DesktopNotificationMode = 'badge' | 'chrome' | 'off';
 export type ChatMe = {
   user_id: number;
   is_admin: boolean;
+  is_admin_unit?: boolean;
   unit_id?: number;
   nickname?: string | null;
   email?: string | null;
@@ -91,6 +92,11 @@ export type ChatMe = {
   desktop_notification?: DesktopNotificationMode | null;
   ai_chatbot_enabled?: boolean;
   zalo_enabled?: boolean;
+  can_use_ai_chat?: boolean;
+  can_use_zalo_chat?: boolean;
+  can_use_oa_chat?: boolean;
+  can_manage_chat_permissions?: boolean;
+  can_manage_chat_permission_default?: boolean;
   chat_theme?: string | null;
   unit?: {
     unit_id: number;
@@ -331,7 +337,39 @@ export type ChatUser = {
   phone?: string | null;
   avatar_id?: string | null;
   department?: string | null;
+  is_admin?: boolean;
+  is_admin_unit?: boolean;
 };
+
+export type UnitChatPermissions = {
+  unit_id: number;
+  user_id: number;
+  can_use_ai_chat: boolean;
+  can_use_zalo_chat: boolean;
+  can_use_oa_chat: boolean;
+  permission_items: UnitChatPermissionItems;
+  available_ai_bots: UnitChatPermissionItem[];
+  available_zalo_accounts: UnitChatPermissionItem[];
+  source: 'user' | 'default' | 'none' | string;
+  is_explicit: boolean;
+};
+
+export type UnitChatPermissionItems = {
+  ai_bots: UnitChatPermissionItem[];
+  zalo_accounts: UnitChatPermissionItem[];
+};
+
+export type UnitChatPermissionItem = {
+  id: string;
+  name?: string | null;
+  enabled: boolean;
+  active?: boolean;
+};
+
+export type UnitChatPermissionWrite = Pick<
+  UnitChatPermissions,
+  'can_use_ai_chat' | 'can_use_zalo_chat' | 'can_use_oa_chat' | 'permission_items'
+>;
 
 export type ContactItem = ChatUser & {
   relation: string;
@@ -619,6 +657,34 @@ export const chatApi = {
     chatFetch<ContactRelation>('/api/chat/contacts/unblock', {
       method: 'POST',
       body: JSON.stringify({ peer_user_id: peerUserId }),
+    }),
+
+  getUnitChatPermissions: (userId: number) =>
+    chatFetch<UnitChatPermissions>(`/api/unit/users/${userId}/chat-permissions`),
+
+  saveUnitChatPermissions: (
+    userId: number,
+    body: UnitChatPermissionWrite,
+  ) =>
+    chatFetch<UnitChatPermissions>(`/api/unit/users/${userId}/chat-permissions`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  resetUnitChatPermissions: (userId: number) =>
+    chatFetch<UnitChatPermissions>(`/api/unit/users/${userId}/chat-permissions`, {
+      method: 'DELETE',
+    }),
+
+  getDefaultUnitChatPermissions: () =>
+    chatFetch<UnitChatPermissions>('/api/unit/chat-permissions/default'),
+
+  saveDefaultUnitChatPermissions: (
+    body: UnitChatPermissionWrite,
+  ) =>
+    chatFetch<UnitChatPermissions>('/api/unit/chat-permissions/default', {
+      method: 'PUT',
+      body: JSON.stringify(body),
     }),
 };
 
