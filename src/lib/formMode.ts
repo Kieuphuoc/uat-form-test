@@ -1,5 +1,14 @@
 import type { ClientFormDto, FormControlDef, FormMode } from '../types/form';
+import { getJwt, decodeJwtPayload } from '../api/client';
 import { isFormDebugEnabled } from './formDebug';
+
+function isJwtAdmin(): boolean {
+  const jwt = getJwt();
+  if (!jwt) return false;
+  const claims = decodeJwtPayload(jwt);
+  const raw = claims?.is_admin;
+  return raw === true || raw === '1' || raw === 'true';
+}
 
 /** Chuẩn hóa formMode; alias create/add → new, update → edit. Mặc định view. */
 export function normalizeFormMode(raw?: string | null): FormMode {
@@ -57,6 +66,7 @@ export function isControlVisible(c: FormControlDef, formMode: FormMode): boolean
   if (c.visible === false) return false;
   const when = (c.visibleWhen ?? '').trim().toLowerCase();
   if (when === 'debug' && !isFormDebugEnabled()) return false;
+  if (when === 'admin' && !isJwtAdmin()) return false;
   const modes = c.visibleModes;
   if (!modes?.length) return true;
   return modes.some((m) => normalizeFormMode(m) === formMode);

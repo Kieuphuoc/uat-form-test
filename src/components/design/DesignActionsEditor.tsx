@@ -14,12 +14,14 @@ import type { FormDocument } from '../../types/formDoc';
 const ACTION_TYPES = [
   'sqlQuery',
   'sqlExec',
+  'httpCall',
   'setValue',
   'validate',
   'showForm',
   'getGps',
   'scanQr',
   'openShell',
+  'openUrl',
   'closeForm',
   'message',
 ] as const;
@@ -49,6 +51,8 @@ const ACTION_TYPE_HINTS: Record<string, string> = {
     'sqlQuery: chạy SELECT → đổ targetDataset. Bật mock để dùng mockRows (không gọi SQL). Params: control.* / state.* / session.userId|clientId|lan. Gắn vào onLoad / onChange / optionsAction.',
   sqlExec:
     'sqlExec: INSERT/UPDATE/DELETE hoặc EXEC procedure. Bật mock để bỏ qua SQL (dev). Params từ control.* / state.* / session.userId|clientId|lan.',
+  httpCall:
+    'httpCall: REST qua Form.Api (BE→BE). connection, method, path, query[], body/bodyFields, responseItems, responseMeta, targetDataset.',
   setValue:
     'setValue: gán control.* / state.* từ map values (vd row.id, session.lan). Bật mock để ưu tiên mockValues thay vì map thật.',
   validate: 'validate: kiểm rules (required…). Lỗi → dừng chuỗi action, hiện message.',
@@ -60,6 +64,8 @@ const ACTION_TYPE_HINTS: Record<string, string> = {
     'scanQr: client-only — xin camera quét QR (web) hoặc báo AppShell quét (native). Mở form qrscan với nội dung đã quét.',
   openShell:
     'openShell: client-only — bảo mobile AppShell đè Chart/AI Agent/Chat/Files/Docs/Monitor/Cấu hình/Log. mode = target. Runtime browser: toast.',
+  openUrl:
+    'openUrl: client-only — chuyển trang. url = absolute hoặc file-web:/notifications?tab=mail',
   closeForm:
     'closeForm: đóng modal/sheet/fullscreen, trả returnValues theo returnMap về form cha.',
   message: 'message: toast thông báo (message + level info|success|error).',

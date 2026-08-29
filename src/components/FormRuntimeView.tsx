@@ -94,6 +94,7 @@ import {
   FORM_CHROME_REQUEST_MSG,
   FORM_HEADER_ACTION_MSG,
   requestOpenShell,
+  requestOpenUrl,
 } from '../lib/formShell';
 
 type Toast = { text: string; level: string } | null;
@@ -666,6 +667,18 @@ export function FormRuntimeView({
           if ((meta?.type ?? '').trim().toLowerCase() === 'openshell') {
             const target = (meta?.mode || meta?.formId || '').trim();
             const ok = requestOpenShell(target);
+            if (!ok) {
+              showToast(uiCopy(lan, 'actionFailed'), 'error');
+              setStack(frames);
+              return;
+            }
+            working = frames[frames.length - 1]!;
+            continue;
+          }
+
+          if ((meta?.type ?? '').trim().toLowerCase() === 'openurl') {
+            const target = (meta?.url || meta?.mode || '').trim();
+            const ok = requestOpenUrl(target);
             if (!ok) {
               showToast(uiCopy(lan, 'actionFailed'), 'error');
               setStack(frames);

@@ -73,6 +73,26 @@ export function requestOpenShell(target: string): OpenShellTarget | null {
   return normalized;
 }
 
+/** Resolve file-web: prefix or absolute URL for openUrl action. */
+export function resolveExternalUrl(raw: string): string {
+  const v = raw.trim();
+  if (!v) return '';
+  if (v.startsWith('file-web:')) {
+    const base =
+      (import.meta.env.VITE_FILE_WEB_URL as string | undefined)?.trim() ||
+      'https://portal.arito.net';
+    return base.replace(/\/$/, '') + v.slice('file-web:'.length);
+  }
+  return v;
+}
+
+export function requestOpenUrl(raw: string): boolean {
+  const url = resolveExternalUrl(raw);
+  if (!url) return false;
+  window.location.assign(url);
+  return true;
+}
+
 export function postFormBack(): void {
   const msg = { type: FORM_BACK_MSG };
   try {

@@ -148,6 +148,7 @@ export type ClientActionMeta = {
   formId?: string;
   mode?: string;
   formMode?: string;
+  url?: string;
 };
 
 export type FormListColumnDef = {
