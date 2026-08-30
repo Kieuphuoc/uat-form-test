@@ -95,6 +95,7 @@ export type ChatMe = {
   can_use_ai_chat?: boolean;
   can_use_zalo_chat?: boolean;
   can_use_oa_chat?: boolean;
+  assigned_oa_id?: string | null;
   can_manage_chat_permissions?: boolean;
   can_manage_chat_permission_default?: boolean;
   chat_theme?: string | null;
@@ -208,13 +209,80 @@ export type ChatAppSettings = {
   ai_chatbots: ChatBotCatalogItem[];
   zalo_enabled: boolean;
   zalo_accounts: ChatZaloAccount[];
+  oa_id?: string | null;
+  oa_setting?: ChatOaSetting | null;
+  oa_catalog?: ChatOaCatalogItem[];
   chat_theme: string;
 };
+
+export type ChatOaSetting = {
+  oa_id: string;
+  default_bot_folder_id?: string | null;
+  notify_user_ids: number[];
+  notify_channels: string[];
+};
+
+export type ChatOaCatalogItem = {
+  oa_id: string;
+  name?: string | null;
+  configured?: boolean;
+  has_token?: boolean;
+  expires_at?: string | null;
+};
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+}
+
+function readString(row: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const v = row[key];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return '';
+}
+
+function normalizeOaCatalog(raw: unknown): ChatOaCatalogItem[] {
+  if (!Array.isArray(raw)) return [];
+  const items: ChatOaCatalogItem[] = [];
+  for (const entry of raw) {
+    const row = asRecord(entry);
+    if (!row) continue;
+    const oaId = readString(row, 'oa_id', 'oaId');
+    if (!oaId) continue;
+    items.push({
+      oa_id: oaId,
+      name: readString(row, 'name', 'title') || null,
+      configured: row.configured === true,
+      has_token: row.has_token === true || row.hasRefreshToken === true || row.has_refresh_token === true,
+      expires_at:
+        typeof row.expires_at === 'string'
+          ? row.expires_at
+          : typeof row.expiresAt === 'string'
+            ? row.expiresAt
+            : null,
+    });
+  }
+  return items;
+}
+
+function normalizeAppSettings(settings: ChatAppSettings): ChatAppSettings {
+  return {
+    ...settings,
+    oa_catalog: normalizeOaCatalog(settings.oa_catalog),
+  };
+}
 
 export type ChatZaloAccount = {
   id: string;
   name: string;
   active: boolean;
+};
+
+export type ChatBotSuggestedQuestion = {
+  text: string;
+  /** Null / trống = trả lời bằng bot hiện tại. */
+  target_folder_id?: string | null;
 };
 
 export type ChatBotCatalogItem = {
@@ -226,6 +294,7 @@ export type ChatBotCatalogItem = {
   type?: ChatBotType | string | null;
   embed_url?: string | null;
   auth_mode?: ChatBotAuthMode | string | null;
+  suggested_questions?: ChatBotSuggestedQuestion[] | null;
 };
 
 export function isEmbedBot(
@@ -365,6 +434,13 @@ export type UnitChatPermissionItem = {
   enabled: boolean;
   active?: boolean;
 };
+
+/** Bot/account đang bật trong cấu hình công ty — dùng khi hiện checkbox phân quyền. */
+export function activeChatPermissionItems(
+  items: UnitChatPermissionItem[] | null | undefined,
+): UnitChatPermissionItem[] {
+  return (items ?? []).filter((item) => item.active !== false);
+}
 
 export type UnitChatPermissionWrite = Pick<
   UnitChatPermissions,
@@ -550,13 +626,23 @@ export const chatApi = {
     });
   },
 
-  getAdminSettings: () => chatFetch<ChatAppSettings>('/api/chat/admin/settings'),
+  getAdminSettings: () =>
+    chatFetch<ChatAppSettings>('/api/chat/admin/settings').then(normalizeAppSettings),
 
   saveAdminSettings: (settings: ChatAppSettings) =>
     chatFetch<ChatAppSettings>('/api/chat/admin/settings', {
       method: 'PUT',
       body: JSON.stringify(settings),
-    }),
+    }).then(normalizeAppSettings),
+
+  listOaTargets: (oaId: string, zaloType = 'id') => {
+    const qs = new URLSearchParams();
+    if (oaId) qs.set('oa_id', oaId);
+    qs.set('zalo_type', zaloType);
+    return chatFetch<{ items: { user_id: number; zalo_id?: string; zalo_type?: string }[] }>(
+      `/api/chat/admin/oa-targets?${qs.toString()}`,
+    );
+  },
 
   uploadBotAvatar: (file: File) => {
     const body = new FormData();

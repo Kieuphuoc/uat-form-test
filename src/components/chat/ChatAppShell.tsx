@@ -17,7 +17,7 @@ import {
   watchZaloSource,
 } from '../../lib/chatTransport';
 import { resolveZaloAccount } from '../../lib/zaloAccount';
-import { IconBell, IconChat, IconDatabase, IconLogout, IconSettings, IconUsers, IconZalo } from '../AppIcons';
+import { IconBell, IconChat, IconDatabase, IconLogout, IconSettings, IconZalo } from '../AppIcons';
 import { ChatAvatar } from './ChatAvatar';
 import { DataSelectionDialog } from './DataSelectionDialog';
 
@@ -41,7 +41,7 @@ function headerSelectPath(id: string): string | null {
 }
 
 /**
- * Shell kiểu Dash: nền #f5f7fa, header navy #001854, nav Chat / Danh bạ / Zalo.
+ * Shell kiểu Dash: nền #f5f7fa, header navy #001854, nav Chat / Zalo / OA.
  * Mobile embed: ẩn header web — menu Chat/Danh bạ/Cài đặt nằm trên header native.
  * `hidden-navbar`: ẩn header/title/user, giữ layout desktop.
  */
@@ -213,16 +213,12 @@ export function ChatAppShell() {
           </Link>
 
           <nav className="chat-shell-nav" aria-label="Chat">
-            <NavLink to="/chat" end className={navClass}>
+            <NavLink to="/chat" className={() => navClass({ isActive: chatAreaKey === 'chat' })}>
               <IconChat size={17} />
               <span>Chat</span>
             </NavLink>
-            <NavLink to="/chat/contacts" className={navClass}>
-              <IconUsers size={17} />
-              <span>Danh bạ</span>
-            </NavLink>
             {zaloChatEnabled ? (
-              <NavLink to="/chat/zalo" end className={navClass}>
+              <NavLink to="/chat/zalo" className={() => navClass({ isActive: chatAreaKey === 'zalo' })}>
                 <IconZalo size={17} />
                 <span>Zalo</span>
                 {zaloBadge > 0 && (
@@ -231,7 +227,7 @@ export function ChatAppShell() {
               </NavLink>
             ) : null}
             {oaChatEnabled ? (
-              <NavLink to="/chat/oa" className={navClass}>
+              <NavLink to="/chat/oa" className={() => navClass({ isActive: chatAreaKey === 'oa' })}>
                 <IconZalo size={17} />
                 <span>OA</span>
               </NavLink>

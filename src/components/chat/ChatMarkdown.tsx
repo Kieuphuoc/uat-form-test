@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { renderTextWithLinks } from '../../lib/linkifyText';
 import { IconChevronsDown, IconChevronsUp, IconClose, IconMaximize } from '../AppIcons';
 
@@ -204,15 +204,17 @@ export const ChatMarkdown = memo(function ChatMarkdown({ text }: { text: string 
 
 export const ChatMarkdownClamped = memo(function ChatMarkdownClamped({
   text,
+  maxLines = AI_REPLY_MAX_LINES,
   onOpenLarge,
 }: {
   text: string;
+  maxLines?: number;
   onOpenLarge: (text: string) => void;
 }) {
   const clipRef = useRef<HTMLDivElement | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(
-    () => text.replace(/\r\n/g, '\n').split('\n').length > AI_REPLY_MAX_LINES,
+    () => text.replace(/\r\n/g, '\n').split('\n').length > maxLines,
   );
 
   useLayoutEffect(() => {
@@ -220,7 +222,7 @@ export const ChatMarkdownClamped = memo(function ChatMarkdownClamped({
     const el = clipRef.current;
     if (!el) return;
     setOverflows(el.scrollHeight > el.clientHeight + 1);
-  }, [text, expanded]);
+  }, [text, expanded, maxLines]);
 
   return (
     <div className="chat-md-clip-wrap">
@@ -229,6 +231,7 @@ export const ChatMarkdownClamped = memo(function ChatMarkdownClamped({
         className={`chat-md-clip${expanded ? '' : ' chat-md-clip--clamp'}${
           !expanded && overflows ? ' chat-md-clip--fade' : ''
         }`}
+        style={!expanded ? ({ '--chat-md-clamp-lines': maxLines } as CSSProperties) : undefined}
       >
         <ChatMarkdown text={text} />
       </div>

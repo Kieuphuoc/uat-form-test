@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { chatApi, chatAvatarUrl } from '../../api/chatApi';
 
 type Props = {
@@ -23,21 +23,17 @@ function initials(name?: string | null): string {
 const blobUrls = new Map<string, string>();
 const inflight = new Map<string, Promise<string>>();
 
-/**
- * Blob URL của file chat, cache theo `${conversationId}:${fileId}:${size}` để list, header và panel
- * thông tin dùng chung một lần tải; đổi ảnh sinh file_id mới nên cache tự hết hiệu lực.
- * `size` > 0 lấy bản resize sẵn của File.Api (Cache-Control của Chat.Api giữ tiếp ở disk cache).
- */
-export function useChatFileUrl(
-  conversationId?: number | null,
-  fileId?: string | null,
-  size = 0,
+/** Cache blob URL theo key; /chat và OA dùng chung. */
+export function useFileBlobUrl(
+  key: string | null,
+  load: (() => Promise<Blob>) | null,
 ): string | null {
-  const key = conversationId && fileId ? `${conversationId}:${fileId}:${size}` : null;
   const [url, setUrl] = useState<string | null>(() => (key ? blobUrls.get(key) ?? null : null));
+  const loadRef = useRef(load);
+  loadRef.current = load;
 
   useEffect(() => {
-    if (!key || !conversationId || !fileId) {
+    if (!key || !loadRef.current) {
       setUrl(null);
       return;
     }
@@ -50,8 +46,8 @@ export function useChatFileUrl(
     let disposed = false;
     let request = inflight.get(key);
     if (!request) {
-      request = chatApi
-        .attachmentBlob(conversationId, fileId, size)
+      request = loadRef
+        .current()
         .then((blob) => {
           const objectUrl = URL.createObjectURL(blob);
           blobUrls.set(key, objectUrl);
@@ -72,9 +68,26 @@ export function useChatFileUrl(
     return () => {
       disposed = true;
     };
-  }, [key, conversationId, fileId, size]);
+  }, [key]);
 
   return url;
+}
+
+/**
+ * Blob URL của file chat, cache theo `${conversationId}:${fileId}:${size}`.
+ */
+export function useChatFileUrl(
+  conversationId?: number | null,
+  fileId?: string | null,
+  size = 0,
+): string | null {
+  const key = conversationId && fileId ? `${conversationId}:${fileId}:${size}` : null;
+  return useFileBlobUrl(
+    key,
+    conversationId && fileId
+      ? () => chatApi.attachmentBlob(conversationId, fileId, size)
+      : null,
+  );
 }
 
 /** Cạnh dài bản thumbnail dùng cho avatar (File.Api sinh sẵn khi upload). */

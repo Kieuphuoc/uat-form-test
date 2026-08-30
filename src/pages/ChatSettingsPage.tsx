@@ -9,7 +9,7 @@ import {
 } from 'react';
 import { Navigate, useNavigate, useOutletContext } from 'react-router-dom';
 import { notificationApi, type NotificationDevice } from '../api/notificationApi';
-import { botAvatarUrl, botTypeLabel, chatApi, isEmbedBot, normalizeBotType, type ChatAppSettings, type ChatMe, type DesktopNotificationMode, type UnitChatPermissions, type UnitChatPermissionWrite } from '../api/chatApi';
+import { activeChatPermissionItems, botAvatarUrl, botTypeLabel, chatApi, isEmbedBot, normalizeBotType, type ChatAppSettings, type ChatMe, type DesktopNotificationMode, type UnitChatPermissions, type UnitChatPermissionWrite } from '../api/chatApi';
 import { applyDesktopNotificationMode } from '../lib/chatTransport';
 import { navigateChat } from '../lib/chatNav';
 import { CHAT_THEMES, normalizeChatTheme } from '../lib/chatThemes';
@@ -36,6 +36,9 @@ const emptySettings = (unitId = 0): ChatAppSettings => ({
   ai_chatbots: [],
   zalo_enabled: false,
   zalo_accounts: [],
+  oa_id: null,
+  oa_setting: null,
+  oa_catalog: [],
   chat_theme: 'default',
 });
 
@@ -51,13 +54,15 @@ function snapshot(settings: ChatAppSettings): string {
     ai_chatbots: settings.ai_chatbots ?? [],
     zalo_enabled: !!settings.zalo_enabled,
     zalo_accounts: settings.zalo_accounts ?? [],
+    oa_id: settings.oa_id ?? null,
+    oa_setting: settings.oa_setting ?? null,
     chat_theme: settings.chat_theme,
   });
 }
 
 function permissionWrite(perms: UnitChatPermissions): UnitChatPermissionWrite {
   return {
-    can_use_ai_chat: perms.permission_items.ai_bots.some((item) => item.enabled),
+    can_use_ai_chat: activeChatPermissionItems(perms.permission_items.ai_bots).some((item) => item.enabled),
     can_use_zalo_chat: perms.permission_items.zalo_accounts.some((item) => item.enabled),
     can_use_oa_chat: perms.can_use_oa_chat,
     permission_items: perms.permission_items,
@@ -70,6 +75,7 @@ type SettingsSectionId =
   | 'default-perms'
   | 'ai-bots'
   | 'zalo'
+  | 'oa'
   | 'theme';
 
 const DEFAULT_SECTION_OPEN: Record<SettingsSectionId, boolean> = {
@@ -78,6 +84,7 @@ const DEFAULT_SECTION_OPEN: Record<SettingsSectionId, boolean> = {
   'default-perms': false,
   'ai-bots': true,
   zalo: true,
+  oa: true,
   theme: false,
 };
 
@@ -134,7 +141,7 @@ function togglePermissionItem(
   return {
     ...perms,
     permission_items: permissionItems,
-    can_use_ai_chat: permissionItems.ai_bots.some((item) => item.enabled),
+    can_use_ai_chat: activeChatPermissionItems(permissionItems.ai_bots).some((item) => item.enabled),
     can_use_zalo_chat: permissionItems.zalo_accounts.some((item) => item.enabled),
   };
 }
@@ -157,6 +164,7 @@ export function ChatSettingsPage() {
   const [dataSelectOpen, setDataSelectOpen] = useState(false);
   const [defaultPerms, setDefaultPerms] = useState<UnitChatPermissions | null>(null);
   const [defaultPermBusy, setDefaultPermBusy] = useState(false);
+  const [oaTargets, setOaTargets] = useState<{ user_id: number; zalo_type?: string }[]>([]);
   const [sectionOpen, setSectionOpen] = useState(DEFAULT_SECTION_OPEN);
   const lastSaved = useRef('');
   const lastSavedSettings = useRef<ChatAppSettings | null>(null);
@@ -178,21 +186,32 @@ export function ChatSettingsPage() {
         lastSavedSettings.current = saved;
         setDraft(saved);
         const effective = await applyDesktopNotificationMode(saved.desktop_notification);
-        setMe?.((prev) =>
-          prev
-            ? {
-                ...prev,
-                desktop_notification: saved.desktop_notification,
-                ai_chatbot_enabled: saved.ai_chatbot_enabled,
-                zalo_enabled: saved.zalo_enabled,
-                chat_theme: saved.chat_theme,
-              }
-            : prev,
-        );
+        try {
+          const nextMe = await chatApi.me();
+          setMe?.(nextMe);
+        } catch {
+          setMe?.((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  desktop_notification: saved.desktop_notification,
+                  ai_chatbot_enabled: saved.ai_chatbot_enabled,
+                  zalo_enabled: saved.zalo_enabled,
+                  chat_theme: saved.chat_theme,
+                  assigned_oa_id: saved.oa_id ?? null,
+                }
+              : prev,
+          );
+        }
         if (saved.desktop_notification === 'chrome' && effective !== 'chrome') {
           setMessage('Đã lưu. Trình duyệt chưa cho phép thông báo — tab này dùng badge.');
         } else {
           setMessage('Đã lưu cài đặt.');
+        }
+        try {
+          setDefaultPerms(await chatApi.getDefaultUnitChatPermissions());
+        } catch {
+          // Quyền mặc định tải lại sau khi catalog AI đổi; lỗi không rollback cài đặt.
         }
       } catch (e) {
         lastSaved.current = previousKey;
@@ -246,6 +265,29 @@ export function ChatSettingsPage() {
     if (!isAdmin) return;
     void loadServerSettings();
   }, [isAdmin, loadServerSettings, unitId]);
+
+  useEffect(() => {
+    const oaId = draft.oa_id?.trim();
+    if (!oaId) {
+      setOaTargets([]);
+      return;
+    }
+    let cancelled = false;
+    void Promise.all([
+      chatApi.listOaTargets(oaId, 'id').catch(() => ({ items: [] })),
+      chatApi.listOaTargets(oaId, 'conversation').catch(() => ({ items: [] })),
+    ]).then(([idRows, convRows]) => {
+      if (cancelled) return;
+      const map = new Map<number, { user_id: number; zalo_type?: string }>();
+      for (const row of [...(idRows.items ?? []), ...(convRows.items ?? [])]) {
+        if (row.user_id > 0) map.set(row.user_id, row);
+      }
+      setOaTargets([...map.values()]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [draft.oa_id]);
 
   const saveDefaultPerms = async (nextPerms: UnitChatPermissions) => {
     if (!hasCompany || !defaultPerms) return;
@@ -311,6 +353,7 @@ export function ChatSettingsPage() {
   if (!isAdmin) return <Navigate to="/chat" replace />;
 
   const disabled = saving || serverLoading || !hasCompany;
+  const visibleDefaultAiBots = activeChatPermissionItems(defaultPerms?.permission_items.ai_bots);
 
   return (
     <div className="chat-page-card chat-settings">
@@ -476,15 +519,19 @@ export function ChatSettingsPage() {
           <>
             <div className="chat-permission-list">
               <strong>AI Chatbots</strong>
-              {defaultPerms.permission_items.ai_bots.length === 0 && (
-                <p className="chat-hint">Chưa có AI Chatbots trong cấu hình công ty.</p>
+              {visibleDefaultAiBots.length === 0 && (
+                <p className="chat-hint">
+                  {defaultPerms.permission_items.ai_bots.length === 0
+                    ? 'Chưa có AI Chatbots trong cấu hình công ty.'
+                    : 'Không có AI Chatbots đang bật.'}
+                </p>
               )}
-              {defaultPerms.permission_items.ai_bots.map((item) => (
+              {visibleDefaultAiBots.map((item) => (
                 <label key={item.id} className="chat-settings-toggle">
                   <input
                     type="checkbox"
                     checked={item.enabled}
-                    disabled={disabled || defaultPermBusy || item.active === false}
+                    disabled={disabled || defaultPermBusy}
                     onChange={(e) =>
                       void saveDefaultPerms(
                         togglePermissionItem(defaultPerms, 'ai_bots', item.id, e.target.checked),
@@ -493,7 +540,7 @@ export function ChatSettingsPage() {
                   />
                   <span>
                     <strong>{item.name || item.id}</strong>
-                    <small>{item.id}{item.active === false ? ' · Đã tắt trong cấu hình' : ''}</small>
+                    <small>{item.id}</small>
                   </span>
                 </label>
               ))}
@@ -661,6 +708,160 @@ export function ChatSettingsPage() {
             );
           })}
         </div>
+      </SettingsSection>
+
+      <SettingsSection
+        id="oa"
+        title="Zalo OA"
+        open={sectionOpen.oa}
+        onToggle={() => setSectionOpen((prev) => ({ ...prev, oa: !prev.oa }))}
+      >
+        <p className="muted">
+          AritoID admin gán 1 OA cho công ty. Nhiều công ty được chọn cùng OA thì dùng chung inbox.
+          AI mặc định và danh sách nhận thông báo gắn theo OA. Danh sách OA lấy từ Notification.Api
+          (ZaloOAAccount:OaIds) — không khai báo lại trên Chat.
+        </p>
+        <label className="chat-settings-field">
+          <span>OA của công ty</span>
+          <select
+            value={draft.oa_id ?? ''}
+            disabled={disabled}
+            onChange={(e) => {
+              const nextId = e.target.value || null;
+              const same = nextId === (lastSavedSettings.current?.oa_id ?? null);
+              saveNow({
+                ...draft,
+                oa_id: nextId,
+                oa_setting: same
+                  ? lastSavedSettings.current?.oa_setting ?? {
+                      oa_id: nextId ?? '',
+                      notify_user_ids: [],
+                      notify_channels: [],
+                    }
+                  : {
+                      oa_id: nextId ?? '',
+                      default_bot_folder_id: null,
+                      notify_user_ids: [],
+                      notify_channels: [],
+                    },
+              });
+            }}
+          >
+            <option value="">— Chưa gán —</option>
+            {(draft.oa_catalog ?? []).map((item) => (
+              <option key={item.oa_id} value={item.oa_id}>
+                {item.name?.trim() ? `${item.name} (${item.oa_id})` : item.oa_id}
+                {item.has_token ? '' : ' (chưa token)'}
+              </option>
+            ))}
+          </select>
+        </label>
+        {(draft.oa_catalog ?? []).length === 0 ? (
+          <p className="chat-hint">
+            Chưa có OA từ Notification. Kiểm tra ZaloOAAccount:OaIds rồi restart Notification.Api và Chat.Api.
+          </p>
+        ) : null}
+        {draft.oa_id ? (
+          <>
+            <label className="chat-settings-field">
+              <span>AI Chatbots mặc định cho OA</span>
+              <select
+                value={draft.oa_setting?.default_bot_folder_id ?? ''}
+                disabled={disabled}
+                onChange={(e) =>
+                  saveNow({
+                    ...draft,
+                    oa_setting: {
+                      oa_id: draft.oa_id ?? '',
+                      default_bot_folder_id: e.target.value || null,
+                      notify_user_ids: draft.oa_setting?.notify_user_ids ?? [],
+                      notify_channels: draft.oa_setting?.notify_channels ?? [],
+                    },
+                  })
+                }
+              >
+                <option value="">— Không auto AI —</option>
+                {draft.ai_chatbots
+                  .filter((bot) => bot.active !== false && !isEmbedBot(bot))
+                  .map((bot) => (
+                    <option key={bot.folder_id} value={bot.folder_id}>
+                      {bot.title || bot.folder_id}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <div className="chat-permission-list">
+              <strong>Kênh thông báo khi khách nhắn OA (sau 30s)</strong>
+              {(['zalo_oa', 'zalo_conversation'] as const).map((ch) => (
+                <label key={ch} className="chat-settings-toggle">
+                  <input
+                    type="checkbox"
+                    checked={(draft.oa_setting?.notify_channels ?? []).includes(ch)}
+                    disabled={disabled}
+                    onChange={(e) => {
+                      const current = draft.oa_setting?.notify_channels ?? [];
+                      const next = e.target.checked
+                        ? [...current.filter((c) => c !== ch), ch]
+                        : current.filter((c) => c !== ch);
+                      saveNow({
+                        ...draft,
+                        oa_setting: {
+                          oa_id: draft.oa_id ?? '',
+                          default_bot_folder_id: draft.oa_setting?.default_bot_folder_id ?? null,
+                          notify_user_ids: draft.oa_setting?.notify_user_ids ?? [],
+                          notify_channels: next,
+                        },
+                      });
+                    }}
+                  />
+                  <span>
+                    <strong>{ch === 'zalo_oa' ? 'zalo_oa' : 'zalo_conversation'}</strong>
+                    <small>
+                      {ch === 'zalo_oa' ? 'Tin tư vấn từ OA' : 'Hội thoại Zalo cá nhân'}
+                    </small>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <div className="chat-permission-list">
+              <strong>User nhận thông báo (có trong noti_zalo)</strong>
+              {oaTargets.length === 0 && (
+                <p className="chat-hint">Chưa có user follow OA / đăng ký zalo_conversation.</p>
+              )}
+              {oaTargets.map((row) => {
+                const checked = (draft.oa_setting?.notify_user_ids ?? []).includes(row.user_id);
+                return (
+                  <label key={row.user_id} className="chat-settings-toggle">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={disabled}
+                      onChange={(e) => {
+                        const current = draft.oa_setting?.notify_user_ids ?? [];
+                        const next = e.target.checked
+                          ? [...current.filter((id) => id !== row.user_id), row.user_id]
+                          : current.filter((id) => id !== row.user_id);
+                        saveNow({
+                          ...draft,
+                          oa_setting: {
+                            oa_id: draft.oa_id ?? '',
+                            default_bot_folder_id: draft.oa_setting?.default_bot_folder_id ?? null,
+                            notify_user_ids: next,
+                            notify_channels: draft.oa_setting?.notify_channels ?? [],
+                          },
+                        });
+                      }}
+                    />
+                    <span>
+                      <strong>User #{row.user_id}</strong>
+                      <small>{row.zalo_type || 'noti_zalo'}</small>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </>
+        ) : null}
       </SettingsSection>
 
       <SettingsSection

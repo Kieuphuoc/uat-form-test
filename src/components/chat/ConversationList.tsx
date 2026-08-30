@@ -1,6 +1,6 @@
 import type { Conversation } from '../../api/chatApi';
 import { botAvatarUrl, isEmbedBot, normalizeNotifyMode, notifyModeLabel } from '../../api/chatApi';
-import { IconBellMention, IconBellOff, IconBot, IconPlus, IconSearch, IconUsers } from '../AppIcons';
+import { IconBellMention, IconBellOff, IconBot, IconPlus, IconSearch, IconUsers, IconUsersAdd } from '../AppIcons';
 import { ChatAvatar } from './ChatAvatar';
 
 type Props = {
@@ -12,6 +12,7 @@ type Props = {
   onSelect: (id: number) => void;
   onNewDirect: () => void;
   onNewGroup: () => void;
+  onOpenContacts: () => void;
 };
 
 function timeLabel(iso?: string | null): string {
@@ -37,10 +38,28 @@ export function ConversationList({
   onSelect,
   onNewDirect,
   onNewGroup,
+  onOpenContacts,
 }: Props) {
   return (
     <div className="chat-list">
-      <div className="chat-list-head">
+      <div className="chat-list-head zalo-list-head">
+        <div className="zalo-list-title">
+          <strong>Tin nhắn nội bộ</strong>
+          <span className="muted">{loading ? 'Đang tải...' : `${items.length} hội thoại`}</span>
+        </div>
+        <div className="zalo-source-pick">
+          <button type="button" className="chat-icon-btn" title="Danh bạ" onClick={onOpenContacts}>
+            <IconUsers size={16} />
+          </button>
+          <button type="button" className="chat-icon-btn" title="Chat mới" onClick={onNewDirect}>
+            <IconPlus size={16} />
+          </button>
+          <button type="button" className="chat-icon-btn" title="Tạo nhóm" onClick={onNewGroup}>
+            <IconUsersAdd size={16} />
+          </button>
+        </div>
+      </div>
+      <div className="oa-list-tools">
         <label className="chat-search">
           <IconSearch size={16} />
           <input
@@ -50,12 +69,6 @@ export function ConversationList({
             aria-label="Tìm hội thoại"
           />
         </label>
-        <button type="button" className="chat-icon-btn" title="Chat mới" onClick={onNewDirect}>
-          <IconPlus size={18} />
-        </button>
-        <button type="button" className="chat-icon-btn" title="Tạo nhóm" onClick={onNewGroup}>
-          <IconUsers size={18} />
-        </button>
       </div>
 
       <div className="chat-list-body">

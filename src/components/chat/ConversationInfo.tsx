@@ -20,13 +20,13 @@ import {
   IconBlock,
   IconClose,
   IconEdit,
-  IconFile,
   IconImage,
   IconPlus,
   IconTrash,
 } from '../AppIcons';
 import { ChatAvatar, useChatFileUrl } from './ChatAvatar';
 import { ChatConfirmDialog } from './ChatConfirmDialog';
+import { ChatFileSection, ChatFileTile } from './ChatFileGrid';
 import { FilePreviewModal } from './FilePreviewModal';
 
 const FILES_PREVIEW_LIMIT = 10;
@@ -59,18 +59,13 @@ function FileTile({
   onOpen: () => void;
 }) {
   const imageUrl = useChatFileUrl(conversationId, item.is_image ? item.file_id : null, 256);
-
   return (
-    <button type="button" className="chat-file-tile" onClick={onOpen} title={item.file_name}>
-      {item.is_image && imageUrl ? (
-        <img src={imageUrl} alt={item.file_name} />
-      ) : (
-        <span className="chat-file-tile-doc">
-          {item.is_image ? <IconImage size={22} /> : <IconFile size={22} />}
-        </span>
-      )}
-      <span className="chat-file-tile-name">{item.file_name}</span>
-    </button>
+    <ChatFileTile
+      fileName={item.file_name}
+      isImage={item.is_image}
+      imageUrl={imageUrl}
+      onOpen={onOpen}
+    />
   );
 }
 
@@ -122,21 +117,27 @@ export function ConversationInfo({
       setFiles([]);
       setFilesTotal(0);
       setFolderUrl(null);
+      setPreview(null);
       return;
     }
     if (appliedSeedRef.current?.id !== conversationId) {
+      appliedSeedRef.current = null;
       setFiles([]);
       setFilesTotal(0);
       setFolderUrl(null);
+      setPreview(null);
     }
-    if (attachmentsPending) return;
+    if (attachmentsPending) {
+      appliedSeedRef.current = null;
+      return;
+    }
 
     const already =
       appliedSeedRef.current?.id === conversationId
       && appliedSeedRef.current.lastMsg === lastMessageId;
     if (already) return;
 
-    const firstOpen = appliedSeedRef.current?.id !== conversationId;
+    const firstOpen = appliedSeedRef.current == null;
     if (firstOpen && seedAttachments) {
       appliedSeedRef.current = { id: conversationId, lastMsg: lastMessageId };
       setFiles(seedAttachments.items ?? []);
@@ -145,17 +146,18 @@ export function ConversationInfo({
       return;
     }
 
-    appliedSeedRef.current = { id: conversationId, lastMsg: lastMessageId };
     let disposed = false;
     void chatApi.listAttachments(conversationId, FILES_PREVIEW_LIMIT).then(
       (result) => {
         if (disposed) return;
+        appliedSeedRef.current = { id: conversationId, lastMsg: lastMessageId };
         setFiles(result.items ?? []);
         setFilesTotal(result.total ?? 0);
         setFolderUrl(chatFolderUrl(result.folder_id, result.folder_name));
       },
       () => {
         if (!disposed) {
+          appliedSeedRef.current = { id: conversationId, lastMsg: lastMessageId };
           setFiles([]);
           setFilesTotal(0);
           setFolderUrl(null);
@@ -366,20 +368,7 @@ export function ConversationInfo({
         )}
 
         {!isBot && (
-          <div className="chat-info-section">
-            <div className="chat-info-section-head">
-              <span>Files{filesTotal > 0 ? ` (${filesTotal})` : ''}</span>
-              {folderUrl && (
-                <a
-                  className="chat-info-link"
-                  href={folderUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Tất cả
-                </a>
-              )}
-            </div>
+          <ChatFileSection total={filesTotal} folderUrl={folderUrl}>
             {files.length === 0 ? (
               <p className="muted" style={{ margin: 0 }}>
                 Chưa có file nào.
@@ -396,7 +385,7 @@ export function ConversationInfo({
                 ))}
               </div>
             )}
-          </div>
+          </ChatFileSection>
         )}
       </div>
 

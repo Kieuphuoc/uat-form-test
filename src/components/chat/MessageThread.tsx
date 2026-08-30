@@ -192,6 +192,7 @@ export function MessageThread({
     setReplyTo(null);
     setMenuForId(null);
     setRecallMessageId(null);
+    setPreview(null);
     setDraggingFiles(false);
     dragDepthRef.current = 0;
   }, [conversation?.id]);

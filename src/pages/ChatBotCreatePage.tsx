@@ -6,10 +6,11 @@ import {
   normalizeBotType,
   type ChatBotAuthMode,
   type ChatBotCatalogItem,
+  type ChatBotSuggestedQuestion,
   type ChatBotType,
   type ChatMe,
 } from '../api/chatApi';
-import { IconBack, IconImage, IconTrash } from '../components/AppIcons';
+import { IconBack, IconImage, IconPlus, IconTrash } from '../components/AppIcons';
 import { ChatAvatar } from '../components/chat/ChatAvatar';
 import { ChatConfirmDialog } from '../components/chat/ChatConfirmDialog';
 import { navigateChat } from '../lib/chatNav';
@@ -19,6 +20,12 @@ type ShellContext = {
   me: ChatMe | null;
   setMe?: Dispatch<SetStateAction<ChatMe | null>>;
 };
+
+const MAX_SUGGESTIONS = 5;
+
+function emptySuggestion(): ChatBotSuggestedQuestion {
+  return { text: '', target_folder_id: null };
+}
 
 export function ChatBotCreatePage() {
   const { folderId: folderIdParam } = useParams();
@@ -40,6 +47,8 @@ export function ChatBotCreatePage() {
   const [avatarUrl, setAvatarUrl] = useState('');
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [active, setActive] = useState(true);
+  const [catalogBots, setCatalogBots] = useState<ChatBotCatalogItem[]>([]);
+  const [suggestions, setSuggestions] = useState<ChatBotSuggestedQuestion[]>([]);
   const [saving, setSaving] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -47,14 +56,15 @@ export function ChatBotCreatePage() {
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    if (!isEdit) return;
     let cancelled = false;
-    setLoading(true);
+    setLoading(isEdit);
     setError(null);
     void chatApi
       .getAdminSettings()
       .then((settings) => {
         if (cancelled) return;
+        setCatalogBots(settings.ai_chatbots);
+        if (!isEdit) return;
         const bot = settings.ai_chatbots.find(
           (item) => item.folder_id.toLowerCase() === editingId.toLowerCase(),
         );
@@ -70,6 +80,12 @@ export function ChatBotCreatePage() {
         setDescription(bot.description ?? '');
         setAvatarUrl(bot.avatar_url ?? '');
         setActive(bot.active !== false);
+        setSuggestions(
+          (bot.suggested_questions ?? []).map((q) => ({
+            text: q.text ?? '',
+            target_folder_id: q.target_folder_id || null,
+          })),
+        );
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Không tải được Chatbots.');
@@ -226,6 +242,22 @@ export function ChatBotCreatePage() {
         }
       }
 
+      const currentFolder = isEmbed ? (isEdit ? editingId : '') : folderId.trim();
+      const nextSuggestions: ChatBotSuggestedQuestion[] = isEmbed
+        ? []
+        : suggestions
+            .map((q) => {
+              const text = q.text.trim();
+              const target = (q.target_folder_id ?? '').trim();
+              return {
+                text,
+                target_folder_id:
+                  target && target.toLowerCase() !== currentFolder.toLowerCase() ? target : null,
+              };
+            })
+            .filter((q) => q.text.length > 0)
+            .slice(0, MAX_SUGGESTIONS);
+
       const nextItem: ChatBotCatalogItem = isEmbed
         ? {
             folder_id: isEdit ? editingId : '',
@@ -236,6 +268,7 @@ export function ChatBotCreatePage() {
             embed_url: embedUrl.trim(),
             auth_mode: authMode,
             active,
+            suggested_questions: [],
           }
         : {
             folder_id: folderId.trim(),
@@ -244,6 +277,7 @@ export function ChatBotCreatePage() {
             description: description.trim() || null,
             avatar_url: avatarUrl.trim() || null,
             active,
+            suggested_questions: nextSuggestions,
           };
 
       const nextBots = isEdit
@@ -428,6 +462,82 @@ export function ChatBotCreatePage() {
             }}
           />
         </div>
+
+        {!isEmbed ? (
+          <div className="chat-settings-field chat-bot-suggest">
+            <span>Câu hỏi gợi ý (Zalo / OA)</span>
+            <p className="muted">
+              Tối đa {MAX_SUGGESTIONS} câu. Khách gửi Alo / Hi sẽ nhận các nút này. Để trống
+              “AI Chatbot trả lời” = bot hiện tại; chọn bot khác thì conversation sẽ chuyển sang
+              bot đó.
+            </p>
+            {suggestions.map((item, index) => (
+              <div key={index} className="chat-bot-suggest-row">
+                <input
+                  value={item.text}
+                  disabled={busy}
+                  maxLength={100}
+                  placeholder="Ví dụ: ARITO có các sản phẩm gì?"
+                  onChange={(e) =>
+                    setSuggestions((prev) =>
+                      prev.map((q, i) => (i === index ? { ...q, text: e.target.value } : q)),
+                    )
+                  }
+                />
+                <select
+                  value={item.target_folder_id ?? ''}
+                  disabled={busy}
+                  onChange={(e) =>
+                    setSuggestions((prev) =>
+                      prev.map((q, i) =>
+                        i === index ? { ...q, target_folder_id: e.target.value || null } : q,
+                      ),
+                    )
+                  }
+                >
+                  <option value="">Bot hiện tại</option>
+                  {catalogBots
+                    .filter((bot) => {
+                      if (normalizeBotType(bot.type) === 'embed') return false;
+                      const self = (isEdit ? editingId : folderId).trim().toLowerCase();
+                      return !self || bot.folder_id.toLowerCase() !== self;
+                    })
+                    .map((bot) => (
+                      <option key={bot.folder_id} value={bot.folder_id}>
+                        {bot.title || bot.folder_id}
+                        {bot.active === false ? ' (tắt)' : ''}
+                      </option>
+                    ))}
+                </select>
+                <button
+                  type="button"
+                  className="chat-icon-btn is-danger"
+                  title="Xóa câu gợi ý"
+                  disabled={busy}
+                  onClick={() =>
+                    setSuggestions((prev) => prev.filter((_, i) => i !== index))
+                  }
+                >
+                  <IconTrash size={16} />
+                </button>
+              </div>
+            ))}
+            {suggestions.length < MAX_SUGGESTIONS ? (
+              <button
+                type="button"
+                className="secondary"
+                disabled={busy}
+                onClick={() => setSuggestions((prev) => [...prev, emptySuggestion()])}
+              >
+                <IconPlus size={14} />
+                Thêm câu gợi ý
+              </button>
+            ) : (
+              <p className="muted">Đã đủ {MAX_SUGGESTIONS} câu gợi ý.</p>
+            )}
+          </div>
+        ) : null}
+
         {error && <div className="chat-error">{error}</div>}
         <div className="chat-bot-create-actions">
           <button type="button" className="secondary" disabled={saving} onClick={goBack}>

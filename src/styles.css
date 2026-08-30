@@ -5509,6 +5509,51 @@ body.mobile-embed .shell > .form-shell > .form-scroll {
   margin-top: 12px;
 }
 
+.chat-bot-suggest {
+  margin-top: 20px;
+}
+
+.chat-bot-suggest > .muted {
+  font-weight: 400;
+  margin: 0;
+}
+
+.chat-bot-suggest-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(140px, 1fr) 36px;
+  gap: 8px;
+  align-items: center;
+}
+
+.chat-bot-suggest-row input,
+.chat-bot-suggest-row select {
+  width: 100%;
+  min-width: 0;
+}
+
+.chat-bot-suggest .secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+}
+
+@media (max-width: 640px) {
+  .chat-bot-suggest-row {
+    grid-template-columns: 1fr 36px;
+  }
+
+  .chat-bot-suggest-row select {
+    grid-column: 1;
+  }
+
+  .chat-bot-suggest-row .chat-icon-btn {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: start;
+  }
+}
+
 .chat-theme-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
@@ -5959,6 +6004,11 @@ body.chat-is-resizing {
   color: var(--text);
 }
 
+.chat-icon-btn.is-active {
+  background: var(--chat-accent-soft, var(--accent-soft));
+  color: var(--chat-accent, var(--accent));
+}
+
 .chat-avatar {
   display: inline-flex;
   align-items: center;
@@ -6067,6 +6117,8 @@ body.chat-is-resizing {
   border-radius: 0;
   color: var(--text);
   text-align: left;
+  cursor: pointer;
+  border: 0;
 }
 
 .chat-list-item:hover {
@@ -6170,6 +6222,16 @@ body.chat-is-resizing {
   line-height: 20px;
   text-align: center;
   flex-shrink: 0;
+}
+
+button.chat-badge {
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+button.chat-badge:hover {
+  filter: brightness(0.92);
 }
 
 /* --------- Panel hội thoại --------- */
@@ -6438,7 +6500,7 @@ body.chat-is-resizing {
 }
 
 .chat-md-clip--clamp {
-  max-height: calc(1.45em * 20);
+  max-height: calc(1.45em * var(--chat-md-clamp-lines, 20));
   overflow: hidden;
   position: relative;
 }
@@ -8726,6 +8788,16 @@ body.mobile-embed .chat-topbar {
 
 /* ===================== Chat OA Phase 1 ===================== */
 
+.oa-list-head {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.oa-list-tools {
+  padding: 0 10px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
 .oa-chat .chat-panel--thread {
   display: flex;
   flex-direction: column;
@@ -8736,61 +8808,56 @@ body.mobile-embed .chat-topbar {
   min-height: 0;
 }
 
-.oa-message {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  margin: 8px 12px;
+.oa-thread .chat-attachment-file {
+  cursor: default;
 }
 
-.oa-message--mine {
-  justify-content: flex-end;
+.oa-chat .chat-msg--mine .chat-msg-time {
+  color: color-mix(in srgb, var(--chat-mine-fg, #fff) 75%, transparent);
 }
 
-.oa-message--theirs {
-  justify-content: flex-start;
+.oa-chat .chat-msg--oa-outbound {
+  flex-direction: row;
+  width: fit-content;
+  max-width: min(78%, 580px);
+  margin-left: auto;
 }
 
-.oa-message-main {
-  max-width: min(70%, 640px);
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.oa-message--mine .oa-message-main {
+.oa-chat .chat-msg--oa-outbound .chat-msg-main {
   align-items: flex-end;
 }
 
-.oa-message-sender {
-  padding: 0 4px;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.2;
+.oa-chat .chat-msg--oa-outbound .chat-msg-sender {
+  padding-left: 0;
+  padding-right: 4px;
 }
 
-.oa-message-bubble {
-  padding: 9px 12px;
-  border: 1px solid var(--chat-theirs-border);
-  border-radius: 14px;
-  background: var(--chat-theirs-bg);
-  color: var(--chat-theirs-fg);
-  white-space: pre-wrap;
-  word-break: break-word;
+.oa-chat .oa-msg--bot .chat-bubble {
+  background: color-mix(in srgb, var(--chat-mine-bg, var(--accent)) 82%, #0f172a);
+  color: var(--chat-mine-fg, #fff);
 }
 
-.oa-message--mine .oa-message-bubble {
-  border-color: transparent;
-  background: var(--chat-mine-bg);
-  color: var(--chat-mine-fg);
+.oa-chat .oa-msg--bot .chat-md-clip--fade::after {
+  background: linear-gradient(transparent, color-mix(in srgb, var(--chat-mine-bg, var(--accent)) 82%, #0f172a));
 }
 
-.oa-message-bubble small {
-  display: block;
-  margin-top: 4px;
-  opacity: 0.65;
-  font-size: 11px;
-  text-align: right;
+.oa-chat .oa-msg-avatar--bot {
+  width: 30px;
+  height: 30px;
+  background: color-mix(in srgb, var(--chat-mine-bg, var(--accent)) 82%, #0f172a);
+  color: var(--chat-mine-fg, #fff);
+}
+
+.oa-chat .chat-info-head-actions .zalo-ai-switch-wrap {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.oa-chat .chat-info-head-actions .zalo-ai-switch-wrap:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .chat-composer-block {

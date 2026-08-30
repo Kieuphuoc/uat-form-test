@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { chatApi, chatFileFullViewUrl, chatFilePreviewUrl } from '../../api/chatApi';
 import { IconClose, IconDownload, IconOpenExternal } from '../AppIcons';
 
@@ -7,6 +7,8 @@ type Props = {
   fileId: string;
   fileName: string;
   contentType?: string | null;
+  /** Mặc định tải qua /chat; OA truyền oaApi.attachmentBlob. */
+  getBlob?: (fileId: string) => Promise<Blob>;
   onClose: () => void;
 };
 
@@ -17,14 +19,22 @@ const VIEWPORT_MARGIN = 32;
 /** Đủ chỗ cho tên file + 3 nút trên header. */
 const MIN_MODAL_WIDTH = 300;
 
-export async function downloadChatFile(conversationId: number, fileId: string, fileName: string) {
-  const blob = await chatApi.attachmentBlob(conversationId, fileId);
+export async function downloadFileBlob(
+  getBlob: (fileId: string) => Promise<Blob>,
+  fileId: string,
+  fileName: string,
+) {
+  const blob = await getBlob(fileId);
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = fileName || 'download';
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+export async function downloadChatFile(conversationId: number, fileId: string, fileName: string) {
+  await downloadFileBlob((id) => chatApi.attachmentBlob(conversationId, id), fileId, fileName);
 }
 
 function isImageFile(contentType: string | null | undefined, fileName: string): boolean {
@@ -41,9 +51,15 @@ export function FilePreviewModal({
   fileId,
   fileName,
   contentType,
+  getBlob,
   onClose,
 }: Props) {
   const isImage = isImageFile(contentType, fileName);
+  const loadBlobRef = useRef<(id: string) => Promise<Blob>>((id) =>
+    chatApi.attachmentBlob(conversationId, id),
+  );
+  loadBlobRef.current = (id) =>
+    getBlob ? getBlob(id) : chatApi.attachmentBlob(conversationId, id);
   const [documentSrc, setDocumentSrc] = useState<string | null>(() =>
     isImage ? null : chatFilePreviewUrl(fileId),
   );
@@ -61,8 +77,7 @@ export function FilePreviewModal({
 
     let disposed = false;
     let objectUrl: string | null = null;
-    // Không truyền size → bản gốc (upload đã hạ về tối đa 1024 nên vẫn nhẹ).
-    void chatApi.attachmentBlob(conversationId, fileId).then(
+    void loadBlobRef.current(fileId).then(
       (blob) => {
         if (disposed) return;
         objectUrl = URL.createObjectURL(blob);
@@ -94,7 +109,6 @@ export function FilePreviewModal({
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  // Thu nhỏ theo tỉ lệ để ảnh nằm trọn trong màn hình; ảnh nhỏ giữ nguyên, không phóng to.
   let imageModalStyle: { width: string; height: string } | undefined;
   if (isImage && imageSize) {
     const maxWidth = Math.max(MIN_MODAL_WIDTH, viewport.width - VIEWPORT_MARGIN);
@@ -129,7 +143,7 @@ export function FilePreviewModal({
               type="button"
               className="chat-icon-btn"
               title="Tải xuống"
-              onClick={() => void downloadChatFile(conversationId, fileId, fileName)}
+              onClick={() => void downloadFileBlob((id) => loadBlobRef.current(id), fileId, fileName)}
             >
               <IconDownload size={18} />
             </button>

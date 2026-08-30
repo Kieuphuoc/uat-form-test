@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import {
+  activeChatPermissionItems,
   botAvatarUrl,
   botTypeLabel,
   chatApi,
@@ -31,7 +32,7 @@ function relationLabel(item: ContactItem): string {
 
 function permissionWrite(perms: UnitChatPermissions): UnitChatPermissionWrite {
   return {
-    can_use_ai_chat: perms.permission_items.ai_bots.some((item) => item.enabled),
+    can_use_ai_chat: activeChatPermissionItems(perms.permission_items.ai_bots).some((item) => item.enabled),
     can_use_zalo_chat: perms.permission_items.zalo_accounts.some((item) => item.enabled),
     can_use_oa_chat: perms.can_use_oa_chat,
     permission_items: perms.permission_items,
@@ -55,7 +56,7 @@ function togglePermissionItem(
   return {
     ...perms,
     permission_items: permissionItems,
-    can_use_ai_chat: permissionItems.ai_bots.some((item) => item.enabled),
+    can_use_ai_chat: activeChatPermissionItems(permissionItems.ai_bots).some((item) => item.enabled),
     can_use_zalo_chat: permissionItems.zalo_accounts.some((item) => item.enabled),
   };
 }
@@ -101,6 +102,7 @@ export function ContactsPage() {
   const [permDraft, setPermDraft] = useState<UnitChatPermissions | null>(null);
   const [permBusy, setPermBusy] = useState(false);
   const [permError, setPermError] = useState<string | null>(null);
+  const visibleAiBots = activeChatPermissionItems(permDraft?.permission_items.ai_bots);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSearch(query.trim()), 300);
@@ -662,15 +664,19 @@ export function ContactsPage() {
                   </p>
                   <div className="chat-permission-list">
                     <strong>AI Chatbots</strong>
-                    {permDraft.permission_items.ai_bots.length === 0 && (
-                      <p className="chat-hint">Chưa có AI Chatbots trong cấu hình công ty.</p>
+                    {visibleAiBots.length === 0 && (
+                      <p className="chat-hint">
+                        {permDraft.permission_items.ai_bots.length === 0
+                          ? 'Chưa có AI Chatbots trong cấu hình công ty.'
+                          : 'Không có AI Chatbots đang bật.'}
+                      </p>
                     )}
-                    {permDraft.permission_items.ai_bots.map((item) => (
+                    {visibleAiBots.map((item) => (
                       <label key={item.id} className="chat-settings-toggle">
                         <input
                           type="checkbox"
                           checked={item.enabled}
-                          disabled={permBusy || item.active === false}
+                          disabled={permBusy}
                           onChange={(e) =>
                             setPermDraft(
                               togglePermissionItem(permDraft, 'ai_bots', item.id, e.target.checked),
@@ -679,7 +685,7 @@ export function ContactsPage() {
                         />
                         <span>
                           <strong>{item.name || item.id}</strong>
-                          <small>{item.id}{item.active === false ? ' · Đã tắt trong cấu hình' : ''}</small>
+                          <small>{item.id}</small>
                         </span>
                       </label>
                     ))}

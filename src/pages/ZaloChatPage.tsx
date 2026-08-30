@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChatApiError } from '../api/chatApi';
+import { ChatApiError, chatApi, normalizeBotType, type ChatBotCatalogItem } from '../api/chatApi';
 import { zaloApi } from '../api/zaloApi';
 import { useAuth } from '../auth/AuthContext';
 import {
@@ -86,6 +86,15 @@ function isNearThreadBottom(el: HTMLDivElement | null, px = 80): boolean {
 function storedWidth(key: string, fallback: number): number {
   const value = Number(window.localStorage.getItem(key));
   return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function botsOfType(bots: ChatBotCatalogItem[], type: 'rag' | 'faq', currentId?: string): ChatBotCatalogItem[] {
+  const items = bots.filter((bot) => bot.active !== false && normalizeBotType(bot.type) === type);
+  const id = (currentId || '').trim();
+  if (id && !items.some((bot) => bot.folder_id === id)) {
+    return [...items, { folder_id: id, title: id }];
+  }
+  return items;
 }
 
 function lastPreview(messages: ZaloMessage[] | undefined, fallback?: string): string {
@@ -274,6 +283,7 @@ export function ZaloChatPage() {
   const [folderModal, setFolderModal] = useState(false);
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   const [folderDraft, setFolderDraft] = useState<ZaloFolderConfig & { minutes?: number }>({});
+  const [bots, setBots] = useState<ChatBotCatalogItem[]>([]);
   const [filePreview, setFilePreview] = useState<ZaloAttachment | null>(null);
   const [infoVisible, setInfoVisible] = useState(true);
   const [listWidth, setListWidth] = useState(() => storedWidth(LIST_WIDTH_KEY, 320));
@@ -305,6 +315,22 @@ export function ZaloChatPage() {
   const openFilePreview = useCallback((file: ZaloAttachment) => {
     setFilePreview(zaloAttachmentPreviewTarget(file));
   }, []);
+
+  useEffect(() => {
+    void chatApi
+      .listBots()
+      .then((res) => setBots(res.items ?? []))
+      .catch(() => setBots([]));
+  }, []);
+
+  const ragBots = useMemo(
+    () => botsOfType(bots, 'rag', folderDraft.ragFolderId),
+    [bots, folderDraft.ragFolderId],
+  );
+  const faqBots = useMemo(
+    () => botsOfType(bots, 'faq', folderDraft.faqFolderId),
+    [bots, folderDraft.faqFolderId],
+  );
 
   useEffect(() => {
     activeIdRef.current = activeId;
@@ -1401,18 +1427,32 @@ export function ZaloChatPage() {
             </header>
             <div className="zalo-modal-body">
               <label>
-                RAG Folder ID
-                <input
+                AI RAG
+                <select
                   value={folderDraft.ragFolderId || ''}
                   onChange={(e) => setFolderDraft((d) => ({ ...d, ragFolderId: e.target.value }))}
-                />
+                >
+                  <option value="">— Chưa chọn —</option>
+                  {ragBots.map((bot) => (
+                    <option key={bot.folder_id} value={bot.folder_id}>
+                      {bot.title || bot.folder_id}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
-                FAQ Folder ID
-                <input
+                AI FAQ
+                <select
                   value={folderDraft.faqFolderId || ''}
                   onChange={(e) => setFolderDraft((d) => ({ ...d, faqFolderId: e.target.value }))}
-                />
+                >
+                  <option value="">— Chưa chọn —</option>
+                  {faqBots.map((bot) => (
+                    <option key={bot.folder_id} value={bot.folder_id}>
+                      {bot.title || bot.folder_id}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
                 Ghi chú (label)

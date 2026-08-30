@@ -852,6 +852,7 @@ export function ChatPage() {
               setPickerError(null);
               setPicker('group');
             }}
+            onOpenContacts={() => navigateChat(navigate, '/chat/contacts')}
           />
         </aside>
 
@@ -927,7 +928,9 @@ export function ChatPage() {
             members={detail?.conversation.id === activeId ? detail.members : []}
             relation={relation}
             seedAttachments={detail?.conversation.id === activeId ? openAttachments : null}
-            attachmentsPending={threadLoading}
+            attachmentsPending={
+              threadLoading || (!!activeId && detail?.conversation.id !== activeId)
+            }
             busy={busy}
             onClose={() => {
               if (window.matchMedia('(max-width: 1023px)').matches) setPane('thread');
