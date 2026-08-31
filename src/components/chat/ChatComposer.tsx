@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
-import { mobileKeyboardFocusHandlers } from '../../lib/keyboardBridge';
+import { mobileKeyboardFocusHandlers, refocusComposer } from '../../lib/keyboardBridge';
 import { type ChatMember, type ChatMessage, type Conversation } from '../../api/chatApi';
 import { useAuth } from '../../auth/AuthContext';
 import { uiCopy } from '../../lib/uiCopy';
@@ -57,7 +57,7 @@ export const ChatComposer = memo(function ChatComposer({
   canSend,
   canAttach,
   isBot,
-  aiWaiting,
+  aiWaiting: _aiWaiting,
   blockReason,
   replyTo,
   members,
@@ -192,29 +192,31 @@ export const ChatComposer = memo(function ChatComposer({
     });
   };
 
-  const submit = async () => {
+  const submit = () => {
     const body = draft.trim();
-    if ((!body && queuedFiles.length === 0) || !canSend || sendingAttachments || aiWaiting) return;
+    if ((!body && queuedFiles.length === 0) || !canSend || sendingAttachments) return;
     if (body) {
       onSend(body, replyTo?.id ?? null);
       setDraft('');
       onClearReply();
-      window.requestAnimationFrame(() => resizeComposer(textareaRef.current));
     }
-    window.requestAnimationFrame(() => textareaRef.current?.focus());
+    window.requestAnimationFrame(() => resizeComposer(textareaRef.current));
+    refocusComposer(textareaRef.current);
     if (queuedFiles.length > 0) {
       setSendingAttachments(true);
-      try {
-        await onSendAttachments(queuedFiles.map((item) => item.file));
-        queuedFiles.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
-        setQueuedFiles([]);
-        setAttachmentError(null);
-      } catch {
-        setAttachmentError('Không gửi được file. Bạn có thể thử lại.');
-      } finally {
-        setSendingAttachments(false);
-        window.requestAnimationFrame(() => textareaRef.current?.focus());
-      }
+      void onSendAttachments(queuedFiles.map((item) => item.file))
+        .then(() => {
+          queuedFiles.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
+          setQueuedFiles([]);
+          setAttachmentError(null);
+        })
+        .catch(() => {
+          setAttachmentError('Không gửi được file. Bạn có thể thử lại.');
+        })
+        .finally(() => {
+          setSendingAttachments(false);
+          refocusComposer(textareaRef.current);
+        });
     }
   };
 
@@ -223,7 +225,7 @@ export const ChatComposer = memo(function ChatComposer({
       className="chat-composer"
       onSubmit={(e) => {
         e.preventDefault();
-        if (!sendingAttachments) void submit();
+        if (!sendingAttachments) submit();
       }}
     >
       {replyTo && (
@@ -418,27 +420,25 @@ export const ChatComposer = memo(function ChatComposer({
             }
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
-              if (!sendingAttachments) void submit();
+              if (!sendingAttachments) submit();
             }
           }}
           rows={1}
           placeholder={
-            aiWaiting
-              ? 'Đang chờ AI trả lời…'
-              : canSend
-                ? isBot
-                  ? 'Hỏi Chatbots…'
-                  : 'Nhập tin nhắn…'
-                : blockReason || 'Không thể gửi tin…'
+            canSend
+              ? isBot
+                ? 'Hỏi Chatbots…'
+                : 'Nhập tin nhắn…'
+              : blockReason || 'Không thể gửi tin…'
           }
           aria-label="Nội dung tin nhắn"
-          disabled={!canSend || aiWaiting}
+          disabled={!canSend}
         />
         <button
           type="submit"
           className="chat-send"
           disabled={
-            !canSend || aiWaiting || sendingAttachments || (!draft.trim() && queuedFiles.length === 0)
+            !canSend || sendingAttachments || (!draft.trim() && queuedFiles.length === 0)
           }
           title="Gửi (Enter)"
         >

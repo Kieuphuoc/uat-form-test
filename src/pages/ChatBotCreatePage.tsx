@@ -14,6 +14,7 @@ import { IconBack, IconImage, IconPlus, IconTrash } from '../components/AppIcons
 import { ChatAvatar } from '../components/chat/ChatAvatar';
 import { ChatConfirmDialog } from '../components/chat/ChatConfirmDialog';
 import { navigateChat } from '../lib/chatNav';
+import { clearChatBotsCache } from '../lib/chatBotsCache';
 import { resizeChatAvatar } from '../lib/chatImageResize';
 
 type ShellContext = {
@@ -24,7 +25,7 @@ type ShellContext = {
 const MAX_SUGGESTIONS = 5;
 
 function emptySuggestion(): ChatBotSuggestedQuestion {
-  return { text: '', target_folder_id: null };
+  return { text: '', target_folder_id: null, greet_and_switch: false };
 }
 
 export function ChatBotCreatePage() {
@@ -44,6 +45,8 @@ export function ChatBotCreatePage() {
   const [authMode, setAuthMode] = useState<ChatBotAuthMode>('embed_token');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [synonyms, setSynonyms] = useState('');
+  const [greetingTitle, setGreetingTitle] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [active, setActive] = useState(true);
@@ -78,12 +81,15 @@ export function ChatBotCreatePage() {
         setAuthMode(bot.auth_mode === 'none' ? 'none' : 'embed_token');
         setTitle(bot.title ?? '');
         setDescription(bot.description ?? '');
+        setSynonyms(bot.synonyms ?? '');
+        setGreetingTitle(bot.greeting_title ?? '');
         setAvatarUrl(bot.avatar_url ?? '');
         setActive(bot.active !== false);
         setSuggestions(
           (bot.suggested_questions ?? []).map((q) => ({
             text: q.text ?? '',
             target_folder_id: q.target_folder_id || null,
+            greet_and_switch: !!q.greet_and_switch,
           })),
         );
       })
@@ -130,6 +136,7 @@ export function ChatBotCreatePage() {
         ...current,
         ai_chatbots: nextBots,
       });
+      clearChatBotsCache();
       setMe?.((prev) =>
         prev
           ? {
@@ -253,6 +260,7 @@ export function ChatBotCreatePage() {
                 text,
                 target_folder_id:
                   target && target.toLowerCase() !== currentFolder.toLowerCase() ? target : null,
+                greet_and_switch: !!q.greet_and_switch,
               };
             })
             .filter((q) => q.text.length > 0)
@@ -264,6 +272,8 @@ export function ChatBotCreatePage() {
             type: 'embed',
             title: nextTitle,
             description: description.trim() || null,
+            synonyms: synonyms.trim() || null,
+            greeting_title: greetingTitle.trim() || null,
             avatar_url: avatarUrl.trim() || null,
             embed_url: embedUrl.trim(),
             auth_mode: authMode,
@@ -275,6 +285,8 @@ export function ChatBotCreatePage() {
             type,
             title: nextTitle,
             description: description.trim() || null,
+            synonyms: synonyms.trim() || null,
+            greeting_title: greetingTitle.trim() || null,
             avatar_url: avatarUrl.trim() || null,
             active,
             suggested_questions: nextSuggestions,
@@ -288,6 +300,7 @@ export function ChatBotCreatePage() {
         ...current,
         ai_chatbots: nextBots,
       });
+      clearChatBotsCache();
       setMe?.((prev) =>
         prev
           ? {
@@ -409,14 +422,30 @@ export function ChatBotCreatePage() {
           />
         </label>
         <label className="chat-settings-field">
-          <span>Mô tả ngắn</span>
-          <input
+          <span>Mô tả (Description)</span>
+          <textarea
+            rows={3}
             value={description}
             disabled={busy}
-            placeholder="Mô tả"
+            maxLength={800}
+            placeholder="Phạm vi bot này trả lời — và những gì không trả lời."
             onChange={(e) => setDescription(e.target.value)}
           />
         </label>
+        <p className="muted">
+          Dùng để chọn đúng bot khi khách hỏi tự do. Nên ghi rõ phạm vi và ngoài phạm vi.
+        </p>
+        <label className="chat-settings-field">
+          <span>Từ đồng nghĩa (Synonyms)</span>
+          <input
+            value={synonyms}
+            disabled={busy}
+            maxLength={400}
+            placeholder="dashbuilder, dashboard, BI, báo cáo, …"
+            onChange={(e) => setSynonyms(e.target.value)}
+          />
+        </label>
+        <p className="muted">Tên sản phẩm, viết tắt, cách khách hay gọi. Cách nhau bằng dấu phẩy.</p>
         <div className="chat-bot-create-preview">
           <button
             type="button"
@@ -466,10 +495,24 @@ export function ChatBotCreatePage() {
         {!isEmbed ? (
           <div className="chat-settings-field chat-bot-suggest">
             <span>Câu hỏi gợi ý (Zalo / OA)</span>
+            <label className="chat-settings-field">
+              <span>Tiêu đề gợi ý</span>
+              <textarea
+                rows={2}
+                value={greetingTitle}
+                disabled={busy}
+                maxLength={200}
+                placeholder="Chào bạn, tôi là trợ lý AI của ARITO. Bạn cần tôi hỗ trợ gì?"
+                onChange={(e) => setGreetingTitle(e.target.value)}
+              />
+            </label>
             <p className="muted">
-              Tối đa {MAX_SUGGESTIONS} câu. Khách gửi Alo / Hi sẽ nhận các nút này. Để trống
-              “AI Chatbot trả lời” = bot hiện tại; chọn bot khác thì conversation sẽ chuyển sang
-              bot đó.
+              Hiện khi khách Alo / Hi (kèm danh sách gợi ý). Để trống thì dùng câu chào theo tên bot.
+            </p>
+            <p className="muted">
+              Tối đa {MAX_SUGGESTIONS} câu. Để trống “AI Chatbot trả lời” = bot hiện tại; chọn bot
+              khác thì conversation chuyển sang bot đó. Tick “Xin chào và đổi source” = chỉ gửi câu
+              chào rồi đổi bot, không hỏi knowledge.
             </p>
             {suggestions.map((item, index) => (
               <div key={index} className="chat-bot-suggest-row">
@@ -509,6 +552,24 @@ export function ChatBotCreatePage() {
                       </option>
                     ))}
                 </select>
+                <label
+                  className="chat-bot-suggest-greet"
+                  title="Chỉ gửi câu xin chào rồi đổi sang bot đã chọn, không hỏi knowledge."
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!item.greet_and_switch}
+                    disabled={busy}
+                    onChange={(e) =>
+                      setSuggestions((prev) =>
+                        prev.map((q, i) =>
+                          i === index ? { ...q, greet_and_switch: e.target.checked } : q,
+                        ),
+                      )
+                    }
+                  />
+                  <span>Xin chào và đổi source</span>
+                </label>
                 <button
                   type="button"
                   className="chat-icon-btn is-danger"

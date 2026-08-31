@@ -390,6 +390,13 @@ async function zaloFetch<T>(path: string, init?: ZaloFetchOptions): Promise<T> {
 export const zaloApi = {
   listSources: () => zaloFetch<ZaloSourcesResponse>('/api/zalo/sources'),
 
+  listUnreadIds: async (infraSourceId: string, accountId: string) =>
+    asArray(
+      await zaloFetch<{ items?: unknown[] }>(
+        `/api/zalo/${infraSourceId}/unread-ids?account_id=${encodeURIComponent(accountId)}`,
+      ),
+    ).map((row) => str(row)),
+
   listAccounts: async (infraSourceId: string) =>
     asArray(await zaloFetch<unknown>(`/api/zalo/${infraSourceId}/accounts`)).map((raw) => {
       const row = asRecord(raw);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { botAvatarUrl, type ChatMember, type ChatMessage, type ContactRelation, type Conversation } from '../../api/chatApi';
+import { botAvatarUrl, botTypeLabel, type ChatMember, type ChatMessage, type ContactRelation, type Conversation } from '../../api/chatApi';
 import { ChatComposer } from './ChatComposer';
 import { ChatMarkdown, ChatMarkdownClamped, ChatMarkdownViewer } from './ChatMarkdown';
 import {
@@ -332,7 +332,7 @@ export function MessageThread({
               : isBot
                 ? botDisabled
                   ? 'Chatbots đã tắt — chỉ xem lịch sử'
-                  : conversation.bot_description || 'AI Chatbots'
+                  : conversation.bot_description || botTypeLabel(conversation)
                 : 'Tin nhắn riêng'}
           </span>
         </button>

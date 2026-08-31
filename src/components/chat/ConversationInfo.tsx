@@ -25,6 +25,7 @@ import {
   IconTrash,
 } from '../AppIcons';
 import { ChatAvatar, useChatFileUrl } from './ChatAvatar';
+import { ChatBotCatalogSection } from './ChatBotCatalogSection';
 import { ChatConfirmDialog } from './ChatConfirmDialog';
 import { ChatFileSection, ChatFileTile } from './ChatFileGrid';
 import { FilePreviewModal } from './FilePreviewModal';
@@ -99,6 +100,7 @@ export function ConversationInfo({
   const [folderUrl, setFolderUrl] = useState<string | null>(null);
   const [preview, setPreview] = useState<ChatAttachmentItem | null>(null);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const [stickyExpired, setStickyExpired] = useState(false);
 
   useEffect(() => {
     setTitle(conversation?.title ?? '');
@@ -109,6 +111,19 @@ export function ConversationInfo({
   const conversationId = conversation?.id ?? null;
   const lastMessageId = conversation?.last_message_id ?? 0;
   const isBotConversation = conversation?.kind === 'bot';
+  const stickyUntil = conversation?.active_bot_until ?? null;
+
+  useEffect(() => {
+    setStickyExpired(false);
+    if (!stickyUntil) return;
+    const ms = Date.parse(stickyUntil) - Date.now();
+    if (Number.isNaN(ms) || ms <= 0) {
+      setStickyExpired(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setStickyExpired(true), ms);
+    return () => window.clearTimeout(timer);
+  }, [stickyUntil, conversation?.id, conversation?.active_bot_folder_id]);
   const appliedSeedRef = useRef<{ id: number; lastMsg: number } | null>(null);
 
   useEffect(() => {
@@ -308,15 +323,67 @@ export function ConversationInfo({
                 {isGroup
                   ? `Nhóm · ${conversation.member_count} thành viên`
                   : isBot
-                    ? conversation.bot_description ||
-                      (isEmbedBot(conversation)
-                        ? 'AI nhúng — không lưu lịch sử'
-                        : botTypeLabel(conversation))
+                    ? isEmbedBot(conversation)
+                      ? 'AI nhúng — không lưu lịch sử'
+                      : botTypeLabel(conversation)
                     : 'Tin nhắn riêng'}
               </span>
             </>
           )}
         </div>
+
+        {isBot && conversation.bot_description?.trim() ? (
+          <div className="chat-info-section">
+            <div className="chat-info-section-head">
+              <span>Diễn giải</span>
+            </div>
+            <p className="muted" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+              {conversation.bot_description.trim()}
+            </p>
+          </div>
+        ) : null}
+
+        {isBot && !isEmbedBot(conversation) ? (
+          <div className="chat-info-section">
+            <div className="chat-info-section-head">
+              <span>Bot đang hỗ trợ</span>
+            </div>
+            {(() => {
+              const homeId = (conversation.bot_folder_id ?? '').trim().toLowerCase();
+              const stickyId = (conversation.active_bot_folder_id ?? '').trim().toLowerCase();
+              const switched =
+                !stickyExpired &&
+                stickyId.length > 0 &&
+                homeId.length > 0 &&
+                stickyId !== homeId;
+              const name = switched
+                ? conversation.active_bot_title || conversation.title
+                : conversation.title;
+              const avatar = switched
+                ? conversation.active_bot_avatar_url
+                : conversation.bot_avatar_url;
+              return (
+                <div className="chat-info-active-bot">
+                  <ChatAvatar name={name} size={40} imageSrc={botAvatarUrl(avatar)} />
+                  <span className="chat-contact-main">
+                    <strong>{name}</strong>
+                    <span className="muted">
+                      {switched
+                        ? conversation.active_bot_until
+                          ? `Đổi từ gợi ý · đến ${new Date(conversation.active_bot_until).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`
+                          : 'Đổi từ gợi ý'
+                        : 'Bot của hội thoại này'}
+                    </span>
+                  </span>
+                </div>
+              );
+            })()}
+          </div>
+        ) : null}
+
+        {isBot ? (
+          <ChatBotCatalogSection currentFolderId={conversation.bot_folder_id} compact />
+        ) : null}
 
         {!isGroup && relation && relation.relation !== 'accepted' && (
           <div className="chat-info-section">

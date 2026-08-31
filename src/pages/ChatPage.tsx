@@ -305,7 +305,7 @@ export function ChatPage() {
     const sub = subscribeConversations(conversationSearch, (items) => {
       setConversations(items);
       if (!conversationSearch)
-        setTotalUnread(items.reduce((sum, item) => sum + item.unread_count, 0));
+        setTotalUnread(items.filter((item) => (item.unread_count || 0) > 0).length);
       setListLoading(false);
     });
     return () => sub.stop();
@@ -332,7 +332,7 @@ export function ChatPage() {
             : item,
         );
         if (!conversationSearch)
-          setTotalUnread(next.reduce((sum, item) => sum + item.unread_count, 0));
+          setTotalUnread(next.filter((item) => (item.unread_count || 0) > 0).length);
         return next;
       });
     });
@@ -429,7 +429,10 @@ export function ChatPage() {
         setMessages((prev) => mergeMessages(prev, items));
         const newest = items[items.length - 1]?.id ?? 0;
         if (newest > lastIdRef.current) lastIdRef.current = newest;
-        if (items.some((item) => !item.sender_is_me)) stopAiWait();
+        if (items.some((item) => !item.sender_is_me)) {
+          stopAiWait();
+          void refreshDetail();
+        }
         if (document.visibilityState === 'visible' && document.hasFocus()) {
           if (newest > 0) {
             setFocusRequest({ messageId: newest, atBottom: true, token: Date.now() });
@@ -439,7 +442,7 @@ export function ChatPage() {
       },
     );
     return () => sub.stop();
-  }, [activeId, embedConversation, markRead, stopAiWait]);
+  }, [activeId, embedConversation, markRead, refreshDetail, stopAiWait]);
 
   useEffect(() => {
     if (!activeId || embedConversation) return;

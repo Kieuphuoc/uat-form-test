@@ -40,6 +40,10 @@ export type OaConversation = {
   default_bot_folder_id?: string | null;
   auto_reply_delay_seconds?: number;
   ai_pending?: boolean;
+  active_bot_folder_id?: string | null;
+  active_bot_title?: string | null;
+  active_bot_avatar_url?: string | null;
+  active_bot_until?: string | null;
 };
 
 export type OaContact = {

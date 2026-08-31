@@ -15,6 +15,18 @@ export function emitMobileKeyboard(open: boolean): void {
   }
 }
 
+/** Focus lại ô nhập sau Enter — không chờ API / AI. */
+export function refocusComposer(el: HTMLTextAreaElement | null) {
+  if (!el || el.disabled) return;
+  const focus = () => {
+    if (el.disabled) return;
+    el.focus({ preventScroll: true });
+  };
+  focus();
+  window.requestAnimationFrame(focus);
+  window.setTimeout(focus, 0);
+}
+
 /** Handlers gắn vào textarea chat khi nhúng mobile. */
 export function mobileKeyboardFocusHandlers(enabled: boolean): {
   onFocus: () => void;

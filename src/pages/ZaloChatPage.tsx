@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChatApiError, chatApi, normalizeBotType, type ChatBotCatalogItem } from '../api/chatApi';
+import { ChatApiError, normalizeBotType, type ChatBotCatalogItem } from '../api/chatApi';
 import { zaloApi } from '../api/zaloApi';
 import { useAuth } from '../auth/AuthContext';
+import { loadChatBots } from '../lib/chatBotsCache';
 import {
   IconBack,
   IconCheck,
@@ -317,9 +318,8 @@ export function ZaloChatPage() {
   }, []);
 
   useEffect(() => {
-    void chatApi
-      .listBots()
-      .then((res) => setBots(res.items ?? []))
+    void loadChatBots()
+      .then((items) => setBots(items))
       .catch(() => setBots([]));
   }, []);
 
@@ -1356,7 +1356,6 @@ export function ZaloChatPage() {
                     </span>
                   </button>
                 </section>
-
                 {conv.ai_enabled !== false && (
                 <section className="chat-info-section">
                   <div className="chat-info-section-head">
@@ -1405,6 +1404,7 @@ export function ZaloChatPage() {
                     ))}
                   </ul>
                 </section>
+
               </div>
             )}
           </div>

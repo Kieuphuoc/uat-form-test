@@ -160,6 +160,11 @@ export type Conversation = {
   bot_type?: ChatBotType | string | null;
   bot_embed_url?: string | null;
   bot_auth_mode?: ChatBotAuthMode | string | null;
+  /** Bot đang sticky (gợi ý / router). Hết TTL = bot_folder_id. */
+  active_bot_folder_id?: string | null;
+  active_bot_title?: string | null;
+  active_bot_avatar_url?: string | null;
+  active_bot_until?: string | null;
   last_message_id: number;
   last_read_message_id: number;
   last_message_at?: string | null;
@@ -283,12 +288,16 @@ export type ChatBotSuggestedQuestion = {
   text: string;
   /** Null / trống = trả lời bằng bot hiện tại. */
   target_folder_id?: string | null;
+  /** True = chỉ xin chào + đổi source (GĐ2, không RAG). */
+  greet_and_switch?: boolean;
 };
 
 export type ChatBotCatalogItem = {
   folder_id: string;
   title: string;
   description?: string | null;
+  synonyms?: string | null;
+  greeting_title?: string | null;
   avatar_url?: string | null;
   active?: boolean | null;
   type?: ChatBotType | string | null;
@@ -522,6 +531,12 @@ async function chatFetchBlob(path: string): Promise<Blob> {
 
 export const chatApi = {
   me: () => chatFetch<ChatMe>('/api/chat/me'),
+
+  unreadSummary: () =>
+    chatFetch<{ chat_ids: number[]; oa_ids: number[] }>('/api/chat/unread-summary').then((r) => ({
+      chat_ids: r.chat_ids ?? [],
+      oa_ids: r.oa_ids ?? [],
+    })),
 
   listConversations: (search = '') => {
     const qs = new URLSearchParams();

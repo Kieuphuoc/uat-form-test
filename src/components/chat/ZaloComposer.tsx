@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { isMobileEmbed, mobileKeyboardFocusHandlers } from '../../lib/keyboardBridge';
+import { isMobileEmbed, mobileKeyboardFocusHandlers, refocusComposer } from '../../lib/keyboardBridge';
 import { IconClose, IconFile, IconPaperclip, IconSend } from '../AppIcons';
 import { ChatAvatar } from './ChatAvatar';
 import type { ZaloMember, ZaloMessage } from '../../lib/zaloChat';
@@ -150,7 +150,7 @@ export const ZaloComposer = memo(function ZaloComposer({
     });
   };
 
-  const submit = async () => {
+  const submit = () => {
     const text = draft;
     if (sending || (!text.trim() && queuedFiles.length === 0)) return;
     const mentions: ZaloSendPayload['mentions'] = [];
@@ -164,21 +164,23 @@ export const ZaloComposer = memo(function ZaloComposer({
         from = p + token.length;
       }
     });
-    try {
-      await onSend({
-        text,
-        files: queuedFiles.map((item) => item.file),
-        quoteMessageId: pendingQuote?.id || pendingQuote?.zalo_msg_id || undefined,
-        mentions,
-      });
-    } catch {
-      return;
-    }
+    const files = queuedFiles.map((item) => item.file);
+    const quoteId = pendingQuote?.id || pendingQuote?.zalo_msg_id || undefined;
     queuedFiles.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
     setDraft('');
     setQueuedFiles([]);
     setMentionOpen(false);
+    onClearQuote();
     window.requestAnimationFrame(() => resizeComposer(composerRef.current));
+    refocusComposer(composerRef.current);
+    void Promise.resolve(
+      onSend({
+        text,
+        files,
+        quoteMessageId: quoteId,
+        mentions,
+      }),
+    ).then(() => refocusComposer(composerRef.current));
   };
 
   return (
@@ -291,7 +293,7 @@ export const ZaloComposer = memo(function ZaloComposer({
             }
             if (e.key === 'Enter') {
               e.preventDefault();
-              void submit();
+              submit();
             }
           }}
         />
@@ -299,7 +301,7 @@ export const ZaloComposer = memo(function ZaloComposer({
           type="button"
           className="chat-send"
           disabled={sending || (!draft.trim() && queuedFiles.length === 0)}
-          onClick={() => void submit()}
+          onClick={() => submit()}
           title="Gửi"
         >
           <IconSend size={18} />

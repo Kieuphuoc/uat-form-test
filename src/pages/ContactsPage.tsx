@@ -16,6 +16,7 @@ import {
 import { ChatAvatar } from '../components/chat/ChatAvatar';
 import { IconBlock, IconChat, IconClose, IconSettings, IconShield, IconUsersAdd } from '../components/AppIcons';
 import { navigateChat } from '../lib/chatNav';
+import { loadChatBots } from '../lib/chatBotsCache';
 import { subscribeContacts } from '../lib/chatTransport';
 
 type ShellContext = { me: ChatMe | null };
@@ -131,9 +132,9 @@ export function ContactsPage() {
         setCompanyItems(result.items);
         setTotal(result.total_record);
       } else if (tab === 'bots') {
-        const result = await chatApi.listBots();
+        const items = await loadChatBots();
         const q = search.toLowerCase();
-        const items = (result.items ?? []).filter((bot) => {
+        const filtered = items.filter((bot) => {
           if (!q) return true;
           return (
             bot.title.toLowerCase().includes(q) ||
@@ -142,8 +143,8 @@ export function ContactsPage() {
             (bot.embed_url ?? '').toLowerCase().includes(q)
           );
         });
-        setBotItems(items);
-        setTotal(items.length);
+        setBotItems(filtered);
+        setTotal(filtered.length);
       } else {
         const result = await chatApi.listContacts(search, page, pageSize, 'all');
         setPersonalItems(result.items);
@@ -535,9 +536,7 @@ export function ContactsPage() {
               <ChatAvatar name={bot.title} size={40} imageSrc={botAvatarUrl(bot.avatar_url)} />
               <div className="chat-contact-main">
                 <strong>{bot.title}</strong>
-                <span className="muted">
-                  {bot.description || botTypeLabel(bot)}
-                </span>
+                <span className="muted">{botTypeLabel(bot)}</span>
               </div>
               <div className="chat-contact-actions">
                 <button

@@ -11,6 +11,12 @@ import { oaApi, type OaConversation, type OaMessage } from '../api/oaApi';
 export type ChatSubscription = { stop: () => void };
 export type ChatPlatform = 'web' | 'mobile';
 export type DesktopNotificationMode = 'badge' | 'chrome' | 'off';
+export type ChatShellArea = 'chat' | 'zalo' | 'oa' | 'other';
+export type UnreadCounts = { chat: number; zalo: number; oa: number };
+
+export function formatHeaderBadge(count: number): string {
+  return count > 9 ? '9+' : String(count);
+}
 
 const HEARTBEAT_MS = 30_000;
 const OA_LIST_PAGE_SIZE = 30;
@@ -102,9 +108,13 @@ const oaInboxListeners = new Set<(event: OaInboxEvent) => void>();
 const oaMessageListeners = new Set<OaMessageListener>();
 const oaConversationListeners = new Set<OaConversationListener>();
 const zaloBadgeListeners = new Set<(count: number) => void>();
+const unreadCountListeners = new Set<(counts: UnreadCounts) => void>();
 const zaloUnread = new Map<string, number>();
+const chatUnreadIds = new Set<string>();
+const oaUnreadIds = new Set<string>();
 let zaloWatchSource = '';
 let zaloBadge = 0;
+let shellMode: { isolated: boolean; area: ChatShellArea } = { isolated: false, area: 'other' };
 const listInflight = new Map<string, Promise<Conversation[]>>();
 let listDebounceTimer: number | null = null;
 let lastListKey = '';
@@ -129,8 +139,93 @@ function hasListeners(): boolean {
     + oaMessageListeners.size
     + oaConversationListeners.size
     + zaloBadgeListeners.size
+    + unreadCountListeners.size
     > 0
   );
+}
+
+export function setChatShellMode(isolated: boolean, area: ChatShellArea): void {
+  shellMode = { isolated, area };
+}
+
+function tracksChannel(channel: 'chat' | 'zalo' | 'oa'): boolean {
+  if (!shellMode.isolated) return true;
+  return shellMode.area === channel;
+}
+
+function unreadCounts(): UnreadCounts {
+  return {
+    chat: chatUnreadIds.size,
+    zalo: zaloBadge,
+    oa: oaUnreadIds.size,
+  };
+}
+
+function emitUnreadCounts(): void {
+  const counts = unreadCounts();
+  for (const listener of unreadCountListeners) listener(counts);
+}
+
+function setChatUnreadId(id: string, unread: boolean): void {
+  if (!tracksChannel('chat') || !id) return;
+  const had = chatUnreadIds.has(id);
+  if (unread && !had) chatUnreadIds.add(id);
+  else if (!unread && had) chatUnreadIds.delete(id);
+  else return;
+  emitUnreadCounts();
+}
+
+function setOaUnreadId(id: string, unread: boolean): void {
+  if (!tracksChannel('oa') || !id) return;
+  const had = oaUnreadIds.has(id);
+  if (unread && !had) oaUnreadIds.add(id);
+  else if (!unread && had) oaUnreadIds.delete(id);
+  else return;
+  emitUnreadCounts();
+}
+
+export function seedChatUnreadIds(ids: number[]): void {
+  chatUnreadIds.clear();
+  for (const id of ids) {
+    if (id > 0) chatUnreadIds.add(String(id));
+  }
+  emitUnreadCounts();
+}
+
+export function seedOaUnreadIds(ids: number[]): void {
+  oaUnreadIds.clear();
+  for (const id of ids) {
+    if (id > 0) oaUnreadIds.add(String(id));
+  }
+  emitUnreadCounts();
+}
+
+function syncChatUnreadFromList(items: Conversation[]): void {
+  chatUnreadIds.clear();
+  for (const item of items) {
+    if ((item.unread_count || 0) > 0) chatUnreadIds.add(String(item.id));
+  }
+  emitUnreadCounts();
+}
+
+function syncOaUnreadFromList(items: OaConversation[]): void {
+  oaUnreadIds.clear();
+  for (const item of items) {
+    if ((item.unread_count || 0) > 0) oaUnreadIds.add(String(item.id));
+  }
+  emitUnreadCounts();
+}
+
+export function subscribeUnreadCounts(onCounts: (counts: UnreadCounts) => void): ChatSubscription {
+  unreadCountListeners.add(onCounts);
+  onCounts(unreadCounts());
+  void ensureStarted();
+  return {
+    stop: () => {
+      unreadCountListeners.delete(onCounts);
+      scheduleStopIfUnused();
+    },
+  };
 }
 
 function isActive(): boolean {
@@ -227,6 +322,9 @@ function buildConnection(): HubConnection {
     .build();
 
   hub.on('message.created', (message: ChatMessage) => {
+    const mine = actorUserId > 0 && message.sender_user_id === actorUserId;
+    const viewing = [...messageListeners].some((listener) => listener.conversationId === message.conversation_id);
+    setChatUnreadId(String(message.conversation_id), !mine && !viewing);
     void showDesktopNotification(message);
     if (!patchConversationsFromMessage(message)) scheduleRefreshAllConversations();
     for (const listener of messageListeners) {
@@ -248,6 +346,9 @@ function buildConnection(): HubConnection {
     scheduleRefreshAllConversations();
   });
   hub.on('conversation.read', (payload: ConversationReadEvent) => {
+    if (actorUserId <= 0 || payload.user_id === actorUserId) {
+      setChatUnreadId(String(payload.conversation_id), false);
+    }
     for (const listener of conversationReadListeners) listener.callback(payload);
   });
   hub.on('contact.updated', () => {
@@ -260,11 +361,20 @@ function buildConnection(): HubConnection {
   });
   hub.on('oa.inbox.updated', (event: OaInboxEvent) => {
     // unread_count trong event là chung cả OA — không dùng; vá preview rồi cộng unread local.
+    const conversation = event.conversation;
+    if (conversation?.id && conversation.last_direction === 'inbound') {
+      const viewing = [...oaMessageListeners].some((listener) => listener.threadId === conversation.id);
+      if (!viewing) setOaUnreadId(String(conversation.id), true);
+    }
     if (!upsertOaConversation(event.conversation)) scheduleRefreshAllOaConversations();
     for (const listener of oaInboxListeners) listener(event);
   });
   hub.on('oa.message.created', (message: OaMessage) => {
     const item = withOaSenderFlag(message);
+    if (item.direction === 'inbound') {
+      const viewing = [...oaMessageListeners].some((listener) => listener.threadId === item.thread_id);
+      if (!viewing) setOaUnreadId(String(item.thread_id), true);
+    }
     if (!patchOaConversationsFromMessage(item)) scheduleRefreshAllOaConversations();
     for (const listener of oaMessageListeners) {
       if (listener.threadId === item.thread_id) listener.callback([item]);
@@ -431,6 +541,7 @@ async function loadConversations(search: string, force = false): Promise<Convers
     lastListKey = key;
     lastListAt = Date.now();
     lastListItems = items;
+    if (!key) syncChatUnreadFromList(items);
     return items;
   });
   listInflight.set(key, pending);
@@ -450,6 +561,7 @@ async function refreshConversation(listener: ConversationListener, force = false
 }
 
 function scheduleRefreshAllConversations(): void {
+  if (conversationListeners.size === 0) return;
   if (listDebounceTimer !== null) window.clearTimeout(listDebounceTimer);
   listDebounceTimer = window.setTimeout(() => {
     listDebounceTimer = null;
@@ -511,6 +623,8 @@ function upsertOaConversation(conversation: OaConversation | null | undefined): 
   const inboundNew =
     conversation.last_direction === 'inbound' &&
     (!current || conversation.last_message_id > (current.last_message_id || 0));
+  const viewing = [...oaMessageListeners].some((listener) => listener.threadId === conversation.id);
+  setOaUnreadId(String(conversation.id), inboundNew && !viewing);
   replaceOaConversation({
     ...conversation,
     unread_count: inboundNew ? (current?.unread_count || 0) + 1 : (current?.unread_count ?? 0),
@@ -528,6 +642,8 @@ function patchOaConversationsFromMessage(message: OaMessage): boolean {
   if (current.last_message_id >= message.id) return true;
 
   const inbound = message.direction === 'inbound';
+  const viewing = [...oaMessageListeners].some((listener) => listener.threadId === message.thread_id);
+  if (inbound && !viewing) setOaUnreadId(String(message.thread_id), true);
   replaceOaConversation({
     ...current,
     last_message_id: message.id,
@@ -541,6 +657,7 @@ function patchOaConversationsFromMessage(message: OaMessage): boolean {
 
 function applyOaRead(event: OaReadEvent): void {
   if (!event.thread_id || (actorUserId > 0 && event.user_id !== actorUserId)) return;
+  setOaUnreadId(String(event.thread_id), false);
   if (!canPatchOaList()) {
     scheduleRefreshAllOaConversations();
     return;
@@ -559,6 +676,8 @@ function applyOaRead(event: OaReadEvent): void {
 
 function applyOaReadAll(userId: number): void {
   if (actorUserId > 0 && userId !== actorUserId) return;
+  oaUnreadIds.clear();
+  emitUnreadCounts();
   if (!canPatchOaList()) {
     scheduleRefreshAllOaConversations();
     return;
@@ -606,8 +725,9 @@ async function loadOaConversations(search: string, force = false): Promise<OaCon
     .listConversations({ search: key, page: 1, pageSize: OA_LIST_PAGE_SIZE })
     .then((items) => {
       oaLastListKey = key;
-      oaLastListAt = Date.now();
+              oaLastListAt = Date.now();
       oaLastListItems = items;
+      if (!key) syncOaUnreadFromList(items);
       return items;
     });
   oaListInflight.set(key, pending);
@@ -662,7 +782,8 @@ export function reloadConversations(): Promise<void> {
 
 async function showDesktopNotification(message: ChatMessage): Promise<void> {
   if (
-    platform !== 'web'
+    !tracksChannel('chat')
+    || platform !== 'web'
     || isActive()
     || getDesktopNotificationMode() !== 'chrome'
     || !('Notification' in window)
@@ -701,9 +822,11 @@ function emitZaloBadge(): void {
   }
   zaloBadge = count;
   for (const listener of zaloBadgeListeners) listener(count);
+  emitUnreadCounts();
 }
 
 function applyZaloInboxEvent(event: ZaloInboxEvent): void {
+  if (!tracksChannel('zalo')) return;
   if (event?.source_id && event.conversation_id) {
     if (!zaloWatchSource || event.source_id === zaloWatchSource) {
       zaloUnread.set(zaloUnreadKey(event.source_id, event.conversation_id), Number(event.unread_count) || 0);
@@ -720,7 +843,8 @@ async function invokeWatchZalo(): Promise<void> {
 
 async function showZaloDesktopNotification(event: ZaloInboxEvent): Promise<void> {
   if (
-    platform !== 'web'
+    !tracksChannel('zalo')
+    || platform !== 'web'
     || isActive()
     || getDesktopNotificationMode() !== 'chrome'
     || !('Notification' in window)
@@ -761,6 +885,15 @@ export function seedZaloUnread(
   zaloUnread.clear();
   for (const item of items) {
     zaloUnread.set(zaloUnreadKey(sourceId, item.id), Number(item.unread_count) || 0);
+  }
+  emitZaloBadge();
+}
+
+export function seedZaloUnreadIds(sourceId: string, ids: string[]): void {
+  zaloUnread.clear();
+  for (const id of ids) {
+    const convId = id.trim();
+    if (convId) zaloUnread.set(zaloUnreadKey(sourceId, convId), 1);
   }
   emitZaloBadge();
 }

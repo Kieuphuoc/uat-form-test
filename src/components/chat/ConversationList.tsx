@@ -132,7 +132,7 @@ export function ConversationList({
                   {isBot && c.bot_active === false
                     ? 'Chatbots đã tắt'
                     : isEmbedBot(c)
-                      ? c.last_preview || c.bot_description || 'AI nhúng'
+                      ? c.last_preview || 'AI nhúng'
                       : `${c.last_sender_name ? `${c.last_sender_name}: ` : ''}${c.last_preview || 'Chưa có tin nhắn'}`}
                 </span>
               </span>

@@ -4,17 +4,23 @@ import { chatApi, type ChatMe } from '../../api/chatApi';
 import { zaloApi } from '../../api/zaloApi';
 import { useAuth } from '../../auth/AuthContext';
 import { navigateChat } from '../../lib/chatNav';
+import { setChatBotCacheActor, clearChatBotsCache } from '../../lib/chatBotsCache';
 import {
   applyDesktopNotificationMode,
+  formatHeaderBadge,
   reloadConversations,
-  seedZaloUnread,
+  seedChatUnreadIds,
+  seedOaUnreadIds,
+  seedZaloUnreadIds,
   setChatActorUserId,
   setChatPlatform,
+  setChatShellMode,
   subscribeChatSession,
-  subscribeConversations,
-  subscribeZaloBadge,
+  subscribeUnreadCounts,
   subscribeZaloInbox,
   watchZaloSource,
+  type ChatShellArea,
+  type UnreadCounts,
 } from '../../lib/chatTransport';
 import { resolveZaloAccount } from '../../lib/zaloAccount';
 import { IconBell, IconChat, IconDatabase, IconLogout, IconSettings, IconZalo } from '../AppIcons';
@@ -26,6 +32,13 @@ function navClass({ isActive }: { isActive: boolean }) {
 }
 
 const JWT_STORAGE_KEY = 'arito_form_jwt';
+
+function shellArea(key: string | null): ChatShellArea {
+  if (key === 'zalo' || key === 'zalo-users') return 'zalo';
+  if (key === 'oa') return 'oa';
+  if (key === 'chat') return 'chat';
+  return 'other';
+}
 
 function headerSelectPath(id: string): string | null {
   const key = id.trim().toLowerCase();
@@ -49,17 +62,18 @@ export function ChatAppShell() {
   const { mobile, hiddenNavbar, user, logout, jwt } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const isolatedBox = hiddenNavbar && !mobile;
   const [me, setMe] = useState<ChatMe | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [dataSelectOpen, setDataSelectOpen] = useState(false);
-  const [zaloBadge, setZaloBadge] = useState(0);
-  const [chatUnread, setChatUnread] = useState(0);
+  const [unread, setUnread] = useState<UnreadCounts>({ chat: 0, zalo: 0, oa: 0 });
   const [zaloToast, setZaloToast] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
   const zaloToastTimer = useRef<number | null>(null);
   const unitIdRef = useRef<number | null>(null);
   const zaloChatEnabled = !!me?.zalo_enabled && me?.can_use_zalo_chat !== false;
   const oaChatEnabled = !!me && me.can_use_oa_chat !== false;
+  const bellCount = unread.chat + unread.zalo + unread.oa;
   const chatAreaKey = useMemo(() => {
     const path = location.pathname;
     if (!path.startsWith('/chat')) return null;
@@ -78,8 +92,10 @@ export function ChatAppShell() {
       unitIdRef.current = value.unit_id ?? 0;
       setMe(value);
       setChatActorUserId(value.user_id);
+      setChatBotCacheActor(value.user_id, value.unit_id ?? 0);
       void applyDesktopNotificationMode(value.desktop_notification);
       if (prevUnitId != null && prevUnitId !== (value.unit_id ?? 0)) {
+        clearChatBotsCache();
         void reloadConversations();
         if (/\/chat\/\d+/.test(location.pathname)) {
           navigateChat(navigate, '/chat', { replace: true });
@@ -95,25 +111,46 @@ export function ChatAppShell() {
   }, [mobile]);
 
   useEffect(() => {
+    setChatShellMode(isolatedBox, shellArea(chatAreaKey));
+  }, [isolatedBox, chatAreaKey]);
+
+  useEffect(() => {
     const sub = subscribeChatSession();
     return () => sub.stop();
   }, []);
 
   useEffect(() => {
-    const sub = subscribeConversations('', (items) => {
-      setChatUnread(items.reduce((sum, item) => sum + item.unread_count, 0));
-    });
+    if (isolatedBox) {
+      setUnread({ chat: 0, zalo: 0, oa: 0 });
+      return;
+    }
+    const sub = subscribeUnreadCounts(setUnread);
     return () => sub.stop();
-  }, []);
+  }, [isolatedBox]);
 
   useEffect(() => {
-    if (!zaloChatEnabled) {
-      setZaloBadge(0);
+    if (isolatedBox) return;
+    let cancelled = false;
+    void chatApi
+      .unreadSummary()
+      .then((summary) => {
+        if (cancelled) return;
+        seedChatUnreadIds(summary.chat_ids);
+        seedOaUnreadIds(oaChatEnabled ? summary.oa_ids : []);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [isolatedBox, jwt, me?.unit_id, oaChatEnabled]);
+
+  useEffect(() => {
+    if (isolatedBox || !zaloChatEnabled) {
       setZaloToast('');
+      if (!zaloChatEnabled) seedZaloUnreadIds('', []);
       return;
     }
     let cancelled = false;
-    const badgeSub = subscribeZaloBadge(setZaloBadge);
     const inboxSub = subscribeZaloInbox((event) => {
       if (!event.notify) return;
       if (window.location.pathname.startsWith('/chat/zalo') || window.location.pathname.startsWith('/chat/oa')) return;
@@ -130,20 +167,16 @@ export function ChatAppShell() {
         const resolved = resolveZaloAccount(items);
         if (!resolved.accountId || !response.infra_source_id) return;
         watchZaloSource(resolved.accountId);
-        const conversations = await zaloApi.listConversations(
-          response.infra_source_id,
-          resolved.accountId,
-        );
-        if (!cancelled) seedZaloUnread(resolved.accountId, conversations);
+        const ids = await zaloApi.listUnreadIds(response.infra_source_id, resolved.accountId);
+        if (!cancelled) seedZaloUnreadIds(resolved.accountId, ids);
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
-      badgeSub.stop();
       inboxSub.stop();
       if (zaloToastTimer.current) window.clearTimeout(zaloToastTimer.current);
     };
-  }, [zaloChatEnabled]);
+  }, [isolatedBox, zaloChatEnabled]);
 
   useEffect(() => {
     if (!chatAreaKey) return;
@@ -216,13 +249,16 @@ export function ChatAppShell() {
             <NavLink to="/chat" className={() => navClass({ isActive: chatAreaKey === 'chat' })}>
               <IconChat size={17} />
               <span>Chat</span>
+              {unread.chat > 0 && (
+                <span className="chat-shell-nav-badge">{formatHeaderBadge(unread.chat)}</span>
+              )}
             </NavLink>
             {zaloChatEnabled ? (
               <NavLink to="/chat/zalo" className={() => navClass({ isActive: chatAreaKey === 'zalo' })}>
                 <IconZalo size={17} />
                 <span>Zalo</span>
-                {zaloBadge > 0 && (
-                  <span className="chat-shell-nav-badge">{zaloBadge > 99 ? '99+' : zaloBadge}</span>
+                {unread.zalo > 0 && (
+                  <span className="chat-shell-nav-badge">{formatHeaderBadge(unread.zalo)}</span>
                 )}
               </NavLink>
             ) : null}
@@ -230,6 +266,9 @@ export function ChatAppShell() {
               <NavLink to="/chat/oa" className={() => navClass({ isActive: chatAreaKey === 'oa' })}>
                 <IconZalo size={17} />
                 <span>OA</span>
+                {unread.oa > 0 && (
+                  <span className="chat-shell-nav-badge">{formatHeaderBadge(unread.oa)}</span>
+                )}
               </NavLink>
             ) : null}
           </nav>
@@ -251,12 +290,12 @@ export function ChatAppShell() {
 
             <div
               className="chat-shell-bell"
-              aria-label={chatUnread > 0 ? `${chatUnread} tin chưa đọc` : 'Không có tin chưa đọc'}
+              aria-label={bellCount > 0 ? `${bellCount} hội thoại chưa đọc` : 'Không có tin chưa đọc'}
             >
               <IconBell size={18} />
-              {chatUnread > 0 && (
+              {bellCount > 0 && (
                 <span className="chat-shell-bell-badge">
-                  {chatUnread > 99 ? '99+' : chatUnread}
+                  {formatHeaderBadge(bellCount)}
                 </span>
               )}
             </div>
@@ -335,7 +374,7 @@ export function ChatAppShell() {
       </div>
 
       {dataSelectOpen && <DataSelectionDialog onClose={() => setDataSelectOpen(false)} />}
-      {zaloChatEnabled && zaloToast && !location.pathname.startsWith('/chat/zalo') && !location.pathname.startsWith('/chat/oa') && (
+      {zaloChatEnabled && !isolatedBox && zaloToast && !location.pathname.startsWith('/chat/zalo') && !location.pathname.startsWith('/chat/oa') && (
         <div className="zalo-toast">{zaloToast}</div>
       )}
     </div>

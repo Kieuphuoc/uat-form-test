@@ -5520,7 +5520,7 @@ body.mobile-embed .shell > .form-shell > .form-scroll {
 
 .chat-bot-suggest-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(140px, 1fr) 36px;
+  grid-template-columns: minmax(0, 1.3fr) minmax(140px, 0.9fr) auto 36px;
   gap: 8px;
   align-items: center;
 }
@@ -5529,6 +5529,24 @@ body.mobile-embed .shell > .form-shell > .form-scroll {
 .chat-bot-suggest-row select {
   width: 100%;
   min-width: 0;
+}
+
+.chat-bot-suggest-greet {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-weight: 500;
+  font-size: 12px;
+  color: #334155;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-bot-suggest-greet input {
+  width: auto;
+  margin: 0;
+  accent-color: #2563eb;
 }
 
 .chat-bot-suggest .secondary {
@@ -5543,13 +5561,15 @@ body.mobile-embed .shell > .form-shell > .form-scroll {
     grid-template-columns: 1fr 36px;
   }
 
-  .chat-bot-suggest-row select {
+  .chat-bot-suggest-row select,
+  .chat-bot-suggest-row .chat-bot-suggest-greet {
     grid-column: 1;
+    white-space: normal;
   }
 
   .chat-bot-suggest-row .chat-icon-btn {
     grid-column: 2;
-    grid-row: 1 / span 2;
+    grid-row: 1 / span 3;
     align-self: start;
   }
 }
@@ -7269,6 +7289,59 @@ button.chat-badge:hover {
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.03em;
+}
+
+.chat-info-active-bot,
+.chat-info-bot-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: inherit;
+}
+
+.chat-info-bot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-info-bot-row {
+  cursor: pointer;
+}
+
+.chat-info-bot-row:hover:not(:disabled) {
+  border-color: #93c5fd;
+  background: #f8fbff;
+}
+
+.chat-info-bot-row.is-current {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.chat-info-bot-row:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.chat-info-active-bot .chat-contact-main,
+.chat-info-bot-row .chat-contact-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-info-bot-row .chat-contact-main strong,
+.chat-info-active-bot .chat-contact-main strong {
+  font-size: 13px;
 }
 
 .chat-member-list {

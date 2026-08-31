@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type UIEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { chatApi, chatFolderUrl, newClientMsgId, notifyModeLabel, type ChatAttachmentItem, type ChatBotCatalogItem } from '../api/chatApi';
+import { chatFolderUrl, newClientMsgId, notifyModeLabel, botAvatarUrl, type ChatAttachmentItem, type ChatBotCatalogItem } from '../api/chatApi';
 import { nextOaNotifyMode, oaApi, type OaContact, type OaConversation, type OaMessage } from '../api/oaApi';
 import {
   IconBack,
@@ -19,11 +19,14 @@ import {
   IconWait,
 } from '../components/AppIcons';
 import { ChatAvatar, useFileBlobUrl } from '../components/chat/ChatAvatar';
+import { ChatBotCatalogSection } from '../components/chat/ChatBotCatalogSection';
 import { ChatFileSection, ChatFileTile } from '../components/chat/ChatFileGrid';
 import { ChatMarkdownClamped, ChatMarkdownViewer } from '../components/chat/ChatMarkdown';
 import { FilePreviewModal } from '../components/chat/FilePreviewModal';
 import { resizeChatImage } from '../lib/chatImageResize';
+import { loadChatBots } from '../lib/chatBotsCache';
 import { navigateChat } from '../lib/chatNav';
+import { refocusComposer } from '../lib/keyboardBridge';
 import { reloadOaConversations, patchOaConversation, markAllOaConversationsRead, subscribeOaConversations, subscribeOaMessages } from '../lib/chatTransport';
 
 const PAGE_SIZE = 30;
@@ -183,7 +186,8 @@ function OaAttachmentBlock({
   onPreview: () => void;
 }) {
   const isImage = isImageMessage(msg);
-  const remoteUrl = useOaFileUrl(threadId, msg.file_id, isImage ? IMAGE_THUMB_SIZE : 0);
+  const fileThreadId = msg.thread_id || threadId;
+  const remoteUrl = useOaFileUrl(fileThreadId, msg.file_id, isImage ? IMAGE_THUMB_SIZE : 0);
   const src = msg.attachment_url || remoteUrl;
   const canPreview = !!msg.file_id;
 
@@ -296,15 +300,12 @@ function OaComposer({
     setDraft('');
     setQueuedFiles([]);
     setAttachmentError(null);
-    void Promise.resolve(onSend(text, files)).finally(() => {
-      window.requestAnimationFrame(() => {
-        submittingRef.current = false;
-      });
-    });
     window.requestAnimationFrame(() => {
       resizeComposer(textareaRef.current);
-      textareaRef.current?.focus();
+      refocusComposer(textareaRef.current);
+      submittingRef.current = false;
     });
+    void Promise.resolve(onSend(text, files)).then(() => refocusComposer(textareaRef.current));
   };
 
   const submitForm = (event: FormEvent) => {
@@ -428,6 +429,7 @@ export function OaChatPage() {
   const [infoFiles, setInfoFiles] = useState<ChatAttachmentItem[]>([]);
   const [infoFilesTotal, setInfoFilesTotal] = useState(0);
   const [infoFolderUrl, setInfoFolderUrl] = useState<string | null>(null);
+  const [infoFilesThreadId, setInfoFilesThreadId] = useState(0);
   const [bots, setBots] = useState<ChatBotCatalogItem[]>([]);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiReplyBusy, setAiReplyBusy] = useState(false);
@@ -444,11 +446,37 @@ export function OaChatPage() {
   const markReadTimerRef = useRef<number | null>(null);
   const pendingReadIdRef = useRef(0);
   const lastReadIdRef = useRef(0);
+  const openGenRef = useRef(0);
+  const infoThreadRef = useRef(0);
+  const conversationsRef = useRef(conversations);
+  conversationsRef.current = conversations;
   const nearBottomRef = useRef(true);
+  /** Chặn mark-read khi scroll chương trình (mở hội thoại) — không đụng unread thật. */
+  const ignoreScrollReadRef = useRef(false);
+  const [threadFocusKey, setThreadFocusKey] = useState(0);
   const [unreadPill, setUnreadPill] = useState<{ count: number; messageId: number } | null>(null);
   const [notifyBusy, setNotifyBusy] = useState(false);
+  const [stickyExpired, setStickyExpired] = useState(false);
 
   const selectedId = selected?.id ?? 0;
+  const visibleInfoFiles = infoFilesThreadId === selectedId ? infoFiles : [];
+  const visibleInfoTotal = infoFilesThreadId === selectedId ? infoFilesTotal : 0;
+  const stickyUntil = selected?.active_bot_until ?? null;
+
+  useEffect(() => {
+    setStickyExpired(false);
+    if (!stickyUntil) return undefined;
+    const ms = Date.parse(stickyUntil) - Date.now();
+    if (Number.isNaN(ms) || ms <= 0) {
+      setStickyExpired(true);
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      setStickyExpired(true);
+      void reloadOaConversations();
+    }, ms);
+    return () => window.clearTimeout(timer);
+  }, [stickyUntil, selected?.id, selected?.active_bot_folder_id]);
   const canSend = !!selected?.can_send;
   const blockReason = selected?.send_block_reason || 'Chọn hội thoại để trả lời.';
   const remainingQuota = selected
@@ -479,9 +507,8 @@ export function OaChatPage() {
   }, [infoWidth]);
 
   useEffect(() => {
-    void chatApi
-      .listBots()
-      .then((res) => setBots(res.items ?? []))
+    void loadChatBots()
+      .then((items) => setBots(items))
       .catch(() => setBots([]));
   }, []);
 
@@ -545,12 +572,15 @@ export function OaChatPage() {
 
   useEffect(() => {
     setPreview(null);
-    if (selectedId <= 0) {
+    const switched = infoThreadRef.current !== selectedId;
+    infoThreadRef.current = selectedId;
+    if (switched) {
       setInfoFiles([]);
       setInfoFilesTotal(0);
       setInfoFolderUrl(null);
-      return;
+      setInfoFilesThreadId(0);
     }
+    if (selectedId <= 0) return;
     let disposed = false;
     void oaApi.listAttachments(selectedId, FILES_PREVIEW_LIMIT).then(
       (result) => {
@@ -558,12 +588,14 @@ export function OaChatPage() {
         setInfoFiles(result.items ?? []);
         setInfoFilesTotal(result.total ?? result.items?.length ?? 0);
         setInfoFolderUrl(chatFolderUrl(result.folder_id, result.folder_name));
+        setInfoFilesThreadId(selectedId);
       },
       () => {
         if (!disposed) {
           setInfoFiles([]);
           setInfoFilesTotal(0);
           setInfoFolderUrl(null);
+          setInfoFilesThreadId(0);
         }
       },
     );
@@ -669,13 +701,24 @@ export function OaChatPage() {
 
   const openThread = useCallback(async (id: number) => {
     if (!id) return;
+    const gen = ++openGenRef.current;
     setLoadingThread(true);
     lastIdRef.current = -1;
     pendingReadIdRef.current = 0;
     lastReadIdRef.current = 0;
     setUnreadPill(null);
+    setPreview(null);
+    setMessages([]);
+    setHasMore(false);
+    setInfoFiles([]);
+    setInfoFilesTotal(0);
+    setInfoFolderUrl(null);
+    setInfoFilesThreadId(0);
+    const fromList = conversationsRef.current.find((item) => item.id === id);
+    if (fromList) setSelected(fromList);
     try {
       const opened = await oaApi.openConversation(id, Math.min(100, MESSAGE_LIMIT + MAX_UNREAD_PRELOAD));
+      if (gen !== openGenRef.current) return;
       setSelected(opened.conversation);
       setMessages(opened.messages);
       setHasMore(opened.has_more);
@@ -693,14 +736,13 @@ export function OaChatPage() {
         });
       }
       nearBottomRef.current = true;
-      window.setTimeout(() => {
-        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      }, 0);
+      setThreadFocusKey(Date.now());
     } catch (ex) {
+      if (gen !== openGenRef.current) return;
       lastIdRef.current = 0;
       setError(ex instanceof Error ? ex.message : 'Không tải được hội thoại OA.');
     } finally {
-      setLoadingThread(false);
+      if (gen === openGenRef.current) setLoadingThread(false);
     }
   }, []);
 
@@ -720,7 +762,9 @@ export function OaChatPage() {
     const id = routeId > 0 ? routeId : selectedId;
     if (id > 0) {
       const match = conversations.find((item) => item.id === id);
-      if (match) setSelected(match);
+      if (match) {
+        setSelected((prev) => (prev?.id === match.id ? { ...prev, ...match } : prev));
+      }
       return;
     }
     if (listMode === 'conversations') {
@@ -735,6 +779,45 @@ export function OaChatPage() {
   useEffect(() => {
     if (routeId > 0) void openThread(routeId);
   }, [openThread, routeId]);
+
+  const scrollThreadToEnd = useCallback(() => {
+    const apply = () => {
+      const el = scrollRef.current;
+      if (!el) return;
+      el.scrollTop = el.scrollHeight;
+      nearBottomRef.current = isNearThreadBottom(el);
+    };
+    apply();
+    window.requestAnimationFrame(() => {
+      apply();
+      window.requestAnimationFrame(apply);
+    });
+  }, []);
+
+  /** Canh cuối thread sau khi React vẽ tin — setTimeout(0) trong openThread chạy trước paint. */
+  useEffect(() => {
+    if (threadFocusKey <= 0 || loadingThread) return;
+    ignoreScrollReadRef.current = true;
+    const apply = () => {
+      const el = scrollRef.current;
+      if (!el) return;
+      el.scrollTop = el.scrollHeight;
+      nearBottomRef.current = isNearThreadBottom(el);
+    };
+    const frame = window.requestAnimationFrame(() => {
+      apply();
+      window.requestAnimationFrame(apply);
+    });
+    const settle = window.setTimeout(() => {
+      apply();
+      ignoreScrollReadRef.current = false;
+    }, 400);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(settle);
+      ignoreScrollReadRef.current = false;
+    };
+  }, [threadFocusKey, loadingThread]);
 
   useEffect(() => {
     if (!selectedId) return undefined;
@@ -751,9 +834,7 @@ export function OaChatPage() {
         if (atBottom && watching) {
           if (newest > 0) queueMarkRead(selectedId, newest);
           setUnreadPill(null);
-          window.setTimeout(() => {
-            if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-          }, 0);
+          scrollThreadToEnd();
           return;
         }
         if (inbound.length > 0) {
@@ -765,7 +846,7 @@ export function OaChatPage() {
       },
     );
     return () => sub.stop();
-  }, [queueMarkRead, selectedId]);
+  }, [queueMarkRead, selectedId, scrollThreadToEnd]);
 
   useEffect(() => () => {
     if (markReadTimerRef.current !== null) window.clearTimeout(markReadTimerRef.current);
@@ -849,6 +930,7 @@ export function OaChatPage() {
   const onThreadScroll = (event: UIEvent<HTMLDivElement>) => {
     const el = event.currentTarget;
     nearBottomRef.current = isNearThreadBottom(el);
+    if (ignoreScrollReadRef.current) return;
     if (nearBottomRef.current && unreadPill) {
       const newest = messagesRef.current.reduce((max, item) => (item.id > max ? item.id : max), 0);
       if (newest > 0) queueMarkRead(selectedId, newest);
@@ -866,12 +948,6 @@ export function OaChatPage() {
           : item,
       ),
     );
-  };
-
-  const scrollThreadToEnd = () => {
-    window.setTimeout(() => {
-      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }, 0);
   };
 
   const deliverText = async (threadId: number, clientMsgId: string, text: string) => {
@@ -1014,7 +1090,7 @@ export function OaChatPage() {
   };
 
   const unreadTotal = useMemo(
-    () => conversations.reduce((sum, item) => sum + (item.unread_count || 0), 0),
+    () => conversations.filter((item) => (item.unread_count || 0) > 0).length,
     [conversations],
   );
 
@@ -1291,7 +1367,9 @@ export function OaChatPage() {
                   </div>
                 ) : null}
                 {loadingThread ? <div className="chat-empty">Đang tải hội thoại...</div> : null}
-                {messages.map((msg) => {
+                {messages
+                  .filter((msg) => !msg.thread_id || msg.thread_id === selectedId)
+                  .map((msg) => {
                   const isBot = msg.sender_type === 'bot';
                   const isOutbound = msg.direction === 'outbound';
                   const otherAgent = isOutbound && !msg.sender_is_me && !isBot;
@@ -1521,15 +1599,57 @@ export function OaChatPage() {
                       ))}
                     </select>
                   </label>
+                  {(() => {
+                    const homeId =
+                      selected.ai_bot_folder_id || selected.default_bot_folder_id || '';
+                    const stickyId = (selected.active_bot_folder_id ?? '').trim();
+                    const switched =
+                      !stickyExpired &&
+                      stickyId.length > 0 &&
+                      homeId.length > 0 &&
+                      stickyId.toLowerCase() !== homeId.toLowerCase();
+                    const current = bots.find(
+                      (bot) =>
+                        bot.folder_id.toLowerCase() ===
+                        (switched ? stickyId : homeId).toLowerCase(),
+                    );
+                    const name = switched
+                      ? selected.active_bot_title || current?.title
+                      : current?.title;
+                    if (!name && !current) return null;
+                    return (
+                      <div className="chat-info-active-bot" style={{ marginTop: 10 }}>
+                        <ChatAvatar
+                          name={name || 'Bot'}
+                          size={40}
+                          imageSrc={botAvatarUrl(
+                            switched ? selected.active_bot_avatar_url : current?.avatar_url,
+                          )}
+                        />
+                        <span className="chat-contact-main">
+                          <strong>{name}</strong>
+                          <span className="muted">
+                            {switched
+                              ? selected.active_bot_until
+                                ? `Đổi từ gợi ý · đến ${new Date(selected.active_bot_until).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`
+                                : 'Đổi từ gợi ý'
+                              : selected.ai_effective
+                                ? 'Bot đang hỗ trợ khách này'
+                                : 'AI đang tắt'}
+                          </span>
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
-                <ChatFileSection total={infoFilesTotal} folderUrl={infoFolderUrl}>
-                  {infoFiles.length === 0 ? (
+                <ChatFileSection total={visibleInfoTotal} folderUrl={infoFolderUrl}>
+                  {visibleInfoFiles.length === 0 ? (
                     <p className="muted" style={{ margin: 0 }}>
                       Chưa có file nào.
                     </p>
                   ) : (
                     <div className="chat-file-grid">
-                      {infoFiles.map((item) => (
+                      {visibleInfoFiles.map((item) => (
                         <OaFileTile
                           key={item.file_id}
                           threadId={selected.id}
@@ -1546,6 +1666,7 @@ export function OaChatPage() {
                     </div>
                   )}
                 </ChatFileSection>
+                <ChatBotCatalogSection title="Danh sách Chatbots" compact />
               </div>
             </div>
           ) : (
