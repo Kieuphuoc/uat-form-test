@@ -141,6 +141,15 @@ export async function startZaloBind(handoffId?: string): Promise<ApiResult<ZaloB
   });
 }
 
+export async function signalZaloBindClose(handoffId?: string): Promise<void> {
+  const id = handoffId?.trim();
+  if (!id) return;
+  await apiFetch('/auth/zalo/bind/close-intent', {
+    method: 'POST',
+    body: JSON.stringify({ handoffId: id }),
+  });
+}
+
 export async function unbindZalo(): Promise<ApiResult<{ linked: boolean; userId: number }>> {
   return apiFetch('/auth/zalo/unbind', { method: 'POST' });
 }

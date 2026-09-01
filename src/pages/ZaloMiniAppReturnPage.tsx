@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { startZaloBind } from '../api/authApi';
+import { signalZaloBindClose, startZaloBind } from '../api/authApi';
 import { IconCheck, IconZalo } from '../components/AppIcons';
 import { useAuth } from '../auth/AuthContext';
 import { closeZaloWebview } from '../lib/closeZaloWebview';
@@ -13,6 +13,7 @@ export function ZaloMiniAppReturnPage() {
   const [busy, setBusy] = useState(true);
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
 
   const createBind = useCallback(async (): Promise<string> => {
     setBusy(true);
@@ -37,6 +38,7 @@ export function ZaloMiniAppReturnPage() {
   const openMiniApp = useCallback(async () => {
     setOpening(true);
     setError(null);
+    setHint(null);
     let url = qrUrl.trim();
     if (!url || Date.now() >= expiresAt) {
       url = await createBind();
@@ -45,9 +47,10 @@ export function ZaloMiniAppReturnPage() {
       setOpening(false);
       return;
     }
-    await closeZaloWebview();
+    await Promise.all([signalZaloBindClose(handoff), closeZaloWebview()]);
     setOpening(false);
-  }, [qrUrl, expiresAt, createBind]);
+    setHint('Nếu cửa sổ chưa đóng, nhấn X góc trên để quay lại Mini App.');
+  }, [qrUrl, expiresAt, createBind, handoff]);
 
   const displayName = user?.nickname || user?.email || `user #${user?.userId ?? 0}`;
   const email = user?.email?.trim() && user.email !== displayName ? user.email : '';
@@ -69,6 +72,7 @@ export function ZaloMiniAppReturnPage() {
           Mở Mini App để liên kết tài khoản Zalo và tiếp tục sử dụng.
         </p>
         {error ? <p className="zalo-return-error">{error}</p> : null}
+        {hint ? <p className="zalo-return-lead">{hint}</p> : null}
       </div>
       <div className="zalo-return-foot">
         <button

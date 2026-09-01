@@ -1,8 +1,18 @@
+type ZaloJsCall = (
+  jsToken: string,
+  action: string,
+  accessToken: string,
+  data: string,
+  callback: unknown,
+) => unknown;
+
 type ZaloBridge = {
   ready?: (cb: () => void) => void;
   closeWindow?: (opts?: Record<string, unknown>) => void;
-  closeWebview?: () => void;
+  closeWebview?: (cb?: unknown) => void;
   closeWebView?: () => void;
+  jsCall?: ZaloJsCall;
+  H5?: { closeWebview?: (cb?: unknown) => void };
 };
 
 declare global {
@@ -10,39 +20,138 @@ declare global {
     zlpSdk?: ZaloBridge;
     zalo?: ZaloBridge;
     zaloJSV2?: ZaloBridge;
+    ZJSBridge?: ZaloBridge;
     ZaloJavaScriptInterface?: ZaloBridge;
-    webkit?: { messageHandlers?: { zalo?: { postMessage: (msg: unknown) => void } } };
+    onJSCall?: (serial: string) => unknown;
+    onNativeMessage?: (serial: string, action: string) => unknown;
+    webkit?: { messageHandlers?: Record<string, { postMessage: (msg: unknown) => void }> };
   }
 }
+
+const CLOSE_ACTION = 'action.window.close';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => window.setTimeout(r, ms));
 }
 
-function tryNativeClose(): void {
-  const calls: Array<() => void> = [
-    () => window.zlpSdk?.closeWindow?.({}),
-    () => window.zlpSdk?.closeWebview?.(),
-    () => window.zaloJSV2?.closeWindow?.({}),
-    () => window.zaloJSV2?.closeWebview?.(),
-    () => window.zaloJSV2?.closeWebView?.(),
-    () => window.zalo?.closeWindow?.({}),
-    () => window.zalo?.closeWebview?.(),
-    () => window.zalo?.closeWebView?.(),
-    () => window.ZaloJavaScriptInterface?.closeWebview?.(),
-    () => window.ZaloJavaScriptInterface?.closeWindow?.({}),
-    () => window.webkit?.messageHandlers?.zalo?.postMessage({ action: 'close' }),
-    () => window.webkit?.messageHandlers?.zalo?.postMessage(JSON.stringify({ action: 'close' })),
-    () => window.close(),
+function readCookie(name: string): string {
+  try {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const m = document.cookie.match(new RegExp(`(?:^|; )${escaped}=([^;]*)`));
+    return m?.[1] ? decodeURIComponent(m[1]) : '';
+  } catch {
+    return '';
+  }
+}
+
+function queryParam(name: string): string {
+  try {
+    return new URLSearchParams(window.location.search).get(name)?.trim() ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function jsToken(): string {
+  return (
+    queryParam('zlink3rd') ||
+    readCookie('h5.zdn.vn_zlink3rd') ||
+    readCookie('zlink3rd') ||
+    'DEFAULT_JS_TOKEN'
+  );
+}
+
+function accessToken(): string {
+  return (
+    queryParam('zacc_session') ||
+    readCookie('h5.zdn.vn_zacc_session') ||
+    readCookie('zacc_session') ||
+    'DEFAULT_ACCESS_TOKEN'
+  );
+}
+
+function isIos(): boolean {
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+}
+
+function iosCallback(serial: string, action: string): unknown {
+  try {
+    if (typeof window.onJSCall === 'function') return window.onJSCall(serial);
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (typeof window.onNativeMessage === 'function') return window.onNativeMessage(serial, action);
+  } catch {
+    /* ignore */
+  }
+  return () => undefined;
+}
+
+/** Native in-app browser: `ZaloJavaScriptInterface.jsCall(..., 'action.window.close', ...)`. */
+function jsCallClose(action: string): void {
+  const iface = window.ZaloJavaScriptInterface;
+  if (typeof iface?.jsCall !== 'function') return;
+  const serial = `${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+  const data = '{}';
+  const jsTk = jsToken();
+  const accTk = accessToken();
+  try {
+    if (isIos()) {
+      iface.jsCall(jsTk, action, accTk, data, iosCallback(serial, action));
+    } else {
+      iface.jsCall(jsTk, action, accTk, data, `window.onJSCall && window.onJSCall('${serial}')`);
+    }
+  } catch {
+    /* native chưa sẵn */
+  }
+}
+
+function postToIosHandlers(): void {
+  const handlers = window.webkit?.messageHandlers;
+  if (!handlers) return;
+  const payloads: unknown[] = [
+    { action: CLOSE_ACTION },
+    CLOSE_ACTION,
+    JSON.stringify({ action: CLOSE_ACTION }),
   ];
-  for (const run of calls) {
-    try {
-      run();
-    } catch {
-      /* next */
+  const names = [
+    'zalo',
+    'zbrowser',
+    'jsCall',
+    'action',
+    'close',
+    'closeWebview',
+    'ZaloJavaScriptInterface',
+  ];
+  for (const name of names) {
+    const handler = handlers[name];
+    if (!handler?.postMessage) continue;
+    for (const payload of payloads) {
+      try {
+        handler.postMessage(payload);
+      } catch {
+        /* next */
+      }
     }
   }
+}
 
+function tryNativeClose(): void {
+  jsCallClose(CLOSE_ACTION);
+  jsCallClose('action.webview.close');
+  jsCallClose('action.close.inapp');
+
+  try {
+    window.ZJSBridge?.H5?.closeWebview?.(() => undefined);
+  } catch {
+    /* ignore */
+  }
+  try {
+    window.zaloJSV2?.closeWindow?.({});
+  } catch {
+    /* ignore */
+  }
   try {
     if (typeof window.zaloJSV2?.ready === 'function') {
       window.zaloJSV2.ready(() => {
@@ -56,46 +165,43 @@ function tryNativeClose(): void {
   } catch {
     /* ignore */
   }
+  try {
+    window.zlpSdk?.closeWindow?.({});
+  } catch {
+    /* ignore */
+  }
+  try {
+    window.ZaloJavaScriptInterface?.closeWebview?.();
+  } catch {
+    /* ignore */
+  }
+
+  postToIosHandlers();
+
+  try {
+    window.close();
+  } catch {
+    /* ignore */
+  }
 
   try {
     const frame = document.createElement('iframe');
     frame.style.display = 'none';
     frame.src = 'js://webview?action=close';
     document.body.appendChild(frame);
-    window.setTimeout(() => frame.remove(), 500);
+    window.setTimeout(() => frame.remove(), 400);
   } catch {
     /* ignore */
   }
 }
 
-function loadZaloJsSdk(): Promise<void> {
-  if (window.zaloJSV2 || window.zlpSdk) return Promise.resolve();
-  const existing = document.querySelector('script[data-arito-zalo-sdk]');
-  if (existing) {
-    return new Promise((resolve) => {
-      existing.addEventListener('load', () => resolve(), { once: true });
-      existing.addEventListener('error', () => resolve(), { once: true });
-      window.setTimeout(() => resolve(), 800);
-    });
-  }
-  return new Promise((resolve) => {
-    const script = document.createElement('script');
-    script.src = 'https://sp.zalo.me/plugins/sdk.js';
-    script.async = true;
-    script.dataset.aritoZaloSdk = '1';
-    script.onload = () => resolve();
-    script.onerror = () => resolve();
-    document.head.appendChild(script);
-    window.setTimeout(() => resolve(), 1200);
-  });
-}
-
-/** Đóng WebView Mini App. Thử ngay, rồi lại sau 1s và 2s. */
+/** Đóng WebView Mini App (`openWebview`) qua JSBridge native. Không nhảy deeplink zalo.me/s. */
 export async function closeZaloWebview(): Promise<void> {
-  await loadZaloJsSdk();
   tryNativeClose();
-  await sleep(1000);
+  await sleep(120);
   tryNativeClose();
-  await sleep(1000);
+  await sleep(280);
+  tryNativeClose();
+  await sleep(500);
   tryNativeClose();
 }
