@@ -110,6 +110,12 @@ export type ChatMe = {
   } | null;
 };
 
+/** Mục menu header tab Chat (id khớp postMessage arito-header-select). */
+export type ChatTabItem = {
+  id: string;
+  name: string;
+};
+
 export const DEFAULT_BOT_AVATAR = '/AritoMascotsAI.png';
 
 export function botAvatarUrl(url?: string | null): string {
@@ -537,6 +543,14 @@ export const chatApi = {
       chat_ids: r.chat_ids ?? [],
       oa_ids: r.oa_ids ?? [],
     })),
+
+  listTabs: () =>
+    chatFetch<ChatTabItem[] | { items?: ChatTabItem[]; data?: ChatTabItem[] }>('/api/chat/tabs').then(
+      (r) => {
+        if (Array.isArray(r)) return r;
+        return r.items ?? r.data ?? [];
+      },
+    ),
 
   listConversations: (search = '') => {
     const qs = new URLSearchParams();

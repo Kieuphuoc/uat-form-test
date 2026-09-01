@@ -1,62 +1,12 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { fetchAuthConfig } from '../api/authApi';
+import { authAritoSession, fetchAuthConfig } from '../api/authApi';
+import { getJwt, isJwtExpired } from '../api/client';
+import { useAuth } from '../auth/AuthContext';
 
 const IDP_NET = 'https://id.arito.net';
 const IDP_VN = 'https://id.arito.vn';
 const DEFAULT_SLUG = 'mobile-login';
-
-function expireCookie(name: string, domain?: string): void {
-  const base = `${encodeURIComponent(name)}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;max-age=0;path=/`;
-  try {
-    document.cookie = domain ? `${base};domain=${domain}` : base;
-  } catch {
-    /* ignore */
-  }
-}
-
-/** Xóa cookie phiên AritoID trên WebView (giống mobile CookieManager trước khi mở IdP). */
-export function clearIdpCookies(): void {
-  const names = ['keycloak', 'Keycloak', 'KEYCLOAK'];
-  try {
-    for (const part of document.cookie.split(';')) {
-      const name = part.split('=')[0]?.trim();
-      if (name) names.push(name);
-    }
-  } catch {
-    /* ignore */
-  }
-
-  const host = window.location.hostname.toLowerCase();
-  const domains = new Set<string>(['', host]);
-  if (host.endsWith('.arito.net') || host === 'arito.net') {
-    domains.add('.arito.net');
-    domains.add('arito.net');
-  }
-  if (host.endsWith('.arito.vn') || host === 'arito.vn') {
-    domains.add('.arito.vn');
-    domains.add('arito.vn');
-  }
-
-  const unique = [...new Set(names.filter(Boolean))];
-  for (const name of unique) {
-    expireCookie(name);
-    for (const domain of domains) {
-      if (domain) expireCookie(name, domain);
-    }
-  }
-
-  try {
-    sessionStorage.clear();
-  } catch {
-    /* ignore */
-  }
-  try {
-    localStorage.removeItem('arito_form_jwt');
-  } catch {
-    /* ignore */
-  }
-}
 
 function idpBaseForHost(): string {
   const host = window.location.hostname.toLowerCase();
@@ -74,14 +24,39 @@ function slugFromLoginUrl(loginUrl?: string): string {
   }
 }
 
-/** Trang trung gian: xóa cookie rồi mở AritoID (prompt login mới). */
+function miniAppPath(handoff?: string): string {
+  const id = (handoff ?? '').trim();
+  return id ? `/account/zalo/mini-app/${encodeURIComponent(id)}` : '/account/zalo/mini-app';
+}
+
+/** Có cookie/JWT AritoID → thẳng mini-app; chưa có → mở IdP (không ép nhập lại user/pass). */
 export function ZaloFreshLoginPage() {
   const { handoff } = useParams<{ handoff?: string }>();
+  const { acceptSession } = useAuth();
+  const [message, setMessage] = useState('Đang kiểm tra phiên AritoID…');
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      clearIdpCookies();
+      const next = miniAppPath(handoff);
+
+      setMessage('Đang kiểm tra cookie AritoID…');
+      const session = await authAritoSession();
+      if (cancelled) return;
+
+      if (session.success && session.data?.jwt) {
+        acceptSession(session.data.jwt, session.data.user);
+        window.location.replace(next);
+        return;
+      }
+
+      const existing = getJwt();
+      if (existing && !isJwtExpired(existing)) {
+        window.location.replace(next);
+        return;
+      }
+
+      setMessage('Chưa có phiên — mở AritoID…');
       const cfg = await fetchAuthConfig();
       if (cancelled) return;
       const origin = window.location.origin.replace(/\/$/, '');
@@ -92,20 +67,17 @@ export function ZaloFreshLoginPage() {
         (cfg.loginSlug ?? '').trim() || slugFromLoginUrl(cfg.loginUrl) || DEFAULT_SLUG;
       const url = new URL(`${idpBaseForHost()}/${encodeURIComponent(slug)}`);
       url.searchParams.set('returnUrl', returnUrl);
-      url.searchParams.set('prompt', 'login');
-      url.searchParams.set('max_age', '0');
-      url.searchParams.set('logout', '1');
       window.location.replace(url.toString());
     })();
     return () => {
       cancelled = true;
     };
-  }, [handoff]);
+  }, [handoff, acceptSession]);
 
   return (
     <div className="shell stack" style={{ textAlign: 'center', paddingTop: 80 }}>
-      <p>Đang xóa phiên cũ…</p>
-      <p className="muted">Mở AritoID để đăng nhập tài khoản mới.</p>
+      <p>{message}</p>
+      <p className="muted">Nếu đã đăng nhập AritoID, Mini App sẽ vào luôn — không cần nhập lại user/pass.</p>
     </div>
   );
 }

@@ -4658,7 +4658,9 @@ body.mobile-embed .shell > .form-shell > .form-scroll {
   margin: 0;
   display: flex;
   flex-direction: column;
-  background: #f4f6f8;
+  background:
+    radial-gradient(120% 80% at 50% 0%, #e8f6ef 0%, transparent 55%),
+    linear-gradient(180deg, #f7f9fc 0%, #eef2f7 100%);
   color: #1a2332;
 }
 
@@ -4669,24 +4671,29 @@ body.mobile-embed .shell > .form-shell > .form-scroll {
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 40px 24px 16px;
-  gap: 10px;
+  padding: 28px 24px 16px;
+  gap: 8px;
 }
 
-.zalo-return-mark {
-  width: 72px;
-  height: 72px;
-  border-radius: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #001854;
-  color: #fff;
-  margin-bottom: 8px;
+.zalo-return-mascot {
+  width: min(220px, 64vw);
+  height: auto;
+  aspect-ratio: 1;
+  object-fit: contain;
+  margin: 0 0 4px;
+  filter: drop-shadow(0 12px 24px rgba(0, 24, 84, 0.16));
+}
+
+.zalo-return-hello {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #001854;
 }
 
 .zalo-return-badge {
-  margin: 0;
+  margin: 4px 0 0;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -4713,11 +4720,31 @@ body.mobile-embed .shell > .form-shell > .form-scroll {
 }
 
 .zalo-return-lead {
-  margin: 8px 0 0;
-  max-width: 320px;
-  font-size: 14px;
+  margin: 10px 0 0;
+  max-width: 340px;
+  font-size: 15px;
+  line-height: 1.55;
+  color: #475569;
+}
+
+.zalo-return-steps {
+  margin: 14px 0 0;
+  padding: 14px 16px 14px 32px;
+  max-width: 340px;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  color: #334155;
+  font-size: 13.5px;
   line-height: 1.5;
-  color: #64748b;
+}
+
+.zalo-return-steps li + li {
+  margin-top: 8px;
 }
 
 .zalo-return-error {
@@ -4730,8 +4757,8 @@ body.mobile-embed .shell > .form-shell > .form-scroll {
 .zalo-return-foot {
   position: sticky;
   bottom: 0;
-  padding: 16px 20px calc(20px + env(safe-area-inset-bottom, 0px));
-  background: #f4f6f8;
+  padding: 12px 20px calc(16px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(180deg, transparent, #eef2f7 28%);
 }
 
 .zalo-return-open {
@@ -4749,6 +4776,14 @@ body.mobile-embed .shell > .form-shell > .form-scroll {
 
 .zalo-return-open:disabled {
   opacity: 0.65;
+}
+
+.zalo-return-foot-hint {
+  margin: 10px 0 0;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #64748b;
 }
 
 /* ===================== Chat: layout 3 panel ===================== */
