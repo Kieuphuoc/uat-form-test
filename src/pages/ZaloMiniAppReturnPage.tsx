@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { startZaloBind } from '../api/authApi';
 import { IconCheck, IconZalo } from '../components/AppIcons';
 import { useAuth } from '../auth/AuthContext';
+import { closeZaloWebview } from '../lib/closeZaloWebview';
 
 export function ZaloMiniAppReturnPage() {
   const { user } = useAuth();
+  const { handoff } = useParams<{ handoff?: string }>();
   const [qrUrl, setQrUrl] = useState('');
   const [expiresAt, setExpiresAt] = useState(0);
   const [busy, setBusy] = useState(true);
@@ -14,7 +17,7 @@ export function ZaloMiniAppReturnPage() {
   const createBind = useCallback(async (): Promise<string> => {
     setBusy(true);
     setError(null);
-    const res = await startZaloBind();
+    const res = await startZaloBind(handoff);
     setBusy(false);
     if (!res.success || !res.data?.qrUrl) {
       setQrUrl('');
@@ -25,7 +28,7 @@ export function ZaloMiniAppReturnPage() {
     const ttl = Math.max(30, res.data.expiresIn || 300);
     setExpiresAt(Date.now() + ttl * 1000);
     return res.data.qrUrl;
-  }, []);
+  }, [handoff]);
 
   useEffect(() => {
     void createBind();
@@ -40,6 +43,10 @@ export function ZaloMiniAppReturnPage() {
     }
     if (!url) {
       setOpening(false);
+      return;
+    }
+    if (closeZaloWebview()) {
+      window.setTimeout(() => setOpening(false), 2500);
       return;
     }
     window.location.assign(url);

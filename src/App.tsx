@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { RequireAdmin } from './auth/RequireAdmin';
 import { RequireAuth } from './auth/RequireAuth';
 import { ChatAppShell } from './components/chat/ChatAppShell';
@@ -33,10 +33,29 @@ function ChatGate({ children }: { children: React.ReactNode }) {
   );
 }
 
+function RedirectMiniAppPage() {
+  const { handoff } = useParams<{ handoff?: string }>();
+  const id = handoff?.trim();
+  const next = id ? `/account/zalo/mini-app/${encodeURIComponent(id)}` : '/account/zalo/mini-app';
+  return <RedirectPage defaultNext={next} />;
+}
+
+function ZaloMiniAppGate() {
+  const { handoff } = useParams<{ handoff?: string }>();
+  const id = handoff?.trim();
+  const next = id ? `/account/zalo/mini-app/${encodeURIComponent(id)}` : '/account/zalo/mini-app';
+  return (
+    <RequireAuth nextPath={next} title="Mở Mini App">
+      <ZaloMiniAppReturnPage />
+    </RequireAuth>
+  );
+}
+
 export function App() {
   return (
     <Routes>
       <Route path="/" element={<HomePage />} />
+      <Route path="/redirect/mini-app/:handoff" element={<RedirectMiniAppPage />} />
       <Route
         path="/redirect/mini-app"
         element={<RedirectPage defaultNext="/account/zalo/mini-app" />}
@@ -50,14 +69,8 @@ export function App() {
           </RequireAuth>
         }
       />
-      <Route
-        path="/account/zalo/mini-app"
-        element={
-          <RequireAuth nextPath="/account/zalo/mini-app" title="Mở Mini App">
-            <ZaloMiniAppReturnPage />
-          </RequireAuth>
-        }
-      />
+      <Route path="/account/zalo/mini-app/:handoff" element={<ZaloMiniAppGate />} />
+      <Route path="/account/zalo/mini-app" element={<ZaloMiniAppGate />} />
       <Route path="/runtime/:slug" element={<RuntimePage />} />
       <Route
         path="/chat"

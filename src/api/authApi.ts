@@ -133,8 +133,12 @@ export async function fetchZaloMapping(): Promise<ApiResult<ZaloMapping>> {
   return apiFetch<ZaloMapping>('/auth/zalo/mapping');
 }
 
-export async function startZaloBind(): Promise<ApiResult<ZaloBindStart>> {
-  return apiFetch<ZaloBindStart>('/auth/zalo/bind/start', { method: 'POST' });
+export async function startZaloBind(handoffId?: string): Promise<ApiResult<ZaloBindStart>> {
+  const id = handoffId?.trim();
+  return apiFetch<ZaloBindStart>('/auth/zalo/bind/start', {
+    method: 'POST',
+    body: JSON.stringify(id ? { handoffId: id } : {}),
+  });
 }
 
 export async function unbindZalo(): Promise<ApiResult<{ linked: boolean; userId: number }>> {
