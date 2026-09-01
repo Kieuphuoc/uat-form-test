@@ -45,11 +45,8 @@ export function ZaloMiniAppReturnPage() {
       setOpening(false);
       return;
     }
-    if (closeZaloWebview()) {
-      window.setTimeout(() => setOpening(false), 2500);
-      return;
-    }
-    window.location.assign(url);
+    await closeZaloWebview();
+    setOpening(false);
   }, [qrUrl, expiresAt, createBind]);
 
   const displayName = user?.nickname || user?.email || `user #${user?.userId ?? 0}`;

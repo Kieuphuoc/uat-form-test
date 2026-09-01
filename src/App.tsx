@@ -19,6 +19,7 @@ import { RedirectPage } from './pages/RedirectPage';
 import { RuntimePage } from './pages/RuntimePage';
 import { ZaloLinkPage } from './pages/ZaloLinkPage';
 import { ZaloMiniAppReturnPage } from './pages/ZaloMiniAppReturnPage';
+import { ZaloFreshLoginPage } from './pages/ZaloFreshLoginPage';
 
 function AdminGate({ children }: { children: React.ReactNode }) {
   return <RequireAdmin>{children}</RequireAdmin>;
@@ -69,6 +70,8 @@ export function App() {
           </RequireAuth>
         }
       />
+      <Route path="/account/zalo/fresh/:handoff" element={<ZaloFreshLoginPage />} />
+      <Route path="/account/zalo/fresh" element={<ZaloFreshLoginPage />} />
       <Route path="/account/zalo/mini-app/:handoff" element={<ZaloMiniAppGate />} />
       <Route path="/account/zalo/mini-app" element={<ZaloMiniAppGate />} />
       <Route path="/runtime/:slug" element={<RuntimePage />} />
