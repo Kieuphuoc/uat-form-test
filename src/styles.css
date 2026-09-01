@@ -4652,6 +4652,105 @@ body.mobile-embed .shell > .form-shell > .form-scroll {
   max-width: 100%;
 }
 
+.zalo-return {
+  min-height: 100vh;
+  min-height: 100dvh;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  background: #f4f6f8;
+  color: #1a2332;
+}
+
+.zalo-return-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 40px 24px 16px;
+  gap: 10px;
+}
+
+.zalo-return-mark {
+  width: 72px;
+  height: 72px;
+  border-radius: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #001854;
+  color: #fff;
+  margin-bottom: 8px;
+}
+
+.zalo-return-badge {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #e7f5ef;
+  color: #0b6e4f;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.zalo-return-name {
+  margin: 8px 0 0;
+  font-size: 1.45rem;
+  line-height: 1.3;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.zalo-return-email {
+  margin: 0;
+  font-size: 14px;
+  color: #64748b;
+}
+
+.zalo-return-lead {
+  margin: 8px 0 0;
+  max-width: 320px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #64748b;
+}
+
+.zalo-return-error {
+  margin: 8px 0 0;
+  max-width: 320px;
+  font-size: 13px;
+  color: var(--danger);
+}
+
+.zalo-return-foot {
+  position: sticky;
+  bottom: 0;
+  padding: 16px 20px calc(20px + env(safe-area-inset-bottom, 0px));
+  background: #f4f6f8;
+}
+
+.zalo-return-open {
+  width: 100%;
+  min-height: 52px;
+  margin: 0;
+  padding: 14px 18px;
+  border: 0;
+  border-radius: 14px;
+  background: #001854;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.zalo-return-open:disabled {
+  opacity: 0.65;
+}
+
 /* ===================== Chat: layout 3 panel ===================== */
 
 .chat-shell {

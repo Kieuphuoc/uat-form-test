@@ -18,6 +18,7 @@ import { HomePage } from './pages/HomePage';
 import { RedirectPage } from './pages/RedirectPage';
 import { RuntimePage } from './pages/RuntimePage';
 import { ZaloLinkPage } from './pages/ZaloLinkPage';
+import { ZaloMiniAppReturnPage } from './pages/ZaloMiniAppReturnPage';
 
 function AdminGate({ children }: { children: React.ReactNode }) {
   return <RequireAdmin>{children}</RequireAdmin>;
@@ -42,6 +43,14 @@ export function App() {
         element={
           <RequireAuth nextPath="/account/zalo" title="Liên kết Zalo">
             <ZaloLinkPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/account/zalo/mini-app"
+        element={
+          <RequireAuth nextPath="/account/zalo/mini-app" title="Mở Mini App">
+            <ZaloMiniAppReturnPage />
           </RequireAuth>
         }
       />

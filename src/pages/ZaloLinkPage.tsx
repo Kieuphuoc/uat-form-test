@@ -32,6 +32,7 @@ export function ZaloLinkPage() {
   const [remain, setRemain] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const loadMapping = useCallback(async () => {
     const res = await fetchZaloMapping();
@@ -152,8 +153,8 @@ export function ZaloLinkPage() {
         <div>
           <h1>Liên kết Zalo Mini App</h1>
           <p className="muted">
-            Tài khoản Arito {user?.nickname || user?.email || `#${user?.userId ?? 0}`}. Quét mã QR bằng
-            ứng dụng Zalo trên điện thoại để liên kết tài khoản.
+            Tài khoản Arito {user?.nickname || user?.email || `#${user?.userId ?? 0}`}. Quét QR trong Mini
+            App (nút Quét QR đăng nhập) hoặc mở link bên dưới trên Zalo.
           </p>
         </div>
       </header>
@@ -180,10 +181,28 @@ export function ZaloLinkPage() {
                 width={240}
                 height={240}
               />
-              <p className="muted">Mở Zalo và quét mã. Mã còn hiệu lực {remain}s.</p>
-              <button type="button" className="secondary" disabled={busy} onClick={() => void createQr()}>
-                Tạo mã mới
-              </button>
+              <p className="muted">Mã còn hiệu lực {remain}s — cùng mã với nút Quét QR đăng nhập trên Mini App.</p>
+              <p className="zalo-link-url">{bind.qrUrl}</p>
+              <div className="row">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(bind.qrUrl).then(
+                      () => {
+                        setCopied(true);
+                        window.setTimeout(() => setCopied(false), 1600);
+                      },
+                      () => undefined,
+                    );
+                  }}
+                >
+                  {copied ? 'Đã copy link' : 'Copy link'}
+                </button>
+                <button type="button" className="secondary" disabled={busy} onClick={() => void createQr()}>
+                  Tạo mã mới
+                </button>
+              </div>
             </>
           ) : (
             <p className="muted">{busy ? 'Đang tạo mã…' : 'Chưa có mã QR.'}</p>
