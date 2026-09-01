@@ -37,6 +37,10 @@ export function App() {
   return (
     <Routes>
       <Route path="/" element={<HomePage />} />
+      <Route
+        path="/redirect/mini-app"
+        element={<RedirectPage defaultNext="/account/zalo/mini-app" />}
+      />
       <Route path="/redirect" element={<RedirectPage />} />
       <Route
         path="/account/zalo"

@@ -96,7 +96,12 @@ export async function unlockDevelopMode(pass: string): Promise<ApiResult<SsoLogi
 }
 
 export function buildLoginHref(loginUrl: string, nextPath = '/admin'): string {
-  const returnUrl = `${window.location.origin}/redirect?from=idp&next=${encodeURIComponent(nextPath)}`;
+  const dest = nextPath.startsWith('/') ? nextPath : '/admin';
+  const returnPath =
+    dest === '/account/zalo/mini-app' || dest.startsWith('/account/zalo/mini-app?')
+      ? '/redirect/mini-app'
+      : `/redirect?from=idp&next=${encodeURIComponent(dest)}`;
+  const returnUrl = `${window.location.origin}${returnPath}`;
   try {
     const url = new URL(loginUrl);
     url.searchParams.set('returnUrl', returnUrl);

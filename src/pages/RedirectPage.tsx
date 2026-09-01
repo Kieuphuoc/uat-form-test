@@ -3,10 +3,16 @@ import { useSearchParams } from 'react-router-dom';
 import { authAritoSession } from '../api/authApi';
 import { useAuth } from '../auth/AuthContext';
 
+type Props = {
+  /** Khi IdP nuốt query `next` — dùng path riêng /redirect/mini-app. */
+  defaultNext?: string;
+};
+
 /**
- * Sau IdP login: đổi cookie keycloak → JWT → chuyển tới next (mặc định /admin).
+ * Sau IdP login: đổi cookie keycloak → JWT → chuyển tới next.
+ * `?next=` mất thì mặc định /admin (IdP chỉ trả /redirect?from=idp).
  */
-export function RedirectPage() {
+export function RedirectPage({ defaultNext = '/admin' }: Props) {
   const [params] = useSearchParams();
   const { acceptSession, jwt } = useAuth();
   const [message, setMessage] = useState('Đang hoàn tất đăng nhập…');
@@ -17,8 +23,9 @@ export function RedirectPage() {
     ran.current = true;
 
     void (async () => {
-      const next = params.get('next')?.trim() || '/admin';
-      const safeNext = next.startsWith('/') ? next : '/admin';
+      const fromQuery = params.get('next')?.trim() || '';
+      const next = fromQuery || defaultNext;
+      const safeNext = next.startsWith('/') ? next : defaultNext;
 
       setMessage('Đã có cookie AritoID — đang tạo JWT…');
       const session = await authAritoSession();
@@ -32,11 +39,10 @@ export function RedirectPage() {
 
       setMessage(session.error || 'Đăng nhập thất bại — chưa có cookie keycloak gửi tới Form.Api.');
       window.setTimeout(() => {
-        // Về đúng chỗ đã bấm đăng nhập (vd. /chat), không dồn hết về /admin.
         window.location.replace(`${safeNext}${safeNext.includes('?') ? '&' : '?'}login_error=1`);
       }, 1800);
     })();
-  }, [acceptSession, params, jwt]);
+  }, [acceptSession, params, jwt, defaultNext]);
 
   return (
     <div className="shell stack" style={{ textAlign: 'center', paddingTop: 80 }}>
