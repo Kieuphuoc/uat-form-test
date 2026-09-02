@@ -191,6 +191,12 @@ export const ChatComposer = memo(function ChatComposer({
     };
   }, [botOpen, botPicksLoaded]);
 
+  useEffect(() => {
+    if (!replyTo) return;
+    refocusComposer(textareaRef.current);
+    resizeComposer(textareaRef.current);
+  }, [replyTo]);
+
   const addFiles = (files: File[]) => {
     if (!canAttach || files.length === 0) return;
     setQueuedFiles((current) => {
@@ -362,8 +368,14 @@ export const ChatComposer = memo(function ChatComposer({
     });
   };
 
+  const quotedQuestion = (replyTo?.body ?? '').trim();
+  const canAskWithQuote = !!selectedBot && !faqBuildMode && quotedQuestion.length > 0;
+  const canSubmit =
+    !!draft.trim() || queuedFiles.length > 0 || canAskWithQuote;
+
   const dispatchSend = (rawBody: string) => {
     let body = rawBody.trim();
+    if (!body && canAskWithQuote) body = quotedQuestion;
     if (!body && queuedFiles.length === 0) return;
     if (body && !faqBuildMode) {
       body = expandQuickMessage(body, quickMessages);
@@ -429,7 +441,7 @@ export const ChatComposer = memo(function ChatComposer({
   };
 
   const submit = () => {
-    if ((!draft.trim() && queuedFiles.length === 0) || !canSend || sendingAttachments || askingBot) return;
+    if (!canSubmit || !canSend || sendingAttachments || askingBot) return;
     dispatchSend(draft);
   };
 
@@ -467,7 +479,11 @@ export const ChatComposer = memo(function ChatComposer({
               {askingBot ? 'Đang hỏi' : 'Soạn nháp với'} {selectedBot.title}
             </strong>
             <span>
-              {askingBot ? 'Chưa gửi tin này…' : 'Enter hỏi AI — xem rồi gửi'}
+              {askingBot
+                ? 'Đang hỏi AI Bots, vui lòng chờ…'
+                : canAskWithQuote
+                  ? 'Enter hỏi AI bằng tin trích dẫn — xem rồi gửi'
+                  : 'Enter hỏi AI — xem rồi gửi'}
             </span>
           </div>
           <button
@@ -754,7 +770,9 @@ export const ChatComposer = memo(function ChatComposer({
               ? selectedBot
                 ? askingBot
                   ? `Đang hỏi ${selectedBot.title}…`
-                  : `Nhập câu hỏi cho ${selectedBot.title}…`
+                  : canAskWithQuote
+                    ? `Nhập câu hỏi, hoặc Enter dùng tin trích dẫn…`
+                    : `Nhập câu hỏi cho ${selectedBot.title}…`
                 : faqBuildMode
                   ? 'Dựng FAQ — gõ / để xem lệnh…'
                   : isBot
@@ -794,7 +812,7 @@ export const ChatComposer = memo(function ChatComposer({
             !canSend
             || sendingAttachments
             || askingBot
-            || (!draft.trim() && queuedFiles.length === 0)
+            || !canSubmit
           }
           title={selectedBot ? `Hỏi ${selectedBot.title} (Enter)` : 'Gửi (Enter)'}
         >

@@ -13,6 +13,7 @@ import {
   IconFile,
   IconInfo,
   IconPaperclip,
+  IconReply,
   IconRetry,
   IconSearch,
   IconSend,
@@ -160,6 +161,27 @@ function messageFileName(msg: OaMessage): string {
   return msg.file_name || msg.body || (isImageMessage(msg) ? 'Ảnh đính kèm' : 'Tệp đính kèm');
 }
 
+function oaQuotePreview(msg: OaMessage): string {
+  if (isImageMessage(msg)) return '[Hình ảnh]';
+  const text = (msg.file_name || msg.body || '').replace(/\n/g, ' ').trim();
+  return text || '[Đính kèm]';
+}
+
+function oaQuoteSender(msg: OaMessage, contactTitle?: string | null): string {
+  if (msg.direction === 'inbound') return msg.sender_name || contactTitle || 'Khách';
+  if (msg.sender_type === 'bot') return 'Bot';
+  return msg.sender_is_me ? 'Bạn' : msg.sender_name || 'Nhân viên';
+}
+
+function oaHasQuote(msg: OaMessage): boolean {
+  return !!(msg.reply_to_message_id || msg.quote_zalo_msg_id || (msg.reply_preview || '').trim());
+}
+
+function oaQuotedQuestion(msg: OaMessage | null): string {
+  if (!msg) return '';
+  return (msg.body || '').trim();
+}
+
 const IMAGE_THUMB_SIZE = 256;
 
 function useOaFileUrl(threadId: number, fileId?: string | null, size = 0): string | null {
@@ -246,12 +268,18 @@ function OaComposer({
   canSend,
   blockReason,
   placeholder,
+  pendingQuote,
+  contactTitle,
+  onClearQuote,
   onSend,
 }: {
   canSend: boolean;
   blockReason: string;
   placeholder: string;
-  onSend: (text: string, files: File[]) => void | Promise<void>;
+  pendingQuote: OaMessage | null;
+  contactTitle?: string | null;
+  onClearQuote: () => void;
+  onSend: (text: string, files: File[], quote?: OaMessage | null) => void | Promise<void>;
 }) {
   const { mobile } = useAuth();
   const keyboardHandlers = useMemo(() => mobileKeyboardFocusHandlers(mobile), [mobile]);
@@ -277,6 +305,12 @@ function OaComposer({
   useEffect(() => {
     canSendRef.current = canSend;
   }, [canSend]);
+
+  useEffect(() => {
+    if (!pendingQuote) return;
+    refocusComposer(textareaRef.current);
+    resizeComposer(textareaRef.current);
+  }, [pendingQuote]);
 
   const addFiles = useCallback((files: File[]) => {
     if (!canSendRef.current || files.length === 0) return;
@@ -361,8 +395,12 @@ function OaComposer({
     });
   };
 
+  const quotedQuestion = oaQuotedQuestion(pendingQuote);
+  const canAskWithQuote = !!botPick.selectedBot && quotedQuestion.length > 0;
+
   const submit = () => {
-    const text = expandQuickMessage(draft, quickMessages).trim();
+    let text = expandQuickMessage(draft, quickMessages).trim();
+    if (!text && canAskWithQuote) text = quotedQuestion;
     const queued = queuedRef.current;
     if ((!text && queued.length === 0) || !canSendRef.current || submittingRef.current || botPick.askingBot) {
       return;
@@ -388,16 +426,18 @@ function OaComposer({
     submittingRef.current = true;
     const files = queued.map((item) => item.file);
     queued.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
+    const quote = pendingQuote;
     setDraft('');
     setQueuedFiles([]);
     setAttachmentError(null);
     setSlashOpen(false);
+    onClearQuote();
     window.requestAnimationFrame(() => {
       resizeComposer(textareaRef.current);
       refocusComposer(textareaRef.current);
       submittingRef.current = false;
     });
-    void Promise.resolve(onSend(text, files)).then(() => refocusComposer(textareaRef.current));
+    void Promise.resolve(onSend(text, files, quote)).then(() => refocusComposer(textareaRef.current));
   };
 
   const submitForm = (event: FormEvent) => {
@@ -408,11 +448,23 @@ function OaComposer({
   return (
     <form className="chat-composer oa-composer" onSubmit={submitForm}>
       {!canSend ? <div className="chat-composer-block">{blockReason}</div> : null}
+      {pendingQuote && (
+        <div className="chat-reply-bar">
+          <div>
+            <strong>Trả lời {oaQuoteSender(pendingQuote, contactTitle)}</strong>
+            <span>{oaQuotePreview(pendingQuote)}</span>
+          </div>
+          <button type="button" className="chat-icon-btn" onClick={onClearQuote}>
+            <IconClose size={14} />
+          </button>
+        </div>
+      )}
       {botPick.selectedBot ? (
         <ComposerBotPickBar
           selected={botPick.selectedBot}
           asking={botPick.askingBot}
           onClear={botPick.clearSelected}
+          quoteHint={canAskWithQuote}
         />
       ) : null}
       {botPick.botOpen && (
@@ -506,7 +558,9 @@ function OaComposer({
             botPick.selectedBot
               ? botPick.askingBot
                 ? `Đang hỏi ${botPick.selectedBot.title}…`
-                : `Nhập câu hỏi cho ${botPick.selectedBot.title}…`
+                : canAskWithQuote
+                  ? 'Nhập câu hỏi, hoặc Enter dùng tin trích dẫn…'
+                  : `Nhập câu hỏi cho ${botPick.selectedBot.title}…`
               : canSend
                 ? `${placeholder} · @@ hỏi AI`
                 : placeholder
@@ -524,7 +578,7 @@ function OaComposer({
         <button
           type="submit"
           className="chat-send"
-          disabled={!canSend || botPick.askingBot || (!draft.trim() && queuedFiles.length === 0)}
+          disabled={!canSend || botPick.askingBot || (!draft.trim() && queuedFiles.length === 0 && !canAskWithQuote)}
           title={botPick.selectedBot ? `Hỏi ${botPick.selectedBot.title} (Enter)` : 'Gửi (Enter)'}
         >
           {botPick.selectedBot ? <IconBot size={18} /> : <IconSend size={18} />}
@@ -569,6 +623,7 @@ export function OaChatPage() {
   const [contacts, setContacts] = useState<OaContact[]>([]);
   const [selected, setSelected] = useState<OaConversation | null>(null);
   const [messages, setMessages] = useState<OaMessage[]>([]);
+  const [pendingQuote, setPendingQuote] = useState<OaMessage | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [search, setSearch] = useState('');
   const [loadingList, setLoadingList] = useState(false);
@@ -872,6 +927,7 @@ export function OaChatPage() {
     lastReadIdRef.current = 0;
     setUnreadPill(null);
     setPreview(null);
+    setPendingQuote(null);
     setMessages([]);
     setHasMore(false);
     setInfoFiles([]);
@@ -1114,9 +1170,15 @@ export function OaChatPage() {
     );
   };
 
-  const deliverText = async (threadId: number, clientMsgId: string, text: string) => {
+  const deliverText = async (
+    threadId: number,
+    clientMsgId: string,
+    text: string,
+    replyToMessageId?: number | null,
+  ) => {
     try {
-      const message = await oaApi.sendMessage(threadId, text, clientMsgId);
+      const message = await oaApi.sendMessage(threadId, text, clientMsgId, replyToMessageId);
+      setMessages((current) => mergeMessages(current, [message]));
       setMessages((current) => mergeMessages(current, [message]));
       setError('');
       setUnreadPill(null);
@@ -1148,10 +1210,11 @@ export function OaChatPage() {
     }
   };
 
-  const sendMessage = (text: string, files: File[]) => {
+  const sendMessage = (text: string, files: File[], quote?: OaMessage | null) => {
     if (!selectedId || !canSend || (!text.trim() && files.length === 0)) return;
     const now = new Date().toISOString();
     const created: OaMessage[] = [];
+    const quoteSource = quote && quote.id > 0 ? quote : null;
 
     const trimmed = text.trim();
     if (trimmed) {
@@ -1168,6 +1231,10 @@ export function OaChatPage() {
         sender_is_me: true,
         created_at: now,
         send_status: 'sending',
+        reply_to_message_id: quoteSource?.id ?? null,
+        reply_preview: quoteSource ? oaQuotePreview(quoteSource) : null,
+        reply_sender_name: quoteSource ? oaQuoteSender(quoteSource, selected?.title) : null,
+        quote_zalo_msg_id: quoteSource?.zalo_msg_id ?? null,
       });
     }
 
@@ -1206,7 +1273,7 @@ export function OaChatPage() {
       for (const item of created) {
         if (!item.client_msg_id) continue;
         if (item.msg_type === 'text' && item.body) {
-          await deliverText(selectedId, item.client_msg_id, item.body);
+          await deliverText(selectedId, item.client_msg_id, item.body, item.reply_to_message_id);
           continue;
         }
         const file = pendingFilesRef.current.get(item.client_msg_id);
@@ -1225,12 +1292,34 @@ export function OaChatPage() {
       ),
     );
     if (item.msg_type === 'text' && item.body) {
-      void deliverText(selectedId, clientMsgId, item.body);
+      void deliverText(selectedId, clientMsgId, item.body, item.reply_to_message_id);
       return;
     }
     const file = pendingFilesRef.current.get(clientMsgId);
     if (file) void deliverFile(selectedId, clientMsgId, file);
     else markFailed(clientMsgId);
+  };
+
+  const jumpToQuoted = async (msg: OaMessage) => {
+    const messageId = msg.reply_to_message_id;
+    if (!messageId || messageId <= 0) return;
+    if (!messagesRef.current.some((item) => item.id === messageId) && selectedId) {
+      try {
+        const target = await oaApi.listMessages(selectedId, { beforeId: messageId + 1, limit: 1 });
+        setMessages((current) => mergeMessages(current, target.filter((item) => item.id === messageId)));
+      } catch (ex) {
+        setError(ex instanceof Error ? ex.message : 'Không tải được tin nhắn gốc.');
+        return;
+      }
+    }
+    window.requestAnimationFrame(() => {
+      const target = scrollRef.current?.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`);
+      if (!target) return;
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.classList.remove('is-jump-highlight');
+      window.requestAnimationFrame(() => target.classList.add('is-jump-highlight'));
+      window.setTimeout(() => target.classList.remove('is-jump-highlight'), 1600);
+    });
   };
 
   const openContact = async (contact: OaContact) => {
@@ -1575,6 +1664,17 @@ export function OaChatPage() {
                                   sending ? ' is-pending' : ''
                                 }${failed ? ' is-failed' : ''}`}
                               >
+                                {oaHasQuote(msg) ? (
+                                  <button
+                                    type="button"
+                                    className="chat-reply-quote"
+                                    title="Đi tới tin nhắn gốc"
+                                    onClick={() => void jumpToQuoted(msg)}
+                                  >
+                                    <strong>{msg.reply_sender_name || 'Tin nhắn'}</strong>
+                                    <span>{msg.reply_preview || '[Tin trích dẫn]'}</span>
+                                  </button>
+                                ) : null}
                                 {attachment ? (
                                   <OaAttachmentBlock
                                     msg={msg}
@@ -1615,7 +1715,22 @@ export function OaChatPage() {
                                   <IconRetry size={14} />
                                 </button>
                               </div>
-                            ) : null}
+                            ) : (
+                              <div className="chat-msg-actions">
+                                <button
+                                  type="button"
+                                  className="chat-msg-action"
+                                  title="Trả lời"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setPendingQuote(msg);
+                                  }}
+                                >
+                                  <IconReply size={14} />
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1631,9 +1746,13 @@ export function OaChatPage() {
               </div>
 
               <OaComposer
+                key={selectedId}
                 canSend={canSend}
                 blockReason={blockReason}
                 placeholder={composerPlaceholder}
+                pendingQuote={pendingQuote}
+                contactTitle={selected?.title}
+                onClearQuote={() => setPendingQuote(null)}
                 onSend={sendMessage}
               />
             </div>

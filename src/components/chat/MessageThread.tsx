@@ -551,6 +551,7 @@ export function MessageThread({
                           type="button"
                           className="chat-msg-action"
                           title="Trả lời"
+                          onMouseDown={(event) => event.preventDefault()}
                           onClick={() => {
                             setReplyTo(m);
                             setMenuForId(null);
@@ -568,7 +569,11 @@ export function MessageThread({
                         </button>
                         {menuForId === m.id && (
                           <div className="chat-msg-menu" role="menu">
-                            <button type="button" onClick={() => { setReplyTo(m); setMenuForId(null); }}>
+                            <button
+                              type="button"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => { setReplyTo(m); setMenuForId(null); }}
+                            >
                               Trả lời
                             </button>
                             {m.msg_type === 'text' && m.body && (

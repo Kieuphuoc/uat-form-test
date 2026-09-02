@@ -80,10 +80,12 @@ export function ComposerBotPickBar({
   selected,
   asking,
   onClear,
+  quoteHint,
 }: {
   selected: ComposerBotPick;
   asking: boolean;
   onClear: () => void;
+  quoteHint?: boolean;
 }) {
   return (
     <div className="chat-reply-bar chat-bot-pick-bar">
@@ -96,7 +98,13 @@ export function ComposerBotPickBar({
         <strong>
           {asking ? 'Đang hỏi' : 'Soạn nháp với'} {selected.title}
         </strong>
-        <span>{asking ? 'Chưa gửi tin này…' : 'Enter hỏi AI — xem rồi gửi'}</span>
+        <span>
+          {asking
+            ? 'Đang hỏi AI Bots, vui lòng chờ…'
+            : quoteHint
+              ? 'Enter hỏi AI bằng tin trích dẫn — xem rồi gửi'
+              : 'Enter hỏi AI — xem rồi gửi'}
+        </span>
       </div>
       <button
         type="button"

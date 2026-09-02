@@ -92,6 +92,11 @@ export type OaMessage = {
   created_at: string;
   /** Chỉ phía client: tin vừa gửi, chưa có id server. */
   send_status?: 'sending' | 'failed';
+  quote_zalo_msg_id?: string | null;
+  reply_to_message_id?: number | null;
+  reply_preview?: string | null;
+  reply_sender_name?: string | null;
+  reply_msg_type?: string | null;
 };
 
 export type OaConversationOpen = {
@@ -193,12 +198,13 @@ export const oaApi = {
     );
   },
 
-  sendMessage: (id: number, text: string, clientMsgId?: string) =>
+  sendMessage: (id: number, text: string, clientMsgId?: string, replyToMessageId?: number | null) =>
     oaFetch<OaMessage>(`/api/chat/oa/conversations/${id}/messages`, {
       method: 'POST',
       body: JSON.stringify({
         text,
         client_msg_id: clientMsgId || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        reply_to_message_id: replyToMessageId ?? null,
       }),
     }),
 

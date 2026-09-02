@@ -14,8 +14,12 @@ import {
   QuickMessageSlashMenu,
 } from './QuickMessageSlashMenu';
 import { ComposerBotPickBar, ComposerBotPickOverlay } from './ComposerBotPickMenu';
-import type { ZaloMember, ZaloMessage } from '../../lib/zaloChat';
-import { zaloQuotePreview } from '../../lib/zaloChat';
+import {
+  zaloMessageDisplayText,
+  zaloQuotePreview,
+  type ZaloMember,
+  type ZaloMessage,
+} from '../../lib/zaloChat';
 
 export type ZaloSendPayload = {
   text: string;
@@ -217,9 +221,15 @@ export const ZaloComposer = memo(function ZaloComposer({
     });
   };
 
+  const quotedQuestion = pendingQuote ? zaloMessageDisplayText(pendingQuote).trim() : '';
+  const canAskWithQuote = !!botPick.selectedBot && quotedQuestion.length > 0;
+  const canSubmit = !!draft.trim() || queuedFiles.length > 0 || canAskWithQuote;
+
   const submit = () => {
-    const text = expandQuickMessage(draft, quickMessages);
-    if (sending || botPick.askingBot || (!text.trim() && queuedFiles.length === 0)) return;
+    let text = expandQuickMessage(draft, quickMessages);
+    if (sending || botPick.askingBot) return;
+    if (!text.trim() && canAskWithQuote) text = quotedQuestion;
+    if (!text.trim() && queuedFiles.length === 0) return;
     if (text.trim() && botPick.selectedBot) {
       void botPick.ask(text.trim()).then((answer) => {
         if (!answer) {
@@ -287,6 +297,7 @@ export const ZaloComposer = memo(function ZaloComposer({
           selected={botPick.selectedBot}
           asking={botPick.askingBot}
           onClear={botPick.clearSelected}
+          quoteHint={canAskWithQuote}
         />
       ) : null}
       {queuedFiles.length > 0 && (
@@ -375,7 +386,9 @@ export const ZaloComposer = memo(function ZaloComposer({
             botPick.selectedBot
               ? botPick.askingBot
                 ? `Đang hỏi ${botPick.selectedBot.title}…`
-                : `Nhập câu hỏi cho ${botPick.selectedBot.title}…`
+                : canAskWithQuote
+                  ? 'Nhập câu hỏi, hoặc Enter dùng tin trích dẫn…'
+                  : `Nhập câu hỏi cho ${botPick.selectedBot.title}…`
               : 'Nhập tin nhắn… · @@ hỏi AI'
           }
           disabled={botPick.askingBot}
@@ -441,7 +454,7 @@ export const ZaloComposer = memo(function ZaloComposer({
         <button
           type="button"
           className="chat-send"
-          disabled={sending || botPick.askingBot || (!draft.trim() && queuedFiles.length === 0)}
+          disabled={sending || botPick.askingBot || !canSubmit}
           onClick={() => submit()}
           title={botPick.selectedBot ? `Hỏi ${botPick.selectedBot.title} (Enter)` : 'Gửi'}
         >
