@@ -98,6 +98,8 @@ export type ChatMe = {
   assigned_oa_id?: string | null;
   can_manage_chat_permissions?: boolean;
   can_manage_chat_permission_default?: boolean;
+  can_manage_faq_sets?: boolean;
+  can_review_faq?: boolean;
   chat_theme?: string | null;
   unit?: {
     unit_id: number;
@@ -592,6 +594,16 @@ export const chatApi = {
       body: JSON.stringify({ folder_id: folderId }),
     }),
 
+  askBotDraft: (folderId: string, body: string, responseType?: 'MD' | 'TEXT') =>
+    chatFetch<{ folder_id: string; title: string; body: string }>('/api/chat/bots/ask', {
+      method: 'POST',
+      body: JSON.stringify({
+        folder_id: folderId,
+        body,
+        response_type: responseType ?? undefined,
+      }),
+    }),
+
   rename: (id: number, title: string) =>
     chatFetch<Conversation>(`/api/chat/conversations/${id}`, {
       method: 'PUT',
@@ -801,6 +813,222 @@ export const chatApi = {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
+
+  listFaqSets: () =>
+    chatFetch<{ items?: FaqSet[] }>('/api/faq/sets').then((r) => r.items ?? []),
+
+  listFaqWorkbench: () =>
+    chatFetch<{ items?: FaqWorkbenchItem[] }>('/api/faq/workbench').then((r) => r.items ?? []),
+
+  syncFaqSet: (id: number) =>
+    chatFetch<{ set_id: number; question_count: number; message: string }>(`/api/faq/sets/${id}/sync`, {
+      method: 'POST',
+    }),
+
+  getFaqSet: (id: number) => chatFetch<FaqSet>(`/api/faq/sets/${id}`),
+
+  createFaqSet: (body: FaqSetWrite) =>
+    chatFetch<FaqSet>('/api/faq/sets', { method: 'POST', body: JSON.stringify(body) }),
+
+  updateFaqSet: (id: number, body: FaqSetWrite) =>
+    chatFetch<FaqSet>(`/api/faq/sets/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+
+  deleteFaqSet: (id: number) =>
+    chatFetch<{ message: string }>(`/api/faq/sets/${id}`, { method: 'DELETE' }),
+
+  listFaqItems: (setId: number, status?: string) => {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+    return chatFetch<FaqItemList>(`/api/faq/sets/${setId}/items${qs}`);
+  },
+
+  createFaqItem: (setId: number, body: FaqItemWrite) =>
+    chatFetch<FaqItem>(`/api/faq/sets/${setId}/items`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  updateFaqItem: (setId: number, itemId: number, body: FaqItemWrite) =>
+    chatFetch<FaqItem>(`/api/faq/sets/${setId}/items/${itemId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  deleteFaqItem: (setId: number, itemId: number) =>
+    chatFetch<{ message: string }>(`/api/faq/sets/${setId}/items/${itemId}`, { method: 'DELETE' }),
+
+  approveFaqItem: (setId: number, itemId: number) =>
+    chatFetch<FaqItem>(`/api/faq/sets/${setId}/items/${itemId}/approve`, { method: 'POST' }),
+
+  rejectFaqItem: (setId: number, itemId: number) =>
+    chatFetch<FaqItem>(`/api/faq/sets/${setId}/items/${itemId}/reject`, { method: 'POST' }),
+
+  submitFaqItem: (setId: number, itemId: number) =>
+    chatFetch<FaqItem>(`/api/faq/sets/${setId}/items/${itemId}/submit`, { method: 'POST' }),
+
+  listFaqApprovers: (setId: number) =>
+    chatFetch<{ items?: FaqApprover[] } | FaqApprover[]>(`/api/faq/sets/${setId}/approvers`).then(
+      (r) => (Array.isArray(r) ? r : r.items ?? []),
+    ),
+
+  addFaqApprover: (setId: number, userId: number) =>
+    chatFetch<{ items?: FaqApprover[] } | FaqApprover[]>(`/api/faq/sets/${setId}/approvers`, {
+      method: 'POST',
+      body: JSON.stringify({ user_id: userId }),
+    }).then((r) => (Array.isArray(r) ? r : r.items ?? [])),
+
+  removeFaqApprover: (setId: number, userId: number) =>
+    chatFetch<{ message: string }>(`/api/faq/sets/${setId}/approvers/${userId}`, {
+      method: 'DELETE',
+    }),
+
+  uploadFaqFile: (setId: number, file: File) => {
+    const body = new FormData();
+    body.append('file', file, file.name);
+    return chatFetch<FaqFile>(`/api/faq/sets/${setId}/files`, { method: 'POST', body });
+  },
+
+  listQuickMessages: () =>
+    chatFetch<{ items?: QuickMessage[] } | QuickMessage[]>('/api/chat/quick-messages').then(
+      (r) => (Array.isArray(r) ? r : r.items ?? []),
+    ),
+
+  createQuickMessage: (body: QuickMessageWrite) =>
+    chatFetch<QuickMessage>('/api/chat/quick-messages', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  updateQuickMessage: (id: number, body: QuickMessageWrite) =>
+    chatFetch<QuickMessage>(`/api/chat/quick-messages/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  deleteQuickMessage: (id: number) =>
+    chatFetch<{ message: string }>(`/api/chat/quick-messages/${id}`, { method: 'DELETE' }),
+
+  reorderQuickMessages: (ids: number[]) =>
+    chatFetch<{ items?: QuickMessage[] } | QuickMessage[]>('/api/chat/quick-messages/reorder', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    }).then((r) => (Array.isArray(r) ? r : r.items ?? [])),
+
+  linkFaqFile: (setId: number, sourceFileId: string) =>
+    chatFetch<FaqFile>(`/api/faq/sets/${setId}/files/link`, {
+      method: 'POST',
+      body: JSON.stringify({ source_file_id: sourceFileId }),
+    }),
+
+  faqFileBlob: (setId: number, fileId: string, size = 0) =>
+    chatFetchBlob(
+      `/api/faq/sets/${setId}/files/${encodeURIComponent(fileId)}/content${
+        size > 0 ? `?size=${size}` : ''
+      }`,
+    ),
+};
+
+export type FaqNoMatchAction = 'silent' | 'fixed_text' | 'transfer' | 'fallback_rag';
+export type FaqReplyMode = 'single' | 'suggest_questions';
+export type FaqItemStatus = 'draft' | 'pending' | 'approved' | 'rejected';
+
+export type FaqSet = {
+  id: number;
+  code: string;
+  name: string;
+  unit_id: number;
+  unit_ids?: number[];
+  folder_id: string;
+  min_score: number;
+  suggest_score: number;
+  auto_score: number;
+  reply_mode: FaqReplyMode | string;
+  no_match_action: FaqNoMatchAction | string;
+  no_match_text?: string | null;
+  pending_publish: boolean;
+  item_count: number;
+  pending_count: number;
+  approved_count: number;
+  can_review: boolean;
+  can_manage: boolean;
+  can_sync?: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FaqSetWrite = {
+  code?: string;
+  name?: string;
+  min_score?: number;
+  suggest_score?: number;
+  auto_score?: number;
+  reply_mode?: string;
+  no_match_action?: string;
+  no_match_text?: string | null;
+  unit_ids?: number[];
+};
+
+export type FaqWorkbenchItem = {
+  set_id: number;
+  code: string;
+  name: string;
+  folder_id: string;
+  role: 'ask' | 'build' | string;
+  title: string;
+  workbench_id: string;
+};
+
+export type FaqItem = {
+  id: number;
+  set_id: number;
+  question: string;
+  answer_md: string;
+  status: FaqItemStatus | string;
+  source: string;
+  created_by: number;
+  created_at: string;
+  updated_by: number;
+  updated_at: string;
+  approved_by?: number | null;
+  approved_at?: string | null;
+};
+
+export type FaqItemWrite = {
+  question?: string;
+  answer_md?: string;
+  source?: string;
+};
+
+export type FaqItemList = {
+  items: FaqItem[];
+  total: number;
+};
+
+export type FaqApprover = {
+  user_id: number;
+  nickname?: string | null;
+  email?: string | null;
+  granted_at: string;
+};
+
+export type FaqFile = {
+  file_id: string;
+  file_name: string;
+  content_type: string;
+  size_bytes: number;
+};
+
+export type QuickMessage = {
+  id: number;
+  unit_id: number;
+  code: string;
+  body_text: string;
+  sort_order: number;
+};
+
+export type QuickMessageWrite = {
+  code: string;
+  body_text: string;
+  sort_order?: number;
 };
 
 /** id tin phía client — chống nhân đôi khi retry / mạng chập. */

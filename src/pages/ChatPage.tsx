@@ -22,6 +22,7 @@ import { UserPickerDialog, type PickerMode } from '../components/chat/UserPicker
 import { useAuth } from '../auth/AuthContext';
 import { resizeChatImage } from '../lib/chatImageResize';
 import { navigateChat } from '../lib/chatNav';
+import { useQuickMessages } from '../lib/useQuickMessages';
 import {
   getDesktopNotificationMode,
   setChatActorUserId,
@@ -160,6 +161,7 @@ export function ChatPage() {
     atBottom: boolean;
     token: number;
   } | null>(null);
+  const quickMessages = useQuickMessages(me?.unit_id);
 
   const lastIdRef = useRef(0);
   const readIdRef = useRef(0);
@@ -554,7 +556,10 @@ export function ChatPage() {
 
   const onSendAttachments = useCallback(
     async (files: File[]) => {
-      if (!activeId || isEmbedBot(activeConversation) || activeConversation?.kind === 'bot' || (relation && !relation.can_send)) return;
+      const botFolder = (activeConversation?.bot_folder_id ?? '').toLowerCase();
+      const isFaqBuild = botFolder.startsWith('faq-build:');
+      const botBlocked = activeConversation?.kind === 'bot' && !isFaqBuild;
+      if (!activeId || isEmbedBot(activeConversation) || botBlocked || (relation && !relation.can_send)) return;
       try {
         const uploaded = [];
         for (const file of files) {
@@ -897,6 +902,9 @@ export function ChatPage() {
               relation={relation}
               members={detail?.members ?? []}
               busy={busy}
+              quickMessages={quickMessages}
+              selfUserId={me?.user_id}
+              canReviewFaq={!!me?.can_review_faq}
               onSend={onSend}
               onSendAttachments={onSendAttachments}
               onRecall={(messageId) => void onRecall(messageId)}

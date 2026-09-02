@@ -1,22 +1,53 @@
 import { memo, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import { mobileKeyboardFocusHandlers, refocusComposer } from '../../lib/keyboardBridge';
-import { type ChatMember, type ChatMessage, type Conversation } from '../../api/chatApi';
+import {
+  botAvatarUrl,
+  chatApi,
+  type ChatMember,
+  type ChatMessage,
+  type Conversation,
+  type QuickMessage,
+} from '../../api/chatApi';
 import { useAuth } from '../../auth/AuthContext';
+import { loadChatBots } from '../../lib/chatBotsCache';
+import {
+  buildComposerBotPicks,
+  detectComposerBotPick,
+  filterComposerBotPicks,
+  type ComposerBotPick,
+} from '../../lib/composerBotPick';
+import {
+  expandQuickMessage,
+  faqSlashCommands,
+  type FaqBuildPhase,
+  type FaqSlashCommand,
+} from '../../lib/faqBuildState';
 import { uiCopy } from '../../lib/uiCopy';
 import {
+  IconBot,
   IconCamera,
+  IconCheck,
   IconClose,
   IconFile,
   IconImage,
   IconPaperclip,
+  IconSave,
   IconSend,
 } from '../AppIcons';
 import { ChatAvatar } from './ChatAvatar';
+import { ComposerBotPickMenu } from './ComposerBotPickMenu';
 
 type QueuedFile = {
   id: string;
   file: File;
   previewUrl: string | null;
+};
+
+type SlashItem = {
+  code: string;
+  label: string;
+  insert: string;
+  description?: string;
 };
 
 const COMPOSER_MAX_LINES = 8;
@@ -42,9 +73,14 @@ type Props = {
   blockReason: string | null;
   replyTo: ChatMessage | null;
   members: ChatMember[];
+  quickMessages?: QuickMessage[];
+  faqBuildMode?: boolean;
+  faqBuildPhase?: FaqBuildPhase;
+  canReviewFaq?: boolean;
   onClearReply: () => void;
   onSend: (body: string, replyToMessageId?: number | null) => void;
   onSendAttachments: (files: File[]) => Promise<void>;
+  onValidateSend?: (body: string) => boolean;
   addFilesRef: MutableRefObject<((files: File[]) => void) | null>;
 };
 
@@ -57,13 +93,18 @@ export const ChatComposer = memo(function ChatComposer({
   canSend,
   canAttach,
   isBot,
-  aiWaiting: _aiWaiting,
+  aiWaiting,
   blockReason,
   replyTo,
   members,
+  quickMessages = [],
+  faqBuildMode = false,
+  faqBuildPhase = 'idle',
+  canReviewFaq = false,
   onClearReply,
   onSend,
   onSendAttachments,
+  onValidateSend,
   addFilesRef,
 }: Props) {
   const { mobile } = useAuth();
@@ -76,6 +117,19 @@ export const ChatComposer = memo(function ChatComposer({
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionStart, setMentionStart] = useState<number | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [slashQuery, setSlashQuery] = useState('');
+  const [slashStart, setSlashStart] = useState<number | null>(null);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [botOpen, setBotOpen] = useState(false);
+  const [botQuery, setBotQuery] = useState('');
+  const [botStart, setBotStart] = useState<number | null>(null);
+  const [botIndex, setBotIndex] = useState(0);
+  const [botPicks, setBotPicks] = useState<ComposerBotPick[]>([]);
+  const [botPicksLoaded, setBotPicksLoaded] = useState(false);
+  const [selectedBot, setSelectedBot] = useState<ComposerBotPick | null>(null);
+  const [askingBot, setAskingBot] = useState(false);
+  const [askError, setAskError] = useState<string | null>(null);
   const [imageMenuOpen, setImageMenuOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -84,6 +138,28 @@ export const ChatComposer = memo(function ChatComposer({
   const imageMenuRef = useRef<HTMLDivElement | null>(null);
   const queuedRef = useRef<QueuedFile[]>([]);
   queuedRef.current = queuedFiles;
+
+  const faqCommands = useMemo(
+    () => (faqBuildMode ? faqSlashCommands(canReviewFaq) : []),
+    [faqBuildMode, canReviewFaq],
+  );
+
+  const slashCatalog = useMemo((): SlashItem[] => {
+    if (faqBuildMode) {
+      return faqCommands.map((item: FaqSlashCommand) => ({
+        code: item.code,
+        label: item.label,
+        insert: item.insert,
+        description: item.description,
+      }));
+    }
+    return quickMessages.map((item) => ({
+      code: item.code,
+      label: item.code,
+      insert: `/${item.code} `,
+      description: item.body_text.length > 80 ? `${item.body_text.slice(0, 80)}…` : item.body_text,
+    }));
+  }, [faqBuildMode, faqCommands, quickMessages]);
 
   useEffect(() => {
     return () => {
@@ -99,6 +175,21 @@ export const ChatComposer = memo(function ChatComposer({
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, [imageMenuOpen]);
+
+  useEffect(() => {
+    if (!botOpen || botPicksLoaded) return;
+    let cancelled = false;
+    void Promise.allSettled([loadChatBots(), chatApi.listFaqWorkbench()]).then((results) => {
+      if (cancelled) return;
+      const bots = results[0].status === 'fulfilled' ? results[0].value : [];
+      const faqs = results[1].status === 'fulfilled' ? results[1].value : [];
+      setBotPicks(buildComposerBotPicks(bots, faqs));
+      setBotPicksLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [botOpen, botPicksLoaded]);
 
   const addFiles = (files: File[]) => {
     if (!canAttach || files.length === 0) return;
@@ -133,20 +224,66 @@ export const ChatComposer = memo(function ChatComposer({
           .slice(0, 8)
       : [];
 
-  const updateMention = (value: string, caret: number) => {
-    if (conversationKind !== 'group') return;
-    const beforeCaret = value.slice(0, caret);
-    const match = beforeCaret.match(/(?:^|\s)@([^\s@]*)$/);
-    if (!match) {
-      setMentionOpen((open) => (open ? false : open));
-      setMentionStart((start) => (start == null ? start : null));
+  const slashMatches =
+    slashOpen && slashCatalog.length > 0
+      ? slashCatalog
+          .filter((item) =>
+            item.code.toLocaleLowerCase('vi').includes(slashQuery.toLocaleLowerCase('vi'))
+            || item.label.toLocaleLowerCase('vi').includes(slashQuery.toLocaleLowerCase('vi')),
+          )
+          .slice(0, 8)
+      : [];
+
+  const botMatches = botOpen ? filterComposerBotPicks(botPicks, botQuery) : [];
+
+  const updateComposerTokens = (value: string, caret: number) => {
+    const botHit = detectComposerBotPick(value, caret);
+    if (botHit) {
+      setBotStart(botHit.start);
+      setBotQuery(botHit.query);
+      setBotIndex(0);
+      setBotOpen(true);
+      setMentionOpen(false);
+      setMentionStart(null);
+      setSlashOpen(false);
+      setSlashStart(null);
       return;
     }
-    const at = beforeCaret.lastIndexOf('@');
-    setMentionStart(at);
-    setMentionQuery(match[1]);
-    setMentionIndex(0);
-    setMentionOpen(true);
+
+    setBotOpen(false);
+    setBotStart(null);
+
+    if (conversationKind === 'group') {
+      const beforeCaret = value.slice(0, caret);
+      const mentionMatch = beforeCaret.match(/(?:^|\s)@([^\s@]*)$/);
+      if (mentionMatch) {
+        const at = beforeCaret.lastIndexOf('@');
+        setMentionStart(at);
+        setMentionQuery(mentionMatch[1]);
+        setMentionIndex(0);
+        setMentionOpen(true);
+        setSlashOpen(false);
+        setSlashStart(null);
+        return;
+      }
+    }
+
+    setMentionOpen(false);
+    setMentionStart(null);
+
+    const beforeCaret = value.slice(0, caret);
+    const slashMatch = beforeCaret.match(/(?:^|\s)\/([^\s/]*)$/);
+    if (slashMatch && (faqBuildMode || quickMessages.length > 0)) {
+      const slashAt = beforeCaret.lastIndexOf('/');
+      setSlashStart(slashAt);
+      setSlashQuery(slashMatch[1]);
+      setSlashIndex(0);
+      setSlashOpen(true);
+      return;
+    }
+
+    setSlashOpen(false);
+    setSlashStart(null);
   };
 
   const chooseMention = (member: ChatMember) => {
@@ -166,6 +303,39 @@ export const ChatComposer = memo(function ChatComposer({
     });
   };
 
+  const chooseSlash = (item: SlashItem) => {
+    if (slashStart == null) return;
+    const textarea = textareaRef.current;
+    const caret = textarea?.selectionStart ?? draft.length;
+    const next = `${draft.slice(0, slashStart)}${item.insert}${draft.slice(caret)}`;
+    const nextCaret = slashStart + item.insert.length;
+    setDraft(next);
+    setSlashOpen(false);
+    setSlashStart(null);
+    window.requestAnimationFrame(() => {
+      textarea?.focus();
+      textarea?.setSelectionRange(nextCaret, nextCaret);
+      resizeComposer(textarea);
+    });
+  };
+
+  const chooseBotPick = (item: ComposerBotPick) => {
+    if (botStart == null) return;
+    const textarea = textareaRef.current;
+    const caret = textarea?.selectionStart ?? draft.length;
+    const next = `${draft.slice(0, botStart)}${draft.slice(caret).replace(/^\s*/, '')}`;
+    setDraft(next);
+    setSelectedBot(item);
+    setAskError(null);
+    setBotOpen(false);
+    setBotStart(null);
+    window.requestAnimationFrame(() => {
+      textarea?.focus();
+      textarea?.setSelectionRange(botStart, botStart);
+      resizeComposer(textarea);
+    });
+  };
+
   const wrapComposerSelection = (marker: string) => {
     const textarea = textareaRef.current;
     if (!textarea || textarea.disabled) return;
@@ -176,7 +346,7 @@ export const ChatComposer = memo(function ChatComposer({
     const nextStart = start + marker.length;
     const nextEnd = nextStart + selected.length;
     setDraft(next);
-    updateMention(next, nextEnd);
+    updateComposerTokens(next, nextEnd);
     window.requestAnimationFrame(() => {
       textarea.focus();
       textarea.setSelectionRange(nextStart, nextEnd);
@@ -192,9 +362,17 @@ export const ChatComposer = memo(function ChatComposer({
     });
   };
 
-  const submit = () => {
-    const body = draft.trim();
-    if ((!body && queuedFiles.length === 0) || !canSend || sendingAttachments) return;
+  const dispatchSend = (rawBody: string) => {
+    let body = rawBody.trim();
+    if (!body && queuedFiles.length === 0) return;
+    if (body && !faqBuildMode) {
+      body = expandQuickMessage(body, quickMessages);
+    }
+    if (body && selectedBot && !faqBuildMode) {
+      void askSelectedBot(body);
+      return;
+    }
+    if (body && onValidateSend && !onValidateSend(body)) return;
     if (body) {
       onSend(body, replyTo?.id ?? null);
       setDraft('');
@@ -220,12 +398,50 @@ export const ChatComposer = memo(function ChatComposer({
     }
   };
 
+  const askSelectedBot = async (question: string) => {
+    if (!selectedBot || askingBot) return;
+    setAskingBot(true);
+    setAskError(null);
+    try {
+      const result = await chatApi.askBotDraft(selectedBot.id, question);
+      const answer = (result.body ?? '').trim();
+      if (!answer) {
+        setAskError('Không nhận được nội dung. Bạn có thể thử lại.');
+        return;
+      }
+      setDraft(answer);
+      setSelectedBot(null);
+      window.requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        resizeComposer(el);
+        if (el) {
+          el.focus();
+          const end = answer.length;
+          el.setSelectionRange(end, end);
+        }
+      });
+    } catch (e) {
+      setAskError(e instanceof Error ? e.message : 'Không hỏi được Chatbots. Hãy thử lại.');
+    } finally {
+      setAskingBot(false);
+      refocusComposer(textareaRef.current);
+    }
+  };
+
+  const submit = () => {
+    if ((!draft.trim() && queuedFiles.length === 0) || !canSend || sendingAttachments || askingBot) return;
+    dispatchSend(draft);
+  };
+
+  const showDoneAction = faqBuildMode && canSend && faqBuildPhase === 'answering';
+  const showSaveAction = faqBuildMode && canSend && faqBuildPhase === 'preview';
+
   return (
     <form
       className="chat-composer"
       onSubmit={(e) => {
         e.preventDefault();
-        if (!sendingAttachments) submit();
+        if (!sendingAttachments && !askingBot) submit();
       }}
     >
       {replyTo && (
@@ -238,6 +454,49 @@ export const ChatComposer = memo(function ChatComposer({
             <IconClose size={14} />
           </button>
         </div>
+      )}
+      {selectedBot ? (
+        <div className="chat-reply-bar chat-bot-pick-bar">
+          <ChatAvatar
+            name={selectedBot.title}
+            size={28}
+            imageSrc={selectedBot.kind === 'bot' ? botAvatarUrl(selectedBot.avatarUrl) : undefined}
+          />
+          <div>
+            <strong>
+              {askingBot ? 'Đang hỏi' : 'Soạn nháp với'} {selectedBot.title}
+            </strong>
+            <span>
+              {askingBot ? 'Chưa gửi tin này…' : 'Enter hỏi AI — xem rồi gửi'}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="chat-icon-btn"
+            disabled={askingBot}
+            onClick={() => {
+              setSelectedBot(null);
+              setAskError(null);
+            }}
+            aria-label="Bỏ Chatbots"
+          >
+            <IconClose size={14} />
+          </button>
+        </div>
+      ) : null}
+      {botOpen && (
+        botPicksLoaded ? (
+          <ComposerBotPickMenu
+            items={botMatches}
+            activeIndex={botIndex}
+            onChoose={chooseBotPick}
+            onHover={setBotIndex}
+          />
+        ) : (
+          <div className="chat-mention-menu chat-bot-pick-menu" role="status">
+            <span className="chat-mention-empty">Đang tải Chatbots / FAQ…</span>
+          </div>
+        )
       )}
       {mentionOpen && (
         <div className="chat-mention-menu" role="listbox" aria-label="Nhắc thành viên">
@@ -268,12 +527,34 @@ export const ChatComposer = memo(function ChatComposer({
           )}
         </div>
       )}
+      {slashOpen && (
+        <div className="chat-mention-menu chat-slash-menu" role="listbox" aria-label="Tin nhắn nhanh">
+          {slashMatches.length > 0 ? (
+            slashMatches.map((item, index) => (
+              <button
+                key={item.code}
+                type="button"
+                className={index === slashIndex ? 'is-active' : ''}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => chooseSlash(item)}
+                role="option"
+                aria-selected={index === slashIndex}
+              >
+                <span className="chat-slash-code">/{item.label}</span>
+                {item.description ? <small>{item.description}</small> : null}
+              </button>
+            ))
+          ) : (
+            <span className="chat-mention-empty">Không có mục phù hợp.</span>
+          )}
+        </div>
+      )}
       <div className="chat-composer-row">
         {canAttach && (
           <button
             type="button"
             className="chat-attach"
-            disabled={!canSend || sendingAttachments}
+            disabled={!canSend || sendingAttachments || askingBot}
             onClick={() => fileInputRef.current?.click()}
             title="Đính kèm file"
           >
@@ -285,7 +566,7 @@ export const ChatComposer = memo(function ChatComposer({
             <button
               type="button"
               className="chat-attach"
-              disabled={!canSend || sendingAttachments}
+              disabled={!canSend || sendingAttachments || askingBot}
               onClick={() => setImageMenuOpen((open) => !open)}
               title="Đính kèm ảnh"
               aria-expanded={imageMenuOpen}
@@ -298,7 +579,7 @@ export const ChatComposer = memo(function ChatComposer({
                 <button
                   type="button"
                   role="menuitem"
-                  disabled={!canSend || sendingAttachments}
+                  disabled={!canSend || sendingAttachments || askingBot}
                   onClick={() => {
                     setImageMenuOpen(false);
                     cameraInputRef.current?.click();
@@ -310,7 +591,7 @@ export const ChatComposer = memo(function ChatComposer({
                 <button
                   type="button"
                   role="menuitem"
-                  disabled={!canSend || sendingAttachments}
+                  disabled={!canSend || sendingAttachments || askingBot}
                   onClick={() => {
                     setImageMenuOpen(false);
                     imageInputRef.current?.click();
@@ -367,7 +648,7 @@ export const ChatComposer = memo(function ChatComposer({
           onChange={(e) => {
             const el = e.currentTarget;
             setDraft(el.value);
-            updateMention(el.value, el.selectionStart);
+            updateComposerTokens(el.value, el.selectionStart);
             resizeComposer(el);
           }}
           onPaste={(e) => {
@@ -391,6 +672,50 @@ export const ChatComposer = memo(function ChatComposer({
               if (key === 'i') {
                 e.preventDefault();
                 wrapComposerSelection('*');
+                return;
+              }
+            }
+            if (botOpen) {
+              if (e.key === 'ArrowDown' && botMatches.length > 0) {
+                e.preventDefault();
+                setBotIndex((index) => (index + 1) % botMatches.length);
+                return;
+              }
+              if (e.key === 'ArrowUp' && botMatches.length > 0) {
+                e.preventDefault();
+                setBotIndex((index) => (index - 1 + botMatches.length) % botMatches.length);
+                return;
+              }
+              if ((e.key === 'Enter' || e.key === 'Tab') && botMatches.length > 0) {
+                e.preventDefault();
+                chooseBotPick(botMatches[botIndex] ?? botMatches[0]);
+                return;
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                setBotOpen(false);
+                return;
+              }
+            }
+            if (slashOpen) {
+              if (e.key === 'ArrowDown' && slashMatches.length > 0) {
+                e.preventDefault();
+                setSlashIndex((index) => (index + 1) % slashMatches.length);
+                return;
+              }
+              if (e.key === 'ArrowUp' && slashMatches.length > 0) {
+                e.preventDefault();
+                setSlashIndex((index) => (index - 1 + slashMatches.length) % slashMatches.length);
+                return;
+              }
+              if ((e.key === 'Enter' || e.key === 'Tab') && slashMatches.length > 0) {
+                e.preventDefault();
+                chooseSlash(slashMatches[slashIndex] ?? slashMatches[0]);
+                return;
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                setSlashOpen(false);
                 return;
               }
             }
@@ -420,29 +745,60 @@ export const ChatComposer = memo(function ChatComposer({
             }
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
-              if (!sendingAttachments) submit();
+              if (!sendingAttachments && !askingBot) submit();
             }
           }}
           rows={1}
           placeholder={
             canSend
-              ? isBot
-                ? 'Hỏi Chatbots…'
-                : 'Nhập tin nhắn…'
+              ? selectedBot
+                ? askingBot
+                  ? `Đang hỏi ${selectedBot.title}…`
+                  : `Nhập câu hỏi cho ${selectedBot.title}…`
+                : faqBuildMode
+                  ? 'Dựng FAQ — gõ / để xem lệnh…'
+                  : isBot
+                    ? 'Hỏi Chatbots… · @@ hỏi AI khác'
+                    : 'Nhập tin nhắn… · @@ hỏi AI'
               : blockReason || 'Không thể gửi tin…'
           }
           aria-label="Nội dung tin nhắn"
-          disabled={!canSend}
+          disabled={!canSend || askingBot}
         />
+        {showDoneAction ? (
+          <button
+            type="button"
+            className="chat-composer-action"
+            disabled={!!aiWaiting || sendingAttachments || askingBot}
+            title="Xong (/Xong)"
+            onClick={() => dispatchSend('/Xong')}
+          >
+            <IconCheck size={18} />
+          </button>
+        ) : null}
+        {showSaveAction ? (
+          <button
+            type="button"
+            className="chat-composer-action chat-composer-action--save"
+            disabled={!!aiWaiting || sendingAttachments || askingBot}
+            title="Lưu (/Lưu)"
+            onClick={() => dispatchSend('/Lưu')}
+          >
+            <IconSave size={18} />
+          </button>
+        ) : null}
         <button
           type="submit"
           className="chat-send"
           disabled={
-            !canSend || sendingAttachments || (!draft.trim() && queuedFiles.length === 0)
+            !canSend
+            || sendingAttachments
+            || askingBot
+            || (!draft.trim() && queuedFiles.length === 0)
           }
-          title="Gửi (Enter)"
+          title={selectedBot ? `Hỏi ${selectedBot.title} (Enter)` : 'Gửi (Enter)'}
         >
-          <IconSend size={18} />
+          {selectedBot ? <IconBot size={18} /> : <IconSend size={18} />}
         </button>
       </div>
       {queuedFiles.length > 0 && (
@@ -475,6 +831,7 @@ export const ChatComposer = memo(function ChatComposer({
           {sendingAttachments && <span className="chat-attachment-uploading">Đang tải lên…</span>}
         </div>
       )}
+      {askError && <div className="chat-attachment-error">{askError}</div>}
       {attachmentError && <div className="chat-attachment-error">{attachmentError}</div>}
     </form>
   );

@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { botAvatarUrl, botTypeLabel, type ChatMember, type ChatMessage, type ContactRelation, type Conversation } from '../../api/chatApi';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { botAvatarUrl, botTypeLabel, type ChatMember, type ChatMessage, type ContactRelation, type Conversation, type QuickMessage } from '../../api/chatApi';
+import { deriveFaqBuildPhase, validateFaqBuildSend } from '../../lib/faqBuildState';
 import { ChatComposer } from './ChatComposer';
 import { ChatMarkdown, ChatMarkdownClamped, ChatMarkdownViewer } from './ChatMarkdown';
+import { useFaqMarkdownMedia } from './FaqMarkdownViewer';
 import {
   IconBack,
   IconDownload,
@@ -38,6 +40,9 @@ type Props = {
   onOpenInfo: () => void;
   onAccept?: () => void;
   onBlock?: () => void;
+  quickMessages?: QuickMessage[];
+  selfUserId?: number;
+  canReviewFaq?: boolean;
 };
 
 /** Cạnh ô ảnh trong bubble (px) — khớp bản resize sẵn của File.Api. */
@@ -125,8 +130,13 @@ export function MessageThread({
   onOpenInfo,
   onAccept,
   onBlock,
+  quickMessages = [],
+  selfUserId,
+  canReviewFaq = false,
 }: Props) {
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  const [faqBuildError, setFaqBuildError] = useState<string | null>(null);
+  const [faqBuildHint, setFaqBuildHint] = useState<string | null>(null);
   const [menuForId, setMenuForId] = useState<number | null>(null);
   const [recallMessageId, setRecallMessageId] = useState<number | null>(null);
   const [preview, setPreview] = useState<{
@@ -194,6 +204,8 @@ export function MessageThread({
     setRecallMessageId(null);
     setPreview(null);
     setDraggingFiles(false);
+    setFaqBuildError(null);
+    setFaqBuildHint(null);
     dragDepthRef.current = 0;
   }, [conversation?.id]);
 
@@ -202,6 +214,50 @@ export function MessageThread({
   }, [conversation?.title]);
 
   const onClearReply = useCallback(() => setReplyTo(null), []);
+
+  const botFolderId = (conversation?.bot_folder_id ?? '').toLowerCase();
+  const isFaqBuild = botFolderId.startsWith('faq-build:');
+  const faqSetId = botFolderId.startsWith('faq-ask:') || isFaqBuild
+    ? Number(botFolderId.split(':')[1]) || 0
+    : 0;
+  const faqMedia = useFaqMarkdownMedia(faqSetId > 0 ? faqSetId : null);
+  const faqBuildPhase = useMemo(
+    () => (isFaqBuild ? deriveFaqBuildPhase(messages, selfUserId) : 'idle'),
+    [isFaqBuild, messages, selfUserId],
+  );
+
+  const handleSend = useCallback(
+    (body: string, replyToMessageId?: number | null) => {
+      if (isFaqBuild) {
+        const validation = validateFaqBuildSend(body, faqBuildPhase);
+        if (!validation.ok) {
+          setFaqBuildError(validation.error ?? 'Cú pháp không hợp lệ.');
+          setFaqBuildHint(validation.hint ?? null);
+          return;
+        }
+      }
+      setFaqBuildError(null);
+      setFaqBuildHint(null);
+      onSend(body, replyToMessageId);
+    },
+    [isFaqBuild, faqBuildPhase, onSend],
+  );
+
+  const validateComposerSend = useCallback(
+    (body: string) => {
+      if (!isFaqBuild) return true;
+      const validation = validateFaqBuildSend(body, faqBuildPhase);
+      if (!validation.ok) {
+        setFaqBuildError(validation.error ?? 'Cú pháp không hợp lệ.');
+        setFaqBuildHint(validation.hint ?? null);
+        return false;
+      }
+      setFaqBuildError(null);
+      setFaqBuildHint(null);
+      return true;
+    },
+    [isFaqBuild, faqBuildPhase],
+  );
 
   if (!conversation) {
     return (
@@ -215,7 +271,7 @@ export function MessageThread({
   const botDisabled = isBot && conversation.bot_active === false;
   const canSend =
     !botDisabled && (conversation.kind !== 'direct' || !relation || relation.can_send);
-  const canAttach = canSend && !isBot;
+  const canAttach = canSend && (!isBot || isFaqBuild);
   const botSrc = isBot ? botAvatarUrl(conversation.bot_avatar_url) : null;
   const blockReason = botDisabled
     ? 'Chatbots đã tắt. Bạn vẫn xem được lịch sử.'
@@ -463,6 +519,7 @@ export function MessageThread({
                           isBot && !m.sender_is_me ? (
                             <ChatMarkdownClamped
                               text={m.body}
+                              media={faqMedia}
                               onOpenLarge={onOpenBotMarkdown}
                             />
                           ) : (
@@ -603,6 +660,12 @@ export function MessageThread({
 
       {error && <div className="chat-error">{error}</div>}
       {blockReason && <div className="chat-error">{blockReason}</div>}
+      {faqBuildError && (
+        <div className="chat-error faq-build-error">
+          <strong>{faqBuildError}</strong>
+          {faqBuildHint ? <span>{faqBuildHint}</span> : null}
+        </div>
+      )}
 
       <ChatComposer
         key={conversation.id}
@@ -614,9 +677,14 @@ export function MessageThread({
         blockReason={blockReason}
         replyTo={replyTo}
         members={members}
+        quickMessages={quickMessages}
+        faqBuildMode={isFaqBuild}
+        faqBuildPhase={faqBuildPhase}
+        canReviewFaq={canReviewFaq}
         onClearReply={onClearReply}
-        onSend={onSend}
+        onSend={handleSend}
         onSendAttachments={onSendAttachments}
+        onValidateSend={validateComposerSend}
         addFilesRef={addFilesRef}
       />
 
@@ -634,6 +702,7 @@ export function MessageThread({
         <ChatMarkdownViewer
           title={mdViewer.title}
           text={mdViewer.text}
+          media={faqMedia}
           onClose={() => setMdViewer(null)}
         />
       )}

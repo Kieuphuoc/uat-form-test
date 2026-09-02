@@ -23,7 +23,7 @@ import {
   type UnreadCounts,
 } from '../../lib/chatTransport';
 import { resolveZaloAccount } from '../../lib/zaloAccount';
-import { IconBell, IconChat, IconDatabase, IconLogout, IconSettings, IconZalo } from '../AppIcons';
+import { IconBell, IconBook, IconChat, IconDatabase, IconLogout, IconSettings, IconTag, IconZalo } from '../AppIcons';
 import { ChatAvatar } from './ChatAvatar';
 import { DataSelectionDialog } from './DataSelectionDialog';
 
@@ -49,6 +49,7 @@ function headerSelectPath(id: string): string | null {
     return '/chat/zalo/users';
   }
   if (key === 'settings' || key === 'caidat' || key === 'cài đặt') return '/chat/settings';
+  if (key === 'faq' || key === 'bofaq' || key === 'bộ faq') return '/chat/faq';
   if (key === 'chat' || key === 'list' || key === 'conversations') return '/chat';
   return null;
 }
@@ -73,12 +74,14 @@ export function ChatAppShell() {
   const unitIdRef = useRef<number | null>(null);
   const zaloChatEnabled = !!me?.zalo_enabled && me?.can_use_zalo_chat !== false;
   const oaChatEnabled = !!me && me.can_use_oa_chat !== false;
+  const faqEnabled = !!me?.can_review_faq || !!me?.can_manage_faq_sets;
   const bellCount = unread.chat + unread.zalo + unread.oa;
   const chatAreaKey = useMemo(() => {
     const path = location.pathname;
     if (!path.startsWith('/chat')) return null;
     if (path.startsWith('/chat/contacts')) return 'contacts';
     if (path.startsWith('/chat/settings')) return 'settings';
+    if (path.startsWith('/chat/faq')) return 'faq';
     if (path.startsWith('/chat/zalo/users')) return 'zalo-users';
     if (path.startsWith('/chat/zalo')) return 'zalo';
     if (path.startsWith('/chat/oa')) return 'oa';
@@ -207,13 +210,14 @@ export function ChatAppShell() {
       const path = headerSelectPath(typeof raw.id === 'string' ? raw.id : '');
       if (!path) return;
       if (path === '/chat/settings' && !me?.is_admin) return;
+      if (path === '/chat/faq' && !me?.can_review_faq && !me?.can_manage_faq_sets) return;
       if ((path === '/chat/zalo' || path === '/chat/zalo/users') && !zaloChatEnabled) return;
       if (path === '/chat/oa' && !oaChatEnabled) return;
       navigateChat(navigate, path);
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
-  }, [navigate, me?.is_admin, zaloChatEnabled, oaChatEnabled]);
+  }, [navigate, me?.is_admin, me?.can_review_faq, me?.can_manage_faq_sets, zaloChatEnabled, oaChatEnabled]);
 
   useEffect(() => {
     if (!me) return;
@@ -223,8 +227,12 @@ export function ChatAppShell() {
     }
     if (location.pathname.startsWith('/chat/oa') && !oaChatEnabled) {
       navigateChat(navigate, '/chat', { replace: true });
+      return;
     }
-  }, [me, zaloChatEnabled, oaChatEnabled, location.pathname, navigate]);
+    if (location.pathname.startsWith('/chat/faq') && !faqEnabled) {
+      navigateChat(navigate, '/chat', { replace: true });
+    }
+  }, [me, zaloChatEnabled, oaChatEnabled, faqEnabled, location.pathname, navigate]);
 
   const displayName =
     me?.nickname || user?.nickname || me?.email || user?.email || 'Bạn';
@@ -337,6 +345,32 @@ export function ChatAppShell() {
                   <IconDatabase size={16} />
                   Thay đổi công ty và dữ liệu
                 </button>
+                {faqEnabled ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      navigateChat(navigate, '/chat/faq');
+                    }}
+                  >
+                    <IconBook size={16} />
+                    Bộ FAQ
+                  </button>
+                ) : null}
+                {me?.is_admin ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      navigateChat(navigate, '/chat/quick-messages');
+                    }}
+                  >
+                    <IconTag size={16} />
+                    Tin nhắn nhanh
+                  </button>
+                ) : null}
                 {me?.is_admin ? (
                   <button
                     type="button"

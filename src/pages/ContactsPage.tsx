@@ -10,6 +10,7 @@ import {
   type ChatUser,
   type ContactItem,
   type Conversation,
+  type FaqWorkbenchItem,
   type UnitChatPermissions,
   type UnitChatPermissionWrite,
 } from '../api/chatApi';
@@ -21,7 +22,7 @@ import { subscribeContacts } from '../lib/chatTransport';
 
 type ShellContext = { me: ChatMe | null };
 
-type Tab = 'company' | 'personal' | 'bots';
+type Tab = 'company' | 'personal' | 'bots' | 'faq';
 
 function relationLabel(item: ContactItem): string {
   if (item.is_blocked || item.relation === 'blocked') return 'Đã chặn';
@@ -75,13 +76,15 @@ export function ContactsPage() {
   const tab: Tab =
     requested === 'bots' && showBots
       ? 'bots'
-      : requested === 'company' && unitId > 0
-        ? 'company'
-        : requested === 'personal'
-          ? 'personal'
-          : unitId > 0
-            ? 'company'
-            : 'personal';
+      : requested === 'faq' && unitId > 0
+        ? 'faq'
+        : requested === 'company' && unitId > 0
+          ? 'company'
+          : requested === 'personal'
+            ? 'personal'
+            : unitId > 0
+              ? 'company'
+              : 'personal';
 
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
@@ -93,6 +96,7 @@ export function ContactsPage() {
   const [companyItems, setCompanyItems] = useState<ChatUser[]>([]);
   const [personalItems, setPersonalItems] = useState<ContactItem[]>([]);
   const [botItems, setBotItems] = useState<ChatBotCatalogItem[]>([]);
+  const [faqItems, setFaqItems] = useState<FaqWorkbenchItem[]>([]);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [busyFolderId, setBusyFolderId] = useState<string | null>(null);
   const [addToGroupUser, setAddToGroupUser] = useState<ChatUser | ContactItem | null>(null);
@@ -144,6 +148,19 @@ export function ContactsPage() {
           );
         });
         setBotItems(filtered);
+        setTotal(filtered.length);
+      } else if (tab === 'faq') {
+        const items = await chatApi.listFaqWorkbench();
+        const q = search.toLowerCase();
+        const filtered = items.filter((item) => {
+          if (!q) return true;
+          return (
+            item.title.toLowerCase().includes(q) ||
+            item.code.toLowerCase().includes(q) ||
+            item.name.toLowerCase().includes(q)
+          );
+        });
+        setFaqItems(filtered);
         setTotal(filtered.length);
       } else {
         const result = await chatApi.listContacts(search, page, pageSize, 'all');
@@ -309,7 +326,9 @@ export function ContactsPage() {
         ? 'Tìm theo tên, email, điện thoại…'
         : tab === 'bots'
           ? 'Tìm Chatbots…'
-          : 'Tìm trong danh bạ của bạn…',
+          : tab === 'faq'
+            ? 'Tìm bộ FAQ…'
+            : 'Tìm trong danh bạ của bạn…',
     [tab],
   );
 
@@ -414,6 +433,17 @@ export function ContactsPage() {
             AI Chatbots
           </button>
         )}
+        {unitId > 0 && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'faq'}
+            className={tab === 'faq' ? 'active' : undefined}
+            onClick={() => setTab('faq')}
+          >
+            Bộ FAQ
+          </button>
+        )}
       </div>
 
       <div className="chat-page-toolbar chat-page-toolbar--contacts">
@@ -438,6 +468,9 @@ export function ContactsPage() {
         )}
         {!loading && tab === 'bots' && botItems.length === 0 && (
           <p className="chat-hint">Chưa có Chatbots nào được khai báo.</p>
+        )}
+        {!loading && tab === 'faq' && faqItems.length === 0 && (
+          <p className="chat-hint">Chưa có bộ FAQ cho công ty này.</p>
         )}
 
         {tab === 'company' &&
@@ -530,6 +563,30 @@ export function ContactsPage() {
             </div>
           ))}
 
+        {tab === 'faq' &&
+          faqItems.map((item) => (
+            <div key={item.workbench_id} className="chat-contact-row">
+              <ChatAvatar name={item.title} size={40} />
+              <div className="chat-contact-main">
+                <strong>{item.title}</strong>
+                <span className="muted">
+                  {item.role === 'build' ? 'Dựng FAQ' : 'Hỏi FAQ'} · {item.name}
+                </span>
+              </div>
+              <div className="chat-contact-actions">
+                <button
+                  type="button"
+                  className="chat-icon-btn"
+                  disabled={busyFolderId === item.workbench_id}
+                  onClick={() => void openBot(item.workbench_id)}
+                  title="Chat"
+                >
+                  <IconChat size={18} />
+                </button>
+              </div>
+            </div>
+          ))}
+
         {tab === 'bots' &&
           botItems.map((bot) => (
             <div key={bot.folder_id} className="chat-contact-row">
@@ -553,7 +610,7 @@ export function ContactsPage() {
           ))}
       </div>
 
-      {tab !== 'bots' && totalPages > 1 && (
+      {tab !== 'bots' && tab !== 'faq' && totalPages > 1 && (
         <div className="chat-modal-pagination">
           <button
             type="button"

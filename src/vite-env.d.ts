@@ -12,6 +12,8 @@ interface ImportMetaEnv {
   readonly VITE_NOTI_API_URL?: string;
   /** Cạnh dài tối đa (px) khi resize ảnh chat ở client trước khi upload. */
   readonly VITE_CHAT_IMAGE_MAX_SIZE?: string;
+  /** Portal Knowledge — iframe embed editor FAQ */
+  readonly VITE_KNOWLEDGE_WEB_URL?: string;
 }
 
 interface ImportMeta {

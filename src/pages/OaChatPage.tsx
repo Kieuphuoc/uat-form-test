@@ -24,7 +24,19 @@ import { ChatAvatar, useFileBlobUrl } from '../components/chat/ChatAvatar';
 import { ChatBotCatalogSection } from '../components/chat/ChatBotCatalogSection';
 import { ChatFileSection, ChatFileTile } from '../components/chat/ChatFileGrid';
 import { ChatMarkdownClamped, ChatMarkdownViewer } from '../components/chat/ChatMarkdown';
+import {
+  detectComposerSlash,
+  filterSlashPicks,
+  insertSlashPick,
+  quickSlashPicks,
+  QuickMessageSlashMenu,
+} from '../components/chat/QuickMessageSlashMenu';
+import { ComposerBotPickBar, ComposerBotPickOverlay } from '../components/chat/ComposerBotPickMenu';
 import { FilePreviewModal } from '../components/chat/FilePreviewModal';
+import { expandQuickMessage } from '../lib/faqBuildState';
+import { useQuickMessages } from '../lib/useQuickMessages';
+import { useComposerBotPick } from '../lib/useComposerBotPick';
+import type { ComposerBotPick } from '../lib/composerBotPick';
 import { resizeChatImage } from '../lib/chatImageResize';
 import { loadChatBots } from '../lib/chatBotsCache';
 import { navigateChat } from '../lib/chatNav';
@@ -246,12 +258,21 @@ function OaComposer({
   const [draft, setDraft] = useState('');
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [slashQuery, setSlashQuery] = useState('');
+  const [slashStart, setSlashStart] = useState<number | null>(null);
+  const [slashIndex, setSlashIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const canSendRef = useRef(canSend);
   const queuedRef = useRef<QueuedFile[]>([]);
   const submittingRef = useRef(false);
   queuedRef.current = queuedFiles;
+  const quickMessages = useQuickMessages();
+  const slashCatalog = useMemo(() => quickSlashPicks(quickMessages), [quickMessages]);
+  const slashMatches =
+    slashOpen && slashCatalog.length > 0 ? filterSlashPicks(slashCatalog, slashQuery) : [];
+  const botPick = useComposerBotPick('TEXT');
 
   useEffect(() => {
     canSendRef.current = canSend;
@@ -294,16 +315,83 @@ function OaComposer({
     });
   };
 
+  const updateSlash = (value: string, caret: number) => {
+    if (botPick.detectToken(value, caret)) {
+      setSlashOpen(false);
+      setSlashStart(null);
+      return;
+    }
+    const slash = detectComposerSlash(value, caret);
+    if (slash && slashCatalog.length > 0) {
+      setSlashStart(slash.start);
+      setSlashQuery(slash.query);
+      setSlashIndex(0);
+      setSlashOpen(true);
+      return;
+    }
+    setSlashOpen(false);
+    setSlashStart(null);
+  };
+
+  const chooseBotPick = (item: ComposerBotPick) => {
+    const caret = textareaRef.current?.selectionStart ?? draft.length;
+    const applied = botPick.applyPick(item, draft, caret);
+    if (!applied) return;
+    setDraft(applied.next);
+    window.requestAnimationFrame(() => {
+      if (!textareaRef.current) return;
+      textareaRef.current.focus();
+      textareaRef.current.setSelectionRange(applied.caret, applied.caret);
+      resizeComposer(textareaRef.current);
+    });
+  };
+
+  const chooseSlash = (item: { insert: string }) => {
+    if (slashStart == null) return;
+    const caret = textareaRef.current?.selectionStart ?? draft.length;
+    const applied = insertSlashPick(draft, slashStart, caret, item.insert);
+    setDraft(applied.next);
+    setSlashOpen(false);
+    setSlashStart(null);
+    window.requestAnimationFrame(() => {
+      if (!textareaRef.current) return;
+      textareaRef.current.focus();
+      textareaRef.current.setSelectionRange(applied.caret, applied.caret);
+      resizeComposer(textareaRef.current);
+    });
+  };
+
   const submit = () => {
-    const text = draft.trim();
+    const text = expandQuickMessage(draft, quickMessages).trim();
     const queued = queuedRef.current;
-    if ((!text && queued.length === 0) || !canSendRef.current || submittingRef.current) return;
+    if ((!text && queued.length === 0) || !canSendRef.current || submittingRef.current || botPick.askingBot) {
+      return;
+    }
+    if (text && botPick.selectedBot) {
+      void botPick.ask(text).then((answer) => {
+        if (!answer) {
+          refocusComposer(textareaRef.current);
+          return;
+        }
+        setDraft(answer);
+        window.requestAnimationFrame(() => {
+          const el = textareaRef.current;
+          resizeComposer(el);
+          if (el) {
+            el.focus();
+            el.setSelectionRange(answer.length, answer.length);
+          }
+        });
+      });
+      return;
+    }
     submittingRef.current = true;
     const files = queued.map((item) => item.file);
     queued.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
     setDraft('');
     setQueuedFiles([]);
     setAttachmentError(null);
+    setSlashOpen(false);
     window.requestAnimationFrame(() => {
       resizeComposer(textareaRef.current);
       refocusComposer(textareaRef.current);
@@ -314,17 +402,41 @@ function OaComposer({
 
   const submitForm = (event: FormEvent) => {
     event.preventDefault();
-    void submit();
+    if (!botPick.askingBot) void submit();
   };
 
   return (
     <form className="chat-composer oa-composer" onSubmit={submitForm}>
       {!canSend ? <div className="chat-composer-block">{blockReason}</div> : null}
+      {botPick.selectedBot ? (
+        <ComposerBotPickBar
+          selected={botPick.selectedBot}
+          asking={botPick.askingBot}
+          onClear={botPick.clearSelected}
+        />
+      ) : null}
+      {botPick.botOpen && (
+        <ComposerBotPickOverlay
+          loaded={botPick.botPicksLoaded}
+          items={botPick.botMatches}
+          activeIndex={botPick.botIndex}
+          onChoose={chooseBotPick}
+          onHover={botPick.setBotIndex}
+        />
+      )}
+      {slashOpen && (
+        <QuickMessageSlashMenu
+          items={slashMatches}
+          activeIndex={slashIndex}
+          onHover={setSlashIndex}
+          onChoose={chooseSlash}
+        />
+      )}
       <div className="chat-composer-row">
         <button
           type="button"
           className="chat-attach"
-          disabled={!canSend}
+          disabled={!canSend || botPick.askingBot}
           title="Đính kèm file"
           onClick={() => fileInputRef.current?.click()}
         >
@@ -346,8 +458,10 @@ function OaComposer({
           onFocus={keyboardHandlers.onFocus}
           onBlur={keyboardHandlers.onBlur}
           onChange={(event) => {
-            setDraft(event.currentTarget.value);
-            resizeComposer(event.currentTarget);
+            const el = event.currentTarget;
+            setDraft(el.value);
+            resizeComposer(el);
+            updateSlash(el.value, el.selectionStart ?? el.value.length);
           }}
           onPaste={(event) => {
             const images = Array.from(event.clipboardData.items)
@@ -360,23 +474,60 @@ function OaComposer({
             }
           }}
           onKeyDown={(event) => {
+            if (botPick.onMenuKeyDown(event, chooseBotPick)) return;
+            if (slashOpen) {
+              if (event.key === 'ArrowDown' && slashMatches.length > 0) {
+                event.preventDefault();
+                setSlashIndex((index) => (index + 1) % slashMatches.length);
+                return;
+              }
+              if (event.key === 'ArrowUp' && slashMatches.length > 0) {
+                event.preventDefault();
+                setSlashIndex((index) => (index - 1 + slashMatches.length) % slashMatches.length);
+                return;
+              }
+              if ((event.key === 'Enter' || event.key === 'Tab') && slashMatches.length > 0) {
+                event.preventDefault();
+                chooseSlash(slashMatches[slashIndex] ?? slashMatches[0]);
+                return;
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                setSlashOpen(false);
+                return;
+              }
+            }
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault();
-              void submit();
+              if (!botPick.askingBot) void submit();
             }
           }}
-          placeholder={placeholder}
-          disabled={!canSend}
+          placeholder={
+            botPick.selectedBot
+              ? botPick.askingBot
+                ? `Đang hỏi ${botPick.selectedBot.title}…`
+                : `Nhập câu hỏi cho ${botPick.selectedBot.title}…`
+              : canSend
+                ? `${placeholder} · @@ hỏi AI`
+                : placeholder
+          }
+          disabled={!canSend || botPick.askingBot}
           rows={1}
-          title={canSend ? 'Enter để gửi, Shift+Enter xuống dòng' : blockReason}
+          title={
+            botPick.selectedBot
+              ? `Hỏi ${botPick.selectedBot.title} (Enter)`
+              : canSend
+                ? 'Enter để gửi, Shift+Enter xuống dòng'
+                : blockReason
+          }
         />
         <button
           type="submit"
           className="chat-send"
-          disabled={!canSend || (!draft.trim() && queuedFiles.length === 0)}
-          title="Gửi (Enter)"
+          disabled={!canSend || botPick.askingBot || (!draft.trim() && queuedFiles.length === 0)}
+          title={botPick.selectedBot ? `Hỏi ${botPick.selectedBot.title} (Enter)` : 'Gửi (Enter)'}
         >
-          <IconSend size={18} />
+          {botPick.selectedBot ? <IconBot size={18} /> : <IconSend size={18} />}
         </button>
       </div>
       {queuedFiles.length > 0 && (
@@ -401,6 +552,7 @@ function OaComposer({
           ))}
         </div>
       )}
+      {botPick.askError && <div className="chat-attachment-error">{botPick.askError}</div>}
       {attachmentError && <div className="chat-attachment-error">{attachmentError}</div>}
     </form>
   );

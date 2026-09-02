@@ -104,6 +104,13 @@ export const IconSearch = (p: IconProps) => (
   </Svg>
 );
 
+export const IconTag = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12.6 3H5a2 2 0 0 0-2 2v7.6L12.7 20.3a2 2 0 0 0 2.8 0L21 14.8a2 2 0 0 0 0-2.8L12.6 3z" />
+    <circle cx="8" cy="8" r="1.35" fill="currentColor" stroke="none" />
+  </Svg>
+);
+
 export const IconPlus = (p: IconProps) => (
   <Svg {...p}>
     <path d="M12 5v14M5 12h14" />
@@ -264,6 +271,18 @@ export const IconOpenExternal = (p: IconProps) => (
   </Svg>
 );
 
+export const IconChevronUp = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M6 15l6-6 6 6" />
+  </Svg>
+);
+
+export const IconChevronDown = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M6 9l6 6 6-6" />
+  </Svg>
+);
+
 export const IconChevronsDown = (p: IconProps) => (
   <Svg {...p}>
     <path d="M6 7l6 6 6-6" />
@@ -310,11 +329,25 @@ export const IconBellOff = (p: IconProps) => (
   </Svg>
 );
 
+export const IconBook = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z" />
+    <path d="M6 3v16" />
+  </Svg>
+);
+
 export const IconBellMention = (p: IconProps) => (
   <Svg {...p}>
     <path d="M6 9a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8" />
     <path d="M10 19a2 2 0 0 0 4 0" />
     <circle cx="18.5" cy="5.5" r="3.2" fill="var(--bg, #fff)" />
     <path d="M19.6 4.2a1.4 1.4 0 1 0-.1 2.3c.3-.2.5-.5.5-.9a1.4 1.4 0 0 0-1.4-1.4" />
+  </Svg>
+);
+
+export const IconSave = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+    <path d="M17 21v-8H7v8M7 3v5h8" />
   </Svg>
 );

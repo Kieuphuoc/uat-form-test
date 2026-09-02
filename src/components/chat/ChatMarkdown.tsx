@@ -1,6 +1,20 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  Fragment,
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { renderTextWithLinks } from '../../lib/linkifyText';
 import { IconChevronsDown, IconChevronsUp, IconClose, IconMaximize } from '../AppIcons';
+
+export type ChatMarkdownMedia = {
+  renderImage?: (src: string, alt: string) => ReactNode;
+  renderLink?: (href: string, label: string) => ReactNode | null;
+};
 
 const HEADING_RE = /^(#{1,6})\s+(.+?)(?:\s+#*)?$/;
 const LIST_RE = /^(\s*)([-*+]|\d+\.)\s+(.*)$/;
@@ -11,9 +25,13 @@ const TABLE_SEP_RE = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
 
 export const AI_REPLY_MAX_LINES = 20;
 
-function inlineMarkdown(text: string): ReactNode[] {
+function isSafeHttpSrc(src: string) {
+  return src.startsWith('https://') || src.startsWith('http://') || src.startsWith('/');
+}
+
+function inlineMarkdown(text: string, media?: ChatMarkdownMedia): ReactNode[] {
   const pattern =
-    /(`[^`]+`)|(~~[^~]+~~)|(\*\*\*[^*]+\*\*\*)|(\*\*[^*]+\*\*)|(__[^_]+__)|(\*[^*]+\*)|(_[^_]+_)|(\[[^\]]+\]\([^)]+\))/g;
+    /(!\[[^\]]*\]\([^)]+\))|(`[^`]+`)|(~~[^~]+~~)|(\*\*\*[^*]+\*\*\*)|(\*\*[^*]+\*\*)|(__[^_]+__)|(\*[^*]+\*)|(_[^_]+_)|(\[[^\]]+\]\([^)]+\))/g;
   const nodes: ReactNode[] = [];
   let last = 0;
   let match: RegExpExecArray | null;
@@ -21,7 +39,18 @@ function inlineMarkdown(text: string): ReactNode[] {
   while ((match = pattern.exec(text))) {
     if (match.index > last) nodes.push(...renderTextWithLinks(text.slice(last, match.index), `md-${key++}`));
     const token = match[0];
-    if (token.startsWith('`')) {
+    if (token.startsWith('![')) {
+      const img = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(token);
+      const alt = img?.[1] ?? '';
+      const src = img?.[2]?.trim() ?? '';
+      if (media?.renderImage) {
+        nodes.push(<Fragment key={key++}>{media.renderImage(src, alt)}</Fragment>);
+      } else if (isSafeHttpSrc(src)) {
+        nodes.push(<img key={key++} src={src} alt={alt} />);
+      } else {
+        nodes.push(token);
+      }
+    } else if (token.startsWith('`')) {
       nodes.push(<code key={key++}>{token.slice(1, -1)}</code>);
     } else if (token.startsWith('~~')) {
       nodes.push(<del key={key++}>{token.slice(2, -2)}</del>);
@@ -38,16 +67,19 @@ function inlineMarkdown(text: string): ReactNode[] {
     } else {
       const link = /^\s*\[([^\]]+)\]\(([^)]+)\)\s*$/.exec(token);
       const href = link?.[2]?.trim() ?? '';
-      const safe = href.startsWith('https://') || href.startsWith('http://') || href.startsWith('/');
-      nodes.push(
-        safe ? (
+      const label = link?.[1] ?? href;
+      const custom = media?.renderLink?.(href, label);
+      if (custom != null) {
+        nodes.push(<Fragment key={key++}>{custom}</Fragment>);
+      } else if (isSafeHttpSrc(href)) {
+        nodes.push(
           <a key={key++} href={href} target="_blank" rel="noopener noreferrer">
-            {link?.[1] ?? href}
-          </a>
-        ) : (
-          token
-        ),
-      );
+            {label}
+          </a>,
+        );
+      } else {
+        nodes.push(token);
+      }
     }
     last = match.index + token.length;
   }
@@ -69,7 +101,11 @@ function splitTableCells(line: string): string[] {
   return trimmed.split('|').map((cell) => cell.trim());
 }
 
-function renderListItems(lines: string[], startKey: number): { node: ReactNode; used: number } {
+function renderListItems(
+  lines: string[],
+  startKey: number,
+  media?: ChatMarkdownMedia,
+): { node: ReactNode; used: number } {
   const first = LIST_RE.exec(lines[0]);
   if (!first) return { node: null, used: 0 };
   const ordered = /^\d+\.$/.test(first[2]);
@@ -85,13 +121,13 @@ function renderListItems(lines: string[], startKey: number): { node: ReactNode; 
     if (indent > baseIndent) break;
     const sameKind = /^\d+\.$/.test(parsed[2]) === ordered;
     if (!sameKind) break;
-    const content = inlineMarkdown(parsed[3]);
+    const content = inlineMarkdown(parsed[3], media);
     i += 1;
     let nested: ReactNode = null;
     if (i < lines.length) {
       const next = LIST_RE.exec(lines[i]);
       if (next && next[1].length > baseIndent) {
-        const child = renderListItems(lines.slice(i), key + 100);
+        const child = renderListItems(lines.slice(i), key + 100, media);
         nested = child.node;
         i += child.used;
       }
@@ -107,7 +143,13 @@ function renderListItems(lines: string[], startKey: number): { node: ReactNode; 
   return { node: <Tag key={startKey}>{items}</Tag>, used: i };
 }
 
-export const ChatMarkdown = memo(function ChatMarkdown({ text }: { text: string }) {
+export const ChatMarkdown = memo(function ChatMarkdown({
+  text,
+  media,
+}: {
+  text: string;
+  media?: ChatMarkdownMedia;
+}) {
   const source = text.replace(/\r\n/g, '\n');
   const blocks: ReactNode[] = [];
   const lines = source.split('\n');
@@ -139,7 +181,7 @@ export const ChatMarkdown = memo(function ChatMarkdown({ text }: { text: string 
     const heading = HEADING_RE.exec(line);
     if (heading) {
       const Tag = headingTag(heading[1].length);
-      blocks.push(<Tag key={key++}>{inlineMarkdown(heading[2])}</Tag>);
+      blocks.push(<Tag key={key++}>{inlineMarkdown(heading[2], media)}</Tag>);
       i += 1;
       continue;
     }
@@ -156,7 +198,7 @@ export const ChatMarkdown = memo(function ChatMarkdown({ text }: { text: string 
           <thead>
             <tr>
               {headers.map((cell, idx) => (
-                <th key={idx}>{inlineMarkdown(cell)}</th>
+                <th key={idx}>{inlineMarkdown(cell, media)}</th>
               ))}
             </tr>
           </thead>
@@ -164,7 +206,7 @@ export const ChatMarkdown = memo(function ChatMarkdown({ text }: { text: string 
             {rows.map((row, ridx) => (
               <tr key={ridx}>
                 {headers.map((_, cidx) => (
-                  <td key={cidx}>{inlineMarkdown(row[cidx] ?? '')}</td>
+                  <td key={cidx}>{inlineMarkdown(row[cidx] ?? '', media)}</td>
                 ))}
               </tr>
             ))}
@@ -179,12 +221,12 @@ export const ChatMarkdown = memo(function ChatMarkdown({ text }: { text: string 
         quoted.push(QUOTE_RE.exec(lines[i])?.[1] ?? '');
         i += 1;
       }
-      blocks.push(<blockquote key={key++}>{inlineMarkdown(quoted.join('\n'))}</blockquote>);
+      blocks.push(<blockquote key={key++}>{inlineMarkdown(quoted.join('\n'), media)}</blockquote>);
       continue;
     }
     if (LIST_RE.test(line)) {
       const rest = lines.slice(i);
-      const list = renderListItems(rest, key);
+      const list = renderListItems(rest, key, media);
       if (list.node && list.used > 0) {
         blocks.push(list.node);
         key += list.used + 1;
@@ -196,7 +238,7 @@ export const ChatMarkdown = memo(function ChatMarkdown({ text }: { text: string 
       i += 1;
       continue;
     }
-    blocks.push(<p key={key++}>{inlineMarkdown(line)}</p>);
+    blocks.push(<p key={key++}>{inlineMarkdown(line, media)}</p>);
     i += 1;
   }
   return <div className="chat-md">{blocks}</div>;
@@ -206,10 +248,12 @@ export const ChatMarkdownClamped = memo(function ChatMarkdownClamped({
   text,
   maxLines = AI_REPLY_MAX_LINES,
   onOpenLarge,
+  media,
 }: {
   text: string;
   maxLines?: number;
   onOpenLarge: (text: string) => void;
+  media?: ChatMarkdownMedia;
 }) {
   const clipRef = useRef<HTMLDivElement | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -233,7 +277,7 @@ export const ChatMarkdownClamped = memo(function ChatMarkdownClamped({
         }`}
         style={!expanded ? ({ '--chat-md-clamp-lines': maxLines } as CSSProperties) : undefined}
       >
-        <ChatMarkdown text={text} />
+        <ChatMarkdown text={text} media={media} />
       </div>
       {(overflows || expanded) && (
         <div className="chat-md-toolbar">
@@ -267,10 +311,12 @@ export function ChatMarkdownViewer({
   title,
   text,
   onClose,
+  media,
 }: {
   title: string;
   text: string;
   onClose: () => void;
+  media?: ChatMarkdownMedia;
 }) {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -296,7 +342,7 @@ export function ChatMarkdownViewer({
           </button>
         </header>
         <div className="chat-md-viewer-body">
-          <ChatMarkdown text={text} />
+          <ChatMarkdown text={text} media={media} />
         </div>
       </div>
     </div>

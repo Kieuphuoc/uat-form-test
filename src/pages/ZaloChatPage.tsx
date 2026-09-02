@@ -14,6 +14,7 @@ import {
   IconReply,
   IconSearch,
   IconSettings,
+  IconTag,
   IconUsers,
 } from '../components/AppIcons';
 import { ChatAvatar } from '../components/chat/ChatAvatar';
@@ -269,7 +270,8 @@ export function ZaloChatPage() {
   const [data, setData] = useState<ZaloInboxData>(() => emptyZaloInbox());
   const [activeId, setActiveId] = useState<string | null>(null);
   const [pane, setPane] = useState<Pane>('list');
-  const [labelFilter, setLabelFilter] = useState('');
+  const [labelFilters, setLabelFilters] = useState<string[]>([]);
+  const [labelMenuOpen, setLabelMenuOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [pendingQuote, setPendingQuote] = useState<ZaloMessage | null>(null);
   const [copied, setCopied] = useState(false);
@@ -306,6 +308,7 @@ export function ZaloChatPage() {
   const messagesRef = useRef(data.messages);
   const conversationsRef = useRef(data.conversations);
   const sourceMenuRef = useRef<HTMLDivElement | null>(null);
+  const searchWrapRef = useRef<HTMLDivElement | null>(null);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -362,6 +365,22 @@ export function ZaloChatPage() {
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, [sourceMenuOpen]);
+
+  useEffect(() => {
+    if (!labelMenuOpen) return;
+    const onDoc = (event: MouseEvent) => {
+      if (!searchWrapRef.current?.contains(event.target as Node)) setLabelMenuOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setLabelMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [labelMenuOpen]);
 
   useEffect(() => {
     return () => {
@@ -550,13 +569,20 @@ export function ZaloChatPage() {
 
   const filtered = useMemo(() => {
     let list = [...data.conversations];
-    if (labelFilter) {
-      list = list.filter((c) => (c.zalo_labels || []).some((l) => l.id === labelFilter));
+    if (labelFilters.length) {
+      const ids = new Set(labelFilters);
+      list = list.filter((c) => (c.zalo_labels || []).some((l) => ids.has(l.id)));
     }
     const q = query.trim().toLowerCase();
     if (q) list = list.filter((c) => (c.name || '').toLowerCase().includes(q));
     return list;
-  }, [data.conversations, labelFilter, query]);
+  }, [data.conversations, labelFilters, query]);
+
+  const toggleLabelFilter = (labelId: string) => {
+    setLabelFilters((prev) =>
+      prev.includes(labelId) ? prev.filter((id) => id !== labelId) : [...prev, labelId],
+    );
+  };
 
   const conv = data.conversations.find((c) => c.id === activeId) ?? null;
   const messages = conv ? data.messages[conv.id] || [] : [];
@@ -989,27 +1015,79 @@ export function ZaloChatPage() {
               </div>
             </div>
             <div className="zalo-list-tools">
-              <select
-                value={labelFilter}
-                onChange={(e) => setLabelFilter(e.target.value)}
-                aria-label="Lọc theo nhãn"
-              >
-                <option value="">Tất cả nhãn</option>
-                {data.labels.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {zaloLabelName(l)}
-                  </option>
-                ))}
-              </select>
-              <label className="chat-search">
-                <IconSearch size={16} />
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Tìm theo tên nhóm..."
-                  aria-label="Tìm hội thoại Zalo"
-                />
-              </label>
+              <div className="zalo-search-wrap" ref={searchWrapRef}>
+                <div className={`zalo-search-field${labelMenuOpen ? ' is-open' : ''}`}>
+                  <div className="chat-search">
+                    <IconSearch size={16} />
+                    <input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="Tìm theo tên nhóm..."
+                      aria-label="Tìm hội thoại Zalo"
+                    />
+                    <button
+                      type="button"
+                      className={`zalo-label-filter-btn${labelMenuOpen ? ' is-open' : ''}${labelFilters.length ? ' is-active' : ''}`}
+                      title="Lọc theo nhãn"
+                      aria-label="Lọc theo nhãn"
+                      aria-expanded={labelMenuOpen}
+                      aria-controls="zalo-label-filter-popup"
+                      aria-haspopup="listbox"
+                      onClick={() => setLabelMenuOpen((open) => !open)}
+                    >
+                      <IconTag size={16} />
+                      {labelFilters.length > 0 && (
+                        <span className="zalo-label-filter-count">
+                          {labelFilters.length > 9 ? '9+' : labelFilters.length}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                  {labelMenuOpen && (
+                    <div
+                      id="zalo-label-filter-popup"
+                      className="zalo-label-filter-popup"
+                      role="listbox"
+                      aria-multiselectable="true"
+                      aria-label="Lọc theo nhãn"
+                    >
+                      <div className="zalo-label-filter-head">
+                        <span>Lọc theo nhãn</span>
+                        {labelFilters.length > 0 && (
+                          <button
+                            type="button"
+                            className="zalo-label-filter-clear"
+                            onClick={() => setLabelFilters([])}
+                          >
+                            Bỏ chọn
+                          </button>
+                        )}
+                      </div>
+                      {data.labels.length === 0 ? (
+                        <p className="muted">Chưa có nhãn</p>
+                      ) : (
+                        data.labels.map((l) => {
+                          const on = labelFilters.includes(l.id);
+                          return (
+                            <button
+                              type="button"
+                              key={l.id}
+                              role="option"
+                              aria-selected={on}
+                              className={on ? 'is-active' : undefined}
+                              onClick={() => toggleLabelFilter(l.id)}
+                            >
+                              <span className="zalo-label-dot" style={{ background: l.color }} />
+                              <span>{zaloLabelName(l)}</span>
+                              {on ? <IconCheck size={14} /> : null}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="chat-list-body">
@@ -1130,26 +1208,6 @@ export function ZaloChatPage() {
                   <IconInfo size={18} />
                 </button>
               </header>
-
-              <div className="zalo-thread-labels">
-                <span className="muted">
-                  {assigned ? `Folder: ${folderLabel}` : 'Chưa gán Folder AI'}
-                </span>
-                {data.labels.map((l) => {
-                  const on = (conv.zalo_labels || []).some((x) => x.id === l.id);
-                  return (
-                    <button
-                      type="button"
-                      key={l.id}
-                      className={`zalo-label-btn${on ? ' is-on' : ''}`}
-                      style={on ? { background: l.color, borderColor: l.color, color: '#fff' } : undefined}
-                      onClick={() => void toggleLabel(l.id)}
-                    >
-                      {zaloLabelName(l)}
-                    </button>
-                  );
-                })}
-              </div>
 
               <div className="zalo-thread-scroll">
                 <div
@@ -1356,10 +1414,9 @@ export function ZaloChatPage() {
                     </span>
                   </button>
                 </section>
-                {conv.ai_enabled !== false && (
                 <section className="chat-info-section">
                   <div className="chat-info-section-head">
-                    Folder AI
+                    Folder
                     <button
                       type="button"
                       className="chat-icon-btn"
@@ -1369,17 +1426,44 @@ export function ZaloChatPage() {
                       <IconSettings size={16} />
                     </button>
                   </div>
-                  {assigned || data.folderMap[conv.zalo_thread_id]?.label ? (
-                    <div className="zalo-folder-card">
-                      {data.folderMap[conv.zalo_thread_id]?.label && (
-                        <strong>{data.folderMap[conv.zalo_thread_id].label}</strong>
-                      )}
-                      {data.folderMap[conv.zalo_thread_id]?.ragFolderId && <small>RAG</small>}
-                      {data.folderMap[conv.zalo_thread_id]?.faqFolderId && <small>FAQ</small>}
-                    </div>
-                  ) : null}
+                  <div className={`zalo-folder-card${assigned || data.folderMap[conv.zalo_thread_id]?.label ? '' : ' is-empty'}`}>
+                    {assigned || data.folderMap[conv.zalo_thread_id]?.label ? (
+                      <>
+                        <strong>
+                          {data.folderMap[conv.zalo_thread_id]?.label || folderLabel || 'Đã gán Folder AI'}
+                        </strong>
+                        {data.folderMap[conv.zalo_thread_id]?.ragFolderId && <small>RAG</small>}
+                        {data.folderMap[conv.zalo_thread_id]?.faqFolderId && <small>FAQ</small>}
+                      </>
+                    ) : (
+                      <span className="muted">Chưa gán Folder AI</span>
+                    )}
+                  </div>
                 </section>
-                )}
+
+                <section className="chat-info-section">
+                  <div className="chat-info-section-head">Nhãn</div>
+                  <div className="zalo-label-wrap">
+                    {data.labels.length === 0 ? (
+                      <span className="muted">Chưa có nhãn</span>
+                    ) : (
+                      data.labels.map((l) => {
+                        const on = (conv.zalo_labels || []).some((x) => x.id === l.id);
+                        return (
+                          <button
+                            type="button"
+                            key={l.id}
+                            className={`zalo-label-btn${on ? ' is-on' : ''}`}
+                            style={on ? { background: l.color, borderColor: l.color, color: '#fff' } : undefined}
+                            onClick={() => void toggleLabel(l.id)}
+                          >
+                            {zaloLabelName(l)}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </section>
 
                 <section className="chat-info-section">
                   <div className="chat-info-section-head">Thành viên · {members.length}</div>

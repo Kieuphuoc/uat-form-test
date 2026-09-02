@@ -1,7 +1,19 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { isMobileEmbed, mobileKeyboardFocusHandlers, refocusComposer } from '../../lib/keyboardBridge';
-import { IconClose, IconFile, IconPaperclip, IconSend } from '../AppIcons';
+import { IconBot, IconClose, IconFile, IconPaperclip, IconSend } from '../AppIcons';
 import { ChatAvatar } from './ChatAvatar';
+import { useQuickMessages } from '../../lib/useQuickMessages';
+import { expandQuickMessage } from '../../lib/faqBuildState';
+import { useComposerBotPick } from '../../lib/useComposerBotPick';
+import type { ComposerBotPick } from '../../lib/composerBotPick';
+import {
+  detectComposerSlash,
+  filterSlashPicks,
+  insertSlashPick,
+  quickSlashPicks,
+  QuickMessageSlashMenu,
+} from './QuickMessageSlashMenu';
+import { ComposerBotPickBar, ComposerBotPickOverlay } from './ComposerBotPickMenu';
 import type { ZaloMember, ZaloMessage } from '../../lib/zaloChat';
 import { zaloQuotePreview } from '../../lib/zaloChat';
 
@@ -64,10 +76,19 @@ export const ZaloComposer = memo(function ZaloComposer({
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionIndex, setMentionIndex] = useState(0);
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [slashQuery, setSlashQuery] = useState('');
+  const [slashStart, setSlashStart] = useState<number | null>(null);
+  const [slashIndex, setSlashIndex] = useState(0);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const queuedRef = useRef<QueuedFile[]>([]);
   queuedRef.current = queuedFiles;
+  const quickMessages = useQuickMessages();
+  const slashCatalog = useMemo(() => quickSlashPicks(quickMessages), [quickMessages]);
+  const slashMatches =
+    slashOpen && slashCatalog.length > 0 ? filterSlashPicks(slashCatalog, slashQuery) : [];
+  const botPick = useComposerBotPick('TEXT');
 
   useEffect(() => {
     return () => {
@@ -123,14 +144,60 @@ export const ZaloComposer = memo(function ZaloComposer({
     setDraft(value);
     resizeComposer(el);
     const caret = el.selectionStart || 0;
+    if (botPick.detectToken(value, caret)) {
+      setMentionOpen(false);
+      setSlashOpen(false);
+      setSlashStart(null);
+      return;
+    }
     const before = value.slice(0, caret);
     const at = before.lastIndexOf('@');
     if (at >= 0 && !before.slice(at).includes(' ')) {
       setMentionQuery(before.slice(at + 1));
       setMentionOpen(true);
-    } else {
-      setMentionOpen(false);
+      setSlashOpen(false);
+      setSlashStart(null);
+      return;
     }
+    setMentionOpen(false);
+    const slash = detectComposerSlash(value, caret);
+    if (slash && slashCatalog.length > 0) {
+      setSlashStart(slash.start);
+      setSlashQuery(slash.query);
+      setSlashIndex(0);
+      setSlashOpen(true);
+      return;
+    }
+    setSlashOpen(false);
+    setSlashStart(null);
+  };
+
+  const chooseBotPick = (item: ComposerBotPick) => {
+    const caret = composerRef.current?.selectionStart ?? draft.length;
+    const applied = botPick.applyPick(item, draft, caret);
+    if (!applied) return;
+    setDraft(applied.next);
+    window.requestAnimationFrame(() => {
+      if (!composerRef.current) return;
+      composerRef.current.focus();
+      composerRef.current.setSelectionRange(applied.caret, applied.caret);
+      resizeComposer(composerRef.current);
+    });
+  };
+
+  const chooseSlash = (item: { insert: string }) => {
+    if (slashStart == null) return;
+    const caret = composerRef.current?.selectionStart ?? draft.length;
+    const applied = insertSlashPick(draft, slashStart, caret, item.insert);
+    setDraft(applied.next);
+    setSlashOpen(false);
+    setSlashStart(null);
+    window.requestAnimationFrame(() => {
+      if (!composerRef.current) return;
+      composerRef.current.focus();
+      composerRef.current.setSelectionRange(applied.caret, applied.caret);
+      resizeComposer(composerRef.current);
+    });
   };
 
   const insertMention = (name: string) => {
@@ -151,8 +218,26 @@ export const ZaloComposer = memo(function ZaloComposer({
   };
 
   const submit = () => {
-    const text = draft;
-    if (sending || (!text.trim() && queuedFiles.length === 0)) return;
+    const text = expandQuickMessage(draft, quickMessages);
+    if (sending || botPick.askingBot || (!text.trim() && queuedFiles.length === 0)) return;
+    if (text.trim() && botPick.selectedBot) {
+      void botPick.ask(text.trim()).then((answer) => {
+        if (!answer) {
+          refocusComposer(composerRef.current);
+          return;
+        }
+        setDraft(answer);
+        window.requestAnimationFrame(() => {
+          const el = composerRef.current;
+          resizeComposer(el);
+          if (el) {
+            el.focus();
+            el.setSelectionRange(answer.length, answer.length);
+          }
+        });
+      });
+      return;
+    }
     const mentions: ZaloSendPayload['mentions'] = [];
     members.forEach((m) => {
       const token = `@${m.display_name}`;
@@ -170,6 +255,7 @@ export const ZaloComposer = memo(function ZaloComposer({
     setDraft('');
     setQueuedFiles([]);
     setMentionOpen(false);
+    setSlashOpen(false);
     onClearQuote();
     window.requestAnimationFrame(() => resizeComposer(composerRef.current));
     refocusComposer(composerRef.current);
@@ -196,6 +282,13 @@ export const ZaloComposer = memo(function ZaloComposer({
           </button>
         </div>
       )}
+      {botPick.selectedBot ? (
+        <ComposerBotPickBar
+          selected={botPick.selectedBot}
+          asking={botPick.askingBot}
+          onClear={botPick.clearSelected}
+        />
+      ) : null}
       {queuedFiles.length > 0 && (
         <div className="chat-attachment-tray">
           {queuedFiles.map((item) => (
@@ -217,6 +310,23 @@ export const ZaloComposer = memo(function ZaloComposer({
             </span>
           ))}
         </div>
+      )}
+      {botPick.botOpen && (
+        <ComposerBotPickOverlay
+          loaded={botPick.botPicksLoaded}
+          items={botPick.botMatches}
+          activeIndex={botPick.botIndex}
+          onChoose={chooseBotPick}
+          onHover={botPick.setBotIndex}
+        />
+      )}
+      {slashOpen && (
+        <QuickMessageSlashMenu
+          items={slashMatches}
+          activeIndex={slashIndex}
+          onHover={setSlashIndex}
+          onChoose={chooseSlash}
+        />
       )}
       {mentionOpen && mentionMatches.length > 0 && (
         <div className="chat-mention-menu" role="listbox" aria-label="Nhắc thành viên">
@@ -241,6 +351,7 @@ export const ZaloComposer = memo(function ZaloComposer({
         <button
           type="button"
           className="chat-attach"
+          disabled={sending || botPick.askingBot}
           title="Đính kèm"
           onClick={() => fileInputRef.current?.click()}
         >
@@ -260,11 +371,19 @@ export const ZaloComposer = memo(function ZaloComposer({
           ref={composerRef}
           rows={1}
           value={draft}
-          placeholder="Nhập tin nhắn để trả lời thủ công..."
+          placeholder={
+            botPick.selectedBot
+              ? botPick.askingBot
+                ? `Đang hỏi ${botPick.selectedBot.title}…`
+                : `Nhập câu hỏi cho ${botPick.selectedBot.title}…`
+              : 'Nhập tin nhắn… · @@ hỏi AI'
+          }
+          disabled={botPick.askingBot}
           onFocus={keyboardHandlers.onFocus}
           onBlur={keyboardHandlers.onBlur}
           onChange={(e) => onComposerChange(e.currentTarget)}
           onKeyDown={(e) => {
+            if (botPick.onMenuKeyDown(e, chooseBotPick)) return;
             if (mentionOpen && mentionMatches.length > 0) {
               if (e.key === 'ArrowDown') {
                 e.preventDefault();
@@ -288,25 +407,48 @@ export const ZaloComposer = memo(function ZaloComposer({
                 return;
               }
             }
+            if (slashOpen) {
+              if (e.key === 'ArrowDown' && slashMatches.length > 0) {
+                e.preventDefault();
+                setSlashIndex((index) => (index + 1) % slashMatches.length);
+                return;
+              }
+              if (e.key === 'ArrowUp' && slashMatches.length > 0) {
+                e.preventDefault();
+                setSlashIndex((index) => (index - 1 + slashMatches.length) % slashMatches.length);
+                return;
+              }
+              if ((e.key === 'Enter' || e.key === 'Tab') && slashMatches.length > 0) {
+                e.preventDefault();
+                chooseSlash(slashMatches[slashIndex] ?? slashMatches[0]);
+                return;
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                setSlashOpen(false);
+                return;
+              }
+            }
             if (e.key === 'Enter' && (e.altKey || e.shiftKey)) {
               return;
             }
             if (e.key === 'Enter') {
               e.preventDefault();
-              submit();
+              if (!botPick.askingBot) submit();
             }
           }}
         />
         <button
           type="button"
           className="chat-send"
-          disabled={sending || (!draft.trim() && queuedFiles.length === 0)}
+          disabled={sending || botPick.askingBot || (!draft.trim() && queuedFiles.length === 0)}
           onClick={() => submit()}
-          title="Gửi"
+          title={botPick.selectedBot ? `Hỏi ${botPick.selectedBot.title} (Enter)` : 'Gửi'}
         >
-          <IconSend size={18} />
+          {botPick.selectedBot ? <IconBot size={18} /> : <IconSend size={18} />}
         </button>
       </div>
+      {botPick.askError ? <div className="chat-attachment-error">{botPick.askError}</div> : null}
     </div>
   );
 });
