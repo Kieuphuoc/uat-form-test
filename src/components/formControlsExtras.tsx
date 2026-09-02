@@ -178,6 +178,10 @@ function FormImageThumbImg({
   return <span className="form-image-thumb-fallback">{fallback}</span>;
 }
 
+function resolveCameraType(raw?: string): 'back' | 'front' {
+  return String(raw ?? '').trim().toLowerCase() === 'front' ? 'front' : 'back';
+}
+
 export function RuntimeFileImageInput({
   kind,
   slug,
@@ -188,6 +192,7 @@ export function RuntimeFileImageInput({
   uploadMode,
   previewWidth,
   imageSource,
+  cameraType,
   align,
   value,
   style,
@@ -205,6 +210,8 @@ export function RuntimeFileImageInput({
   previewWidth?: number;
   /** image: 'camera' | 'both' (mặc định). */
   imageSource?: string;
+  /** image: 'back' | 'front' (mặc định back). */
+  cameraType?: string;
   /** image: left | center | right | squareCenter. */
   align?: string;
   value: unknown;
@@ -217,6 +224,8 @@ export function RuntimeFileImageInput({
   const mode = resolveUploadMode(uploadMode);
   const thumb = Math.max(24, previewWidth ?? 50);
   const cameraOnly = kind === 'image' && String(imageSource ?? '').trim().toLowerCase() === 'camera';
+  const resolvedCameraType = resolveCameraType(cameraType);
+  const captureAttr = resolvedCameraType === 'front' ? 'user' : 'environment';
   const alignRaw = String(align ?? '').trim().toLowerCase();
   const alignCenter = alignRaw === 'center' || alignRaw === 'middle';
   const alignSquareCenter =
@@ -322,7 +331,7 @@ export function RuntimeFileImageInput({
       const files = await requestImagesFromParent({
         count: room,
         sourceType: mode === 'camera' ? ['camera'] : ['album', 'camera'],
-        cameraType: 'back',
+        cameraType: resolvedCameraType,
       });
       await addFiles(files);
     } catch {
@@ -353,7 +362,7 @@ export function RuntimeFileImageInput({
           type="file"
           hidden
           accept="image/*"
-          capture="environment"
+          capture={captureAttr}
           disabled={!canUpload}
           onChange={(e) => {
             if (!canUpload) return;

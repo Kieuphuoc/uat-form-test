@@ -1439,6 +1439,22 @@ export function DesignInspector({
                     <option value="camera">camera (chỉ chụp)</option>
                   </select>
                 </PropRow>
+                <PropRow
+                  label="cameraType"
+                  title="Camera mặc định khi chụp: back (sau) | front (trước). Web chỉ gợi ý; native/mini-app tuân theo hơn."
+                >
+                  <select
+                    value={c.cameraType === 'front' ? 'front' : 'back'}
+                    onChange={(e) =>
+                      patch({
+                        cameraType: e.target.value === 'front' ? 'front' : undefined,
+                      })
+                    }
+                  >
+                    <option value="back">back (camera sau)</option>
+                    <option value="front">front (camera trước)</option>
+                  </select>
+                </PropRow>
                 <PropRow label="previewWidth" title="Cạnh preview vuông (px), mặc định 50">
                   <input
                     type="number"

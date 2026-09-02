@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { useNavigate, useParams } from 'react-router-dom';
 import { chatFolderUrl, newClientMsgId, notifyModeLabel, botAvatarUrl, type ChatAttachmentItem, type ChatBotCatalogItem } from '../api/chatApi';
 import { nextOaNotifyMode, oaApi, type OaContact, type OaConversation, type OaMessage } from '../api/oaApi';
+import { useAuth } from '../auth/AuthContext';
 import {
   IconBack,
   IconBell,
   IconBellOff,
   IconBot,
   IconCheck,
+  IconClose,
   IconFile,
   IconInfo,
   IconPaperclip,
@@ -26,7 +28,7 @@ import { FilePreviewModal } from '../components/chat/FilePreviewModal';
 import { resizeChatImage } from '../lib/chatImageResize';
 import { loadChatBots } from '../lib/chatBotsCache';
 import { navigateChat } from '../lib/chatNav';
-import { refocusComposer } from '../lib/keyboardBridge';
+import { mobileKeyboardFocusHandlers, refocusComposer } from '../lib/keyboardBridge';
 import { reloadOaConversations, patchOaConversation, markAllOaConversationsRead, subscribeOaConversations, subscribeOaMessages } from '../lib/chatTransport';
 
 const PAGE_SIZE = 30;
@@ -239,6 +241,8 @@ function OaComposer({
   placeholder: string;
   onSend: (text: string, files: File[]) => void | Promise<void>;
 }) {
+  const { mobile } = useAuth();
+  const keyboardHandlers = useMemo(() => mobileKeyboardFocusHandlers(mobile), [mobile]);
   const [draft, setDraft] = useState('');
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -339,6 +343,8 @@ function OaComposer({
         <textarea
           ref={textareaRef}
           value={draft}
+          onFocus={keyboardHandlers.onFocus}
+          onBlur={keyboardHandlers.onBlur}
           onChange={(event) => {
             setDraft(event.currentTarget.value);
             resizeComposer(event.currentTarget);
@@ -403,6 +409,7 @@ function OaComposer({
 export function OaChatPage() {
   const params = useParams();
   const navigate = useNavigate();
+  const { mobile } = useAuth();
   const routeId = Number(params.conversationId || 0);
   const [pane, setPane] = useState<Pane>(routeId > 0 ? 'thread' : 'list');
   const [listMode, setListMode] = useState<ListMode>('conversations');
@@ -636,9 +643,14 @@ export function OaChatPage() {
   );
 
   const openInfo = useCallback(() => {
-    if (window.matchMedia('(max-width: 1023px)').matches) setPane('info');
+    if (window.matchMedia('(max-width: 1023px)').matches || mobile) setPane('info');
     else setInfoVisible((value) => !value);
-  }, []);
+  }, [mobile]);
+
+  const closeInfo = useCallback(() => {
+    if (window.matchMedia('(max-width: 1023px)').matches || mobile) setPane('thread');
+    else setInfoVisible(false);
+  }, [mobile]);
 
   const queueMarkRead = useCallback((threadId: number, messageId: number) => {
     if (threadId <= 0 || messageId <= pendingReadIdRef.current) return;
@@ -767,10 +779,10 @@ export function OaChatPage() {
       }
       return;
     }
-    if (listMode === 'conversations') {
-      navigateChat(navigate, `/chat/oa/${conversations[0].id}`, { replace: true });
-    }
-  }, [conversations, listMode, navigate, routeId, selectedId]);
+    if (listMode !== 'conversations' || mobile) return;
+    if (window.matchMedia('(max-width: 1023px)').matches) return;
+    navigateChat(navigate, `/chat/oa/${conversations[0].id}`, { replace: true });
+  }, [conversations, listMode, mobile, navigate, routeId, selectedId]);
 
   useEffect(() => {
     if (listMode === 'contacts') void loadContacts();
@@ -1529,6 +1541,9 @@ export function OaChatPage() {
                       <IconBot size={18} />
                     </button>
                   ) : null}
+                  <button type="button" className="chat-icon-btn" onClick={closeInfo} title="Đóng">
+                    <IconClose size={18} />
+                  </button>
                 </div>
               </header>
               <div className="chat-info-body">

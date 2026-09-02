@@ -115,6 +115,12 @@ export type FormControlDef = {
    */
   imageSource?: 'camera' | 'both' | string;
   /**
+   * image: camera mặc định khi chụp.
+   * - `back` (mặc định) — camera sau
+   * - `front` — camera trước (selfie)
+   */
+  cameraType?: 'back' | 'front' | string;
+  /**
    * Căn control trong hàng: left | center | right | squareCenter.
    * center/squareCenter + width x% (<100) → một hàng riêng, rộng x% hàng.
    * squareCenter (image): khung chụp hình vuông; center|squareCenter + imageSource=camera → label/icon/text canh giữa.

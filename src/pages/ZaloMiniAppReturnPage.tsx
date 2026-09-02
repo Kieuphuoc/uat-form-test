@@ -5,14 +5,12 @@ import { IconCheck } from '../components/AppIcons';
 import { useAuth } from '../auth/AuthContext';
 import { closeZaloWebview } from '../lib/closeZaloWebview';
 
-const MASCOT_SRC = '/AritoMascotsAI.png';
+const LOGO_SRC = '/arito-logo.png';
 
 export function ZaloMiniAppReturnPage() {
   const { user } = useAuth();
   const { handoff } = useParams<{ handoff?: string }>();
-  const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(true);
-  const [closing, setClosing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const finishBind = useCallback(async (): Promise<boolean> => {
@@ -20,12 +18,10 @@ export function ZaloMiniAppReturnPage() {
     setError(null);
     const res = await startZaloBind(handoff);
     if (!res.success || !res.data?.bindToken) {
-      setReady(false);
       setBusy(false);
       setError(res.error || 'Không hoàn tất liên kết Mini App.');
       return false;
     }
-    setReady(true);
     setBusy(false);
     void signalZaloBindClose(handoff);
     void closeZaloWebview();
@@ -36,13 +32,6 @@ export function ZaloMiniAppReturnPage() {
     void finishBind();
   }, [finishBind]);
 
-  const handleClose = useCallback(async () => {
-    setClosing(true);
-    if (!ready) await finishBind();
-    await Promise.all([signalZaloBindClose(handoff), closeZaloWebview()]);
-    setClosing(false);
-  }, [ready, finishBind, handoff]);
-
   const displayName = user?.nickname || user?.email || `user #${user?.userId ?? 0}`;
   const email = user?.email?.trim() && user.email !== displayName ? user.email : '';
 
@@ -50,11 +39,11 @@ export function ZaloMiniAppReturnPage() {
     <div className="zalo-return">
       <div className="zalo-return-body">
         <img
-          className="zalo-return-mascot"
-          src={MASCOT_SRC}
-          alt="Arito xin chào!"
-          width={220}
-          height={220}
+          className="zalo-return-logo"
+          src={LOGO_SRC}
+          alt="Arito"
+          width={240}
+          height={80}
         />
         <p className="zalo-return-hello">Arito xin chào!</p>
         <p className="zalo-return-badge">
@@ -76,25 +65,12 @@ export function ZaloMiniAppReturnPage() {
             </p>
             <ol className="zalo-return-steps">
               <li>
-                Nhấn nút <strong>X</strong> góc trên thanh Zalo để đóng form này
+                Nhấn nút đóng (<strong>X</strong>) hoặc back (<strong>&lt;</strong>) ở góc trên thanh Zalo để đóng form này
               </li>
               <li>Quay lại ARITO Mini App — tài khoản AritoID đã được liên kết</li>
             </ol>
           </>
         )}
-      </div>
-      <div className="zalo-return-foot">
-        <button
-          type="button"
-          className="zalo-return-open"
-          disabled={closing || busy}
-          onClick={() => void handleClose()}
-        >
-          {closing ? 'Đang đóng…' : 'Đóng cửa sổ này'}
-        </button>
-        <p className="zalo-return-foot-hint">
-          Nếu cửa sổ chưa đóng, dùng nút X trên thanh Zalo.
-        </p>
       </div>
     </div>
   );

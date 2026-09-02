@@ -1438,6 +1438,7 @@ export function FormRuntimeView({
               uploadMode={c.uploadMode}
               previewWidth={c.previewWidth}
               imageSource={c.imageSource}
+              cameraType={c.cameraType}
               align={c.align}
               value={visualFrame.values[c.id]}
               style={heightStyle}

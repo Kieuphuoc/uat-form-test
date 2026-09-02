@@ -153,6 +153,7 @@ const CONTROL_GUIDES: Record<string, Guide> = {
     lines: [
       'Preview vuông (`previewWidth` px, mặc định 50); chọn ảnh / chụp.',
       '`imageSource`: both (chụp+chọn) | camera (chỉ chụp live).',
+      '`cameraType`: back (mặc định) | front — camera khi chụp; web gợi ý, native/mini-app tuân theo.',
       '`align`: center | squareCenter → label canh giữa; camera-only → icon+Chụp ảnh giữa; squareCenter = khung vuông.',
       '`uploadMode` giống file. View: chỉ xem, không upload.',
     ],
