@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import type { Conversation } from '../../api/chatApi';
 import { botAvatarUrl, isEmbedBot, normalizeNotifyMode, notifyModeLabel } from '../../api/chatApi';
 import { IconBellMention, IconBellOff, IconBot, IconPlus, IconSearch, IconUsers, IconUsersAdd } from '../AppIcons';
@@ -7,12 +8,15 @@ type Props = {
   items: Conversation[];
   activeId: number | null;
   loading: boolean;
+  hasMore?: boolean;
+  loadingMore?: boolean;
   query: string;
   onQueryChange: (value: string) => void;
   onSelect: (id: number) => void;
   onNewDirect: () => void;
   onNewGroup: () => void;
   onOpenContacts: () => void;
+  onLoadMore?: () => void;
 };
 
 function timeLabel(iso?: string | null): string {
@@ -33,19 +37,32 @@ export function ConversationList({
   items,
   activeId,
   loading,
+  hasMore = false,
+  loadingMore = false,
   query,
   onQueryChange,
   onSelect,
   onNewDirect,
   onNewGroup,
   onOpenContacts,
+  onLoadMore,
 }: Props) {
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el || !hasMore || loading || loadingMore || !onLoadMore) return;
+    if (el.scrollHeight <= el.clientHeight + 8) onLoadMore();
+  }, [items.length, hasMore, loading, loadingMore, onLoadMore]);
+
   return (
     <div className="chat-list">
       <div className="chat-list-head zalo-list-head">
         <div className="zalo-list-title">
           <strong>Tin nhắn nội bộ</strong>
-          <span className="muted">{loading ? 'Đang tải...' : `${items.length} hội thoại`}</span>
+          <span className="muted">
+            {loading ? 'Đang tải...' : `${items.length}${hasMore ? '+' : ''} hội thoại`}
+          </span>
         </div>
         <div className="zalo-source-pick">
           <button type="button" className="chat-icon-btn" title="Danh bạ" onClick={onOpenContacts}>
@@ -71,7 +88,16 @@ export function ConversationList({
         </label>
       </div>
 
-      <div className="chat-list-body">
+      <div
+        ref={bodyRef}
+        className="chat-list-body"
+        onScroll={(event) => {
+          if (!hasMore || loadingMore || loading || !onLoadMore) return;
+          const el = event.currentTarget;
+          if (el.scrollHeight - el.scrollTop - el.clientHeight > 72) return;
+          onLoadMore();
+        }}
+      >
         {loading && items.length === 0 && <p className="chat-hint">Đang tải hội thoại…</p>}
 
         {!loading && items.length === 0 && (
@@ -142,6 +168,7 @@ export function ConversationList({
             </button>
           );
         })}
+        {loadingMore && <p className="chat-hint chat-list-more">Đang tải thêm…</p>}
       </div>
     </div>
   );

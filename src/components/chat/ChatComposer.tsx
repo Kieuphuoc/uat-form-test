@@ -82,6 +82,7 @@ type Props = {
   onSendAttachments: (files: File[]) => Promise<void>;
   onValidateSend?: (body: string) => boolean;
   addFilesRef: MutableRefObject<((files: File[]) => void) | null>;
+  focusToken?: number;
 };
 
 /**
@@ -106,6 +107,7 @@ export const ChatComposer = memo(function ChatComposer({
   onSendAttachments,
   onValidateSend,
   addFilesRef,
+  focusToken = 0,
 }: Props) {
   const { mobile } = useAuth();
   const keyboardHandlers = useMemo(() => mobileKeyboardFocusHandlers(mobile), [mobile]);
@@ -196,6 +198,11 @@ export const ChatComposer = memo(function ChatComposer({
     refocusComposer(textareaRef.current);
     resizeComposer(textareaRef.current);
   }, [replyTo]);
+
+  useEffect(() => {
+    if (!focusToken || !canSend) return;
+    refocusComposer(textareaRef.current);
+  }, [focusToken, canSend]);
 
   const addFiles = (files: File[]) => {
     if (!canAttach || files.length === 0) return;

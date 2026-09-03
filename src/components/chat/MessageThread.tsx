@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { botAvatarUrl, botTypeLabel, type ChatMember, type ChatMessage, type ContactRelation, type Conversation, type QuickMessage } from '../../api/chatApi';
 import { deriveFaqBuildPhase, validateFaqBuildSend } from '../../lib/faqBuildState';
 import { ChatComposer } from './ChatComposer';
-import { ChatMarkdown, ChatMarkdownClamped, ChatMarkdownViewer } from './ChatMarkdown';
-import { useFaqMarkdownMedia } from './FaqMarkdownViewer';
+import { ChatMarkdownClamped, ChatMarkdownViewer } from './ChatMarkdown';
+import { parseFaqSetIdFromFolder, useFaqMarkdownMedia } from './FaqMarkdownViewer';
 import {
   IconBack,
   IconDownload,
@@ -167,7 +167,8 @@ export function MessageThread({
   }, [messages]);
 
   useEffect(() => {
-    if (!focusRequest?.messageId) return;
+    if (!focusRequest) return;
+    if (!focusRequest.messageId) return;
     const applyFocus = () => {
       const container = bodyRef.current;
       if (!container) return;
@@ -209,17 +210,17 @@ export function MessageThread({
     dragDepthRef.current = 0;
   }, [conversation?.id]);
 
-  const onOpenBotMarkdown = useCallback((text: string) => {
-    setMdViewer({ title: conversation?.title || 'Nội dung AI', text });
+  const onOpenMarkdown = useCallback((text: string) => {
+    setMdViewer({ title: conversation?.title || 'Nội dung tin nhắn', text });
   }, [conversation?.title]);
 
   const onClearReply = useCallback(() => setReplyTo(null), []);
 
   const botFolderId = (conversation?.bot_folder_id ?? '').toLowerCase();
   const isFaqBuild = botFolderId.startsWith('faq-build:');
-  const faqSetId = botFolderId.startsWith('faq-ask:') || isFaqBuild
-    ? Number(botFolderId.split(':')[1]) || 0
-    : 0;
+  const faqSetId =
+    parseFaqSetIdFromFolder(conversation?.active_bot_folder_id)
+    || parseFaqSetIdFromFolder(conversation?.bot_folder_id);
   const faqMedia = useFaqMarkdownMedia(faqSetId > 0 ? faqSetId : null);
   const faqBuildPhase = useMemo(
     () => (isFaqBuild ? deriveFaqBuildPhase(messages, selfUserId) : 'idle'),
@@ -516,15 +517,11 @@ export function MessageThread({
                         {m.file_id ? (
                           <AttachmentMessage message={m} onPreview={() => openPreview(m)} />
                         ) : m.body ? (
-                          isBot && !m.sender_is_me ? (
-                            <ChatMarkdownClamped
-                              text={m.body}
-                              media={faqMedia}
-                              onOpenLarge={onOpenBotMarkdown}
-                            />
-                          ) : (
-                            <ChatMarkdown text={m.body} />
-                          )
+                          <ChatMarkdownClamped
+                            text={m.body}
+                            media={faqMedia}
+                            onOpenLarge={onOpenMarkdown}
+                          />
                         ) : null}
                       </div>
                     </div>
@@ -691,6 +688,7 @@ export function MessageThread({
         onSendAttachments={onSendAttachments}
         onValidateSend={validateComposerSend}
         addFilesRef={addFilesRef}
+        focusToken={focusRequest?.token}
       />
 
       {preview && (

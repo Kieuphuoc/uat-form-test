@@ -35,6 +35,7 @@ import {
   subscribeMessages,
   syncConversationNotifyModes,
   reloadConversations,
+  loadMoreConversations,
 } from '../lib/chatTransport';
 
 const PAGE_SIZE = 30;
@@ -46,7 +47,10 @@ const LIST_WIDTH_KEY = 'arito-chat:list-width';
 const INFO_WIDTH_KEY = 'arito-chat:info-width';
 
 type Pane = 'list' | 'thread' | 'info';
-type ShellContext = { me: ChatMe | null };
+type ShellContext = {
+  me: ChatMe | null;
+  onOpenDataSelect?: () => void;
+};
 
 function storedWidth(key: string, fallback: number): number {
   const value = Number(window.localStorage.getItem(key));
@@ -133,7 +137,7 @@ export function ChatPage() {
   const { conversationId } = useParams();
   const navigate = useNavigate();
   const { mobile } = useAuth();
-  const { me } = useOutletContext<ShellContext>();
+  const { me, onOpenDataSelect } = useOutletContext<ShellContext>();
 
   const activeId = Number(conversationId) > 0 ? Number(conversationId) : null;
 
@@ -142,6 +146,12 @@ export function ChatPage() {
   const [conversationQuery, setConversationQuery] = useState('');
   const [conversationSearch, setConversationSearch] = useState('');
   const [listLoading, setListLoading] = useState(true);
+  const [listHasMore, setListHasMore] = useState(false);
+  const [listLoadingMore, setListLoadingMore] = useState(false);
+  const [peerOpening, setPeerOpening] = useState(() => {
+    const peer = Number(new URLSearchParams(window.location.search).get('peer'));
+    return Number.isFinite(peer) && peer > 0;
+  });
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [openAttachments, setOpenAttachments] = useState<ChatAttachmentList | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -169,6 +179,7 @@ export function ChatPage() {
   const optimisticIdRef = useRef(-1);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const aiWaitTimer = useRef<number | null>(null);
+  const peerOpenedRef = useRef(0);
 
   const stopAiWait = useCallback(() => {
     setAiWaiting(false);
@@ -197,6 +208,49 @@ export function ChatPage() {
   useEffect(() => {
     if (me?.user_id) setChatActorUserId(me.user_id);
   }, [me?.user_id]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const peer = Number(params.get('peer'));
+    if (!Number.isFinite(peer) || peer <= 0 || peerOpenedRef.current === peer) return;
+    peerOpenedRef.current = peer;
+    setPeerOpening(true);
+    const lookup = params.get('lookup')?.trim() || undefined;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const conversation = await chatApi.createDirect(peer, lookup);
+        if (cancelled) return;
+        params.delete('peer');
+        params.delete('lookup');
+        const qs = params.toString();
+        window.history.replaceState(
+          {},
+          '',
+          `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`,
+        );
+        try {
+          await reloadConversations();
+        } catch {
+          /* hội thoại vẫn mở được dù danh sách chưa refresh */
+        }
+        if (cancelled) return;
+        navigateChat(navigate, `/chat/${conversation.id}`, { replace: true });
+        setPane('thread');
+      } catch (e) {
+        if (!cancelled) {
+          peerOpenedRef.current = 0;
+          setError(errorMessage(e, 'Không mở được hội thoại.'));
+        }
+      } finally {
+        if (!cancelled) setPeerOpening(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (peerOpenedRef.current === peer) peerOpenedRef.current = 0;
+    };
+  }, [navigate]);
 
   useEffect(() => {
     syncConversationNotifyModes(conversations);
@@ -268,6 +322,12 @@ export function ChatPage() {
     }
   }, []);
 
+  const onListLoadMore = useCallback(() => {
+    if (!listHasMore || listLoadingMore || listLoading) return;
+    setListLoadingMore(true);
+    void loadMoreConversations().finally(() => setListLoadingMore(false));
+  }, [listHasMore, listLoadingMore, listLoading]);
+
   const refreshDetail = useCallback(async () => {
     if (!activeId) return;
     try {
@@ -304,8 +364,9 @@ export function ChatPage() {
 
   useEffect(() => {
     setListLoading(true);
-    const sub = subscribeConversations(conversationSearch, (items) => {
+    const sub = subscribeConversations(conversationSearch, (items, meta) => {
       setConversations(items);
+      setListHasMore(meta.hasMore);
       if (!conversationSearch)
         setTotalUnread(items.filter((item) => (item.unread_count || 0) > 0).length);
       setListLoading(false);
@@ -314,11 +375,11 @@ export function ChatPage() {
   }, [conversationSearch]);
 
   useEffect(() => {
-    if (activeId || listLoading || conversationSearch || mobile) return;
+    if (activeId || listLoading || conversationSearch || mobile || peerOpening) return;
     if (conversations.length === 0) return;
     if (window.matchMedia('(max-width: 1023px)').matches) return;
     navigateChat(navigate, `/chat/${conversations[0].id}`, { replace: true });
-  }, [activeId, listLoading, conversationSearch, conversations, mobile, navigate]);
+  }, [activeId, listLoading, conversationSearch, conversations, mobile, navigate, peerOpening]);
 
   useEffect(() => {
     const sub = subscribeConversationRead((event) => {
@@ -849,9 +910,12 @@ export function ChatPage() {
             items={conversations}
             activeId={activeId}
             loading={listLoading}
+            hasMore={listHasMore}
+            loadingMore={listLoadingMore}
             query={conversationQuery}
             onQueryChange={setConversationQuery}
             onSelect={openConversation}
+            onLoadMore={onListLoadMore}
             onNewDirect={() => {
               setPickerError(null);
               setPicker('direct');
@@ -873,7 +937,7 @@ export function ChatPage() {
         />
 
         <main className="chat-panel chat-panel--thread">
-          {!activeId && (listLoading || (!mobile && !conversationSearch && conversations.length > 0)) ? (
+          {!activeId && (listLoading || peerOpening || (!mobile && !conversationSearch && conversations.length > 0)) ? (
             <div className="chat-thread chat-thread--empty">
               <p className="chat-hint">Đang tải hội thoại…</p>
             </div>
@@ -943,6 +1007,20 @@ export function ChatPage() {
               threadLoading || (!!activeId && detail?.conversation.id !== activeId)
             }
             busy={busy}
+            embedCompany={
+              onOpenDataSelect
+                ? {
+                    label:
+                      me?.unit?.unit_name ||
+                      me?.unit?.unit_code ||
+                      (me?.unit_id && me.unit_id > 0 ? `Công ty #${me.unit_id}` : 'Chọn công ty'),
+                    title: me?.unit?.address
+                      ? `Thay đổi công ty và dữ liệu — ${me.unit.address}`
+                      : 'Thay đổi công ty và dữ liệu',
+                    onClick: onOpenDataSelect,
+                  }
+                : null
+            }
             onClose={() => {
               if (window.matchMedia('(max-width: 1023px)').matches) setPane('thread');
               else setInfoVisible(false);

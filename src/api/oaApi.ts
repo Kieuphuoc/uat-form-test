@@ -158,9 +158,12 @@ export const oaApi = {
     if (opts?.page) qs.set('page', String(opts.page));
     if (opts?.pageSize) qs.set('page_size', String(opts.pageSize));
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
-    return oaFetch<{ items: OaConversation[] }>(`/api/chat/oa/conversations${suffix}`).then(
-      (r) => r.items ?? [],
-    );
+    return oaFetch<{ items: OaConversation[]; has_more?: boolean }>(
+      `/api/chat/oa/conversations${suffix}`,
+    ).then((r) => ({
+      items: r.items ?? [],
+      has_more: !!r.has_more,
+    }));
   },
 
   listContacts: (opts?: { search?: string; page?: number; pageSize?: number }) => {

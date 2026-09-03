@@ -243,6 +243,7 @@ export function ChatAppShell() {
       ? me.unit?.unit_name || me.unit?.unit_code || `Công ty #${me.unit_id}`
       : null;
   const companyTitle = me?.unit?.address || companyName || undefined;
+  const openDataSelect = isolatedBox ? () => setDataSelectOpen(true) : undefined;
 
   return (
     <div className={`chat-shell${mobile ? ' chat-shell--mobile' : ''}`} data-chat-theme={me?.chat_theme || 'default'}>
@@ -404,7 +405,7 @@ export function ChatAppShell() {
       )}
 
       <div className="chat-shell-body">
-        <Outlet context={{ me, setMe }} />
+        <Outlet context={{ me, setMe, onOpenDataSelect: openDataSelect }} />
       </div>
 
       {dataSelectOpen && <DataSelectionDialog onClose={() => setDataSelectOpen(false)} />}

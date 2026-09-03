@@ -222,8 +222,8 @@ export function ContactsPage() {
     setNewGroupTitle('');
     setError(null);
     try {
-      const items = await chatApi.listConversations();
-      setGroups(items.filter((c) => c.kind === 'group'));
+      const items = await chatApi.listConversations('', 1, 100);
+      setGroups(items.items.filter((c) => c.kind === 'group'));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Không tải được danh sách nhóm.');
     }

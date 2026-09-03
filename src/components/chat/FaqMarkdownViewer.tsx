@@ -75,6 +75,14 @@ function FaqMediaFile({
   );
 }
 
+export function parseFaqSetIdFromFolder(folderId?: string | null): number {
+  const value = (folderId ?? '').trim().toLowerCase();
+  if (value.startsWith('faq-ask:') || value.startsWith('faq-build:')) {
+    return Number(value.split(':')[1]) || 0;
+  }
+  return 0;
+}
+
 export function useFaqMarkdownMedia(setId: number | null): ChatMarkdownMedia | undefined {
   return useMemo(() => {
     if (!setId) return undefined;

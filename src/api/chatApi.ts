@@ -554,13 +554,17 @@ export const chatApi = {
       },
     ),
 
-  listConversations: (search = '') => {
+  listConversations: (search = '', page = 1, pageSize = 16) => {
     const qs = new URLSearchParams();
     if (search.trim()) qs.set('search', search.trim());
-    const suffix = qs.toString() ? `?${qs.toString()}` : '';
-    return chatFetch<{ items: Conversation[] }>(`/api/chat/conversations${suffix}`).then(
-      (r) => r.items ?? [],
-    );
+    qs.set('page', String(Math.max(1, page)));
+    qs.set('page_size', String(Math.max(1, pageSize)));
+    return chatFetch<{ items: Conversation[]; has_more?: boolean }>(
+      `/api/chat/conversations?${qs.toString()}`,
+    ).then((r) => ({
+      items: r.items ?? [],
+      has_more: !!r.has_more,
+    }));
   },
 
   getConversation: (id: number) =>

@@ -25,6 +25,7 @@ import { ChatAvatar, useFileBlobUrl } from '../components/chat/ChatAvatar';
 import { ChatBotCatalogSection } from '../components/chat/ChatBotCatalogSection';
 import { ChatFileSection, ChatFileTile } from '../components/chat/ChatFileGrid';
 import { ChatMarkdownClamped, ChatMarkdownViewer } from '../components/chat/ChatMarkdown';
+import { parseFaqSetIdFromFolder, useFaqMarkdownMedia } from '../components/chat/FaqMarkdownViewer';
 import {
   detectComposerSlash,
   filterSlashPicks,
@@ -42,7 +43,7 @@ import { resizeChatImage } from '../lib/chatImageResize';
 import { loadChatBots } from '../lib/chatBotsCache';
 import { navigateChat } from '../lib/chatNav';
 import { mobileKeyboardFocusHandlers, refocusComposer } from '../lib/keyboardBridge';
-import { reloadOaConversations, patchOaConversation, markAllOaConversationsRead, subscribeOaConversations, subscribeOaMessages } from '../lib/chatTransport';
+import { reloadOaConversations, loadMoreOaConversations, patchOaConversation, markAllOaConversationsRead, subscribeOaConversations, subscribeOaMessages } from '../lib/chatTransport';
 
 const PAGE_SIZE = 30;
 const MESSAGE_LIMIT = 50;
@@ -53,7 +54,6 @@ const LIST_WIDTH_KEY = 'arito-oa:list-width';
 const INFO_WIDTH_KEY = 'arito-oa:info-width';
 const COMPOSER_MAX_LINES = 8;
 const LINE_HEIGHT_FALLBACK = 20;
-const OA_REPLY_MAX_LINES = 10;
 
 type Pane = 'list' | 'thread' | 'info';
 type ListMode = 'conversations' | 'contacts';
@@ -627,6 +627,8 @@ export function OaChatPage() {
   const [hasMore, setHasMore] = useState(false);
   const [search, setSearch] = useState('');
   const [loadingList, setLoadingList] = useState(false);
+  const [listHasMore, setListHasMore] = useState(false);
+  const [listLoadingMore, setListLoadingMore] = useState(false);
   const [loadingContacts, setLoadingContacts] = useState(false);
   const [loadingThread, setLoadingThread] = useState(false);
   const [error, setError] = useState('');
@@ -649,6 +651,7 @@ export function OaChatPage() {
   const [aiReplyBusy, setAiReplyBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const listBodyRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const dragDepthRef = useRef(0);
   const localUrlsRef = useRef<string[]>([]);
@@ -700,6 +703,12 @@ export function OaChatPage() {
     ? `Nhập tin nhắn... còn ${remainingQuota}/${selected.outbound_limit || 8} tin tương tác`
     : blockReason;
   messagesRef.current = messages;
+
+  const faqSetId =
+    parseFaqSetIdFromFolder(selected?.active_bot_folder_id)
+    || parseFaqSetIdFromFolder(selected?.ai_bot_folder_id)
+    || parseFaqSetIdFromFolder(selected?.default_bot_folder_id);
+  const faqMedia = useFaqMarkdownMedia(faqSetId > 0 ? faqSetId : null);
 
   const onOpenLarge = useCallback((text: string) => {
     setMdViewer({ title: selected?.title || 'Nội dung tin nhắn', text });
@@ -969,12 +978,25 @@ export function OaChatPage() {
   /** Danh sách OA do chatTransport giữ cache và vá tại chỗ theo realtime. */
   useEffect(() => {
     setLoadingList(true);
-    const sub = subscribeOaConversations(search, (items) => {
+    const sub = subscribeOaConversations(search, (items, meta) => {
       setConversations(items);
+      setListHasMore(meta.hasMore);
       setLoadingList(false);
     });
     return () => sub.stop();
   }, [search]);
+
+  const onListLoadMore = useCallback(() => {
+    if (listMode !== 'conversations' || !listHasMore || listLoadingMore || loadingList) return;
+    setListLoadingMore(true);
+    void loadMoreOaConversations().finally(() => setListLoadingMore(false));
+  }, [listMode, listHasMore, listLoadingMore, loadingList]);
+
+  useEffect(() => {
+    const el = listBodyRef.current;
+    if (!el || listMode !== 'conversations' || !listHasMore || listLoadingMore || loadingList) return;
+    if (el.scrollHeight <= el.clientHeight + 8) onListLoadMore();
+  }, [conversations.length, listHasMore, listLoadingMore, loadingList, listMode, onListLoadMore]);
 
   /** Bám hội thoại đang chọn theo danh sách mới nhất, hoặc mở hội thoại đầu tiên. */
   useEffect(() => {
@@ -1370,7 +1392,7 @@ export function OaChatPage() {
 
   const currentItemsLabel = listMode === 'contacts'
     ? `${contacts.length} danh bạ`
-    : `${conversations.length} hội thoại`;
+    : `${conversations.length}${listHasMore ? '+' : ''} hội thoại`;
   const loadingCurrentList = listMode === 'contacts' ? loadingContacts : loadingList;
 
   return (
@@ -1437,7 +1459,15 @@ export function OaChatPage() {
                 />
               </label>
             </div>
-            <div className="chat-list-body">
+            <div
+              ref={listBodyRef}
+              className="chat-list-body"
+              onScroll={(event) => {
+                const el = event.currentTarget;
+                if (el.scrollHeight - el.scrollTop - el.clientHeight > 72) return;
+                onListLoadMore();
+              }}
+            >
               {listMode === 'conversations' ? (
                 <>
                   {conversations.map((item) => (
@@ -1491,6 +1521,7 @@ export function OaChatPage() {
                   {!conversations.length && !loadingList ? (
                     <p className="chat-hint">Chưa có hội thoại OA. Tin mới sẽ xuất hiện sau khi webhook nhận event.</p>
                   ) : null}
+                  {listLoadingMore ? <p className="chat-hint chat-list-more">Đang tải thêm…</p> : null}
                 </>
               ) : (
                 <>
@@ -1691,7 +1722,7 @@ export function OaChatPage() {
                                 ) : (
                                   <ChatMarkdownClamped
                                     text={msg.body || `[${msg.msg_type}]`}
-                                    maxLines={OA_REPLY_MAX_LINES}
+                                    media={faqMedia}
                                     onOpenLarge={onOpenLarge}
                                   />
                                 )}
@@ -1976,6 +2007,7 @@ export function OaChatPage() {
         <ChatMarkdownViewer
           title={mdViewer.title}
           text={mdViewer.text}
+          media={faqMedia}
           onClose={() => setMdViewer(null)}
         />
       ) : null}

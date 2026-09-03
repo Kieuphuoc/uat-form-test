@@ -19,6 +19,7 @@ import {
   IconBellOff,
   IconBlock,
   IconClose,
+  IconDatabase,
   IconEdit,
   IconImage,
   IconPlus,
@@ -48,7 +49,37 @@ type Props = {
   onBlock?: () => void;
   onUnblock?: () => void;
   onAccept?: () => void;
+  embedCompany?: {
+    label: string;
+    title?: string;
+    onClick: () => void;
+  } | null;
 };
+
+function EmbedCompanyFooter({
+  embedCompany,
+}: {
+  embedCompany?: Props['embedCompany'];
+}) {
+  if (!embedCompany) return null;
+  return (
+    <div className="chat-info-embed-company">
+      <span className="chat-info-embed-company-label">Tin nhắn nội bộ</span>
+      <span className="chat-info-embed-company-sep" aria-hidden="true">
+        ⇒
+      </span>
+      <button
+        type="button"
+        className="chat-info-embed-company-btn"
+        title={embedCompany.title ?? 'Thay đổi công ty và dữ liệu'}
+        onClick={embedCompany.onClick}
+      >
+        <IconDatabase size={14} />
+        <span>{embedCompany.label}</span>
+      </button>
+    </div>
+  );
+}
 
 function FileTile({
   conversationId,
@@ -86,6 +117,7 @@ export function ConversationInfo({
   onBlock,
   onUnblock,
   onAccept,
+  embedCompany,
 }: Props) {
   const isGroup = conversation?.kind === 'group';
   const isBot = conversation?.kind === 'bot';
@@ -187,7 +219,8 @@ export function ConversationInfo({
   if (!conversation) {
     return (
       <div className="chat-info">
-        <p className="chat-hint">Chưa chọn hội thoại.</p>
+        <p className="chat-hint" style={{ flex: 1 }}>Chưa chọn hội thoại.</p>
+        <EmbedCompanyFooter embedCompany={embedCompany} />
       </div>
     );
   }
@@ -455,6 +488,8 @@ export function ConversationInfo({
           </ChatFileSection>
         )}
       </div>
+
+      <EmbedCompanyFooter embedCompany={embedCompany} />
 
       {preview && (
         <FilePreviewModal

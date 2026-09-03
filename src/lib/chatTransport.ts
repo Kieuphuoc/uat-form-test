@@ -19,8 +19,11 @@ export function formatHeaderBadge(count: number): string {
 }
 
 const HEARTBEAT_MS = 30_000;
-const OA_LIST_PAGE_SIZE = 30;
+const LIST_PAGE_SIZE = 16;
+const OA_LIST_PAGE_SIZE = 16;
 const OA_MESSAGE_LIMIT = 50;
+
+export type ConversationListMeta = { hasMore: boolean };
 
 type MessageListener = {
   conversationId: number;
@@ -30,7 +33,7 @@ type MessageListener = {
 
 type ConversationListener = {
   search: string;
-  callback: (items: Conversation[]) => void;
+  callback: (items: Conversation[], meta: ConversationListMeta) => void;
 };
 
 type ContactListener = {
@@ -83,7 +86,7 @@ type OaMessageListener = {
 
 type OaConversationListener = {
   search: string;
-  callback: (items: OaConversation[]) => void;
+  callback: (items: OaConversation[], meta: ConversationListMeta) => void;
 };
 
 let platform: ChatPlatform = 'web';
@@ -120,11 +123,17 @@ let listDebounceTimer: number | null = null;
 let lastListKey = '';
 let lastListAt = 0;
 let lastListItems: Conversation[] = [];
+let lastListPage = 1;
+let lastListHasMore = false;
+let listMoreInflight: Promise<Conversation[]> | null = null;
 const oaListInflight = new Map<string, Promise<OaConversation[]>>();
 let oaListDebounceTimer: number | null = null;
 let oaLastListKey = '';
 let oaLastListAt = 0;
 let oaLastListItems: OaConversation[] = [];
+let oaLastListPage = 1;
+let oaLastListHasMore = false;
+let oaListMoreInflight: Promise<OaConversation[]> | null = null;
 
 function hasListeners(): boolean {
   return (
@@ -201,19 +210,15 @@ export function seedOaUnreadIds(ids: number[]): void {
 }
 
 function syncChatUnreadFromList(items: Conversation[]): void {
-  chatUnreadIds.clear();
   for (const item of items) {
-    if ((item.unread_count || 0) > 0) chatUnreadIds.add(String(item.id));
+    setChatUnreadId(String(item.id), (item.unread_count || 0) > 0);
   }
-  emitUnreadCounts();
 }
 
 function syncOaUnreadFromList(items: OaConversation[]): void {
-  oaUnreadIds.clear();
   for (const item of items) {
-    if ((item.unread_count || 0) > 0) oaUnreadIds.add(String(item.id));
+    setOaUnreadId(String(item.id), (item.unread_count || 0) > 0);
   }
-  emitUnreadCounts();
 }
 
 export function subscribeUnreadCounts(onCounts: (counts: UnreadCounts) => void): ChatSubscription {
@@ -520,15 +525,32 @@ function patchConversationsFromMessage(message: ChatMessage): boolean {
   };
   lastListItems = [next, ...lastListItems.filter((item) => item.id !== message.conversation_id)];
   lastListAt = Date.now();
+  emitConversations();
+  return true;
+}
+
+function emitConversations(): void {
+  const meta: ConversationListMeta = { hasMore: lastListHasMore };
   for (const listener of conversationListeners) {
     const query = listener.search.trim().toLowerCase();
     listener.callback(
       query
         ? lastListItems.filter((item) => (item.title ?? '').toLowerCase().includes(query))
         : lastListItems,
+      meta,
     );
   }
-  return true;
+}
+
+function mergeUnique<T extends { id: number }>(base: T[], extra: T[]): T[] {
+  const seen = new Set(base.map((item) => item.id));
+  const next = [...base];
+  for (const item of extra) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    next.push(item);
+  }
+  return next;
 }
 
 async function loadConversations(search: string, force = false): Promise<Conversation[]> {
@@ -537,12 +559,18 @@ async function loadConversations(search: string, force = false): Promise<Convers
   if (existing) return existing;
   if (!force && key === lastListKey && Date.now() - lastListAt < 1000) return lastListItems;
 
-  const pending = chatApi.listConversations(key).then((items) => {
+  const pending = chatApi.listConversations(key, 1, LIST_PAGE_SIZE).then((result) => {
+    const keepExtra = force && key === lastListKey && lastListPage > 1;
+    const extras = keepExtra
+      ? lastListItems.filter((item) => !result.items.some((row) => row.id === item.id))
+      : [];
     lastListKey = key;
     lastListAt = Date.now();
-    lastListItems = items;
-    if (!key) syncChatUnreadFromList(items);
-    return items;
+    lastListItems = extras.length > 0 ? [...result.items, ...extras] : result.items;
+    lastListPage = extras.length > 0 ? lastListPage : 1;
+    lastListHasMore = extras.length > 0 ? lastListHasMore || result.has_more : result.has_more;
+    if (!key) syncChatUnreadFromList(result.items);
+    return lastListItems;
   });
   listInflight.set(key, pending);
   try {
@@ -552,9 +580,32 @@ async function loadConversations(search: string, force = false): Promise<Convers
   }
 }
 
+export async function loadMoreConversations(): Promise<Conversation[]> {
+  if (!lastListHasMore) return lastListItems;
+  if (listMoreInflight) return listMoreInflight;
+  const key = lastListKey;
+  const pending = chatApi.listConversations(key, lastListPage + 1, LIST_PAGE_SIZE).then((result) => {
+    if (lastListKey !== key) return lastListItems;
+    const merged = mergeUnique(lastListItems, result.items);
+    lastListPage += 1;
+    lastListHasMore = merged.length > lastListItems.length && result.has_more;
+    lastListItems = merged;
+    lastListAt = Date.now();
+    if (!key) syncChatUnreadFromList(result.items);
+    emitConversations();
+    return lastListItems;
+  });
+  listMoreInflight = pending;
+  try {
+    return await pending;
+  } finally {
+    if (listMoreInflight === pending) listMoreInflight = null;
+  }
+}
+
 async function refreshConversation(listener: ConversationListener, force = false): Promise<void> {
   try {
-    listener.callback(await loadConversations(listener.search, force));
+    listener.callback(await loadConversations(listener.search, force), { hasMore: lastListHasMore });
   } catch {
     // Giữ state hiện tại, reconnect sau sẽ thử lại.
   }
@@ -709,9 +760,10 @@ export function markAllOaConversationsRead(): void {
 }
 
 function emitOaConversations(): void {
+  const meta: ConversationListMeta = { hasMore: oaLastListHasMore };
   for (const listener of oaConversationListeners) {
     if (listener.search.trim() !== oaLastListKey) continue;
-    listener.callback(oaLastListItems);
+    listener.callback(oaLastListItems, meta);
   }
 }
 
@@ -723,12 +775,18 @@ async function loadOaConversations(search: string, force = false): Promise<OaCon
 
   const pending = oaApi
     .listConversations({ search: key, page: 1, pageSize: OA_LIST_PAGE_SIZE })
-    .then((items) => {
+    .then((result) => {
+      const keepExtra = force && key === oaLastListKey && oaLastListPage > 1;
+      const extras = keepExtra
+        ? oaLastListItems.filter((item) => !result.items.some((row) => row.id === item.id))
+        : [];
       oaLastListKey = key;
-              oaLastListAt = Date.now();
-      oaLastListItems = items;
-      if (!key) syncOaUnreadFromList(items);
-      return items;
+      oaLastListAt = Date.now();
+      oaLastListItems = extras.length > 0 ? [...result.items, ...extras] : result.items;
+      oaLastListPage = extras.length > 0 ? oaLastListPage : 1;
+      oaLastListHasMore = extras.length > 0 ? oaLastListHasMore || result.has_more : result.has_more;
+      if (!key) syncOaUnreadFromList(result.items);
+      return oaLastListItems;
     });
   oaListInflight.set(key, pending);
   try {
@@ -738,9 +796,34 @@ async function loadOaConversations(search: string, force = false): Promise<OaCon
   }
 }
 
+export async function loadMoreOaConversations(): Promise<OaConversation[]> {
+  if (!oaLastListHasMore) return oaLastListItems;
+  if (oaListMoreInflight) return oaListMoreInflight;
+  const key = oaLastListKey;
+  const pending = oaApi
+    .listConversations({ search: key, page: oaLastListPage + 1, pageSize: OA_LIST_PAGE_SIZE })
+    .then((result) => {
+      if (oaLastListKey !== key) return oaLastListItems;
+      const merged = mergeUnique(oaLastListItems, result.items);
+      oaLastListPage += 1;
+      oaLastListHasMore = merged.length > oaLastListItems.length && result.has_more;
+      oaLastListItems = merged;
+      oaLastListAt = Date.now();
+      if (!key) syncOaUnreadFromList(result.items);
+      emitOaConversations();
+      return oaLastListItems;
+    });
+  oaListMoreInflight = pending;
+  try {
+    return await pending;
+  } finally {
+    if (oaListMoreInflight === pending) oaListMoreInflight = null;
+  }
+}
+
 async function refreshOaConversation(listener: OaConversationListener, force = false): Promise<void> {
   try {
-    listener.callback(await loadOaConversations(listener.search, force));
+    listener.callback(await loadOaConversations(listener.search, force), { hasMore: oaLastListHasMore });
   } catch {
     // Giữ state hiện tại, reconnect sau sẽ thử lại.
   }
@@ -934,7 +1017,7 @@ export function subscribeOaInbox(onEvent: (event: OaInboxEvent) => void): ChatSu
 
 export function subscribeOaConversations(
   search: string,
-  onConversations: (items: OaConversation[]) => void,
+  onConversations: (items: OaConversation[], meta: ConversationListMeta) => void,
 ): ChatSubscription {
   const listener: OaConversationListener = { search, callback: onConversations };
   oaConversationListeners.add(listener);
@@ -986,7 +1069,7 @@ export function subscribeMessages(
 
 export function subscribeConversations(
   search: string,
-  onConversations: (items: Conversation[]) => void,
+  onConversations: (items: Conversation[], meta: ConversationListMeta) => void,
 ): ChatSubscription {
   const listener: ConversationListener = { search, callback: onConversations };
   conversationListeners.add(listener);

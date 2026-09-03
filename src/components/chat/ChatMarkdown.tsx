@@ -23,7 +23,72 @@ const HR_RE = /^\s{0,3}(-{3,}|\*{3,}|_{3,})\s*$/;
 const TABLE_ROW_RE = /^\s*\|.+\|\s*$/;
 const TABLE_SEP_RE = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
 
-export const AI_REPLY_MAX_LINES = 20;
+/** Chiều cao clamp trên thread (~10 dòng chat). Ảnh FAQ thường vượt ngưỡng này. */
+export const AI_REPLY_MAX_LINES = 10;
+const CLAMP_LINE_HEIGHT = 1.45;
+const MD_IMAGE_RE = /!\[[^\]]*\]\([^)]+\)/;
+
+function likelyOverflows(text: string, maxLines: number) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n').length;
+  return lines > maxLines || MD_IMAGE_RE.test(text);
+}
+
+function clampLineHeightPx(el: HTMLElement) {
+  const style = window.getComputedStyle(el);
+  const lineHeight = parseFloat(style.lineHeight);
+  if (Number.isFinite(lineHeight) && lineHeight > 0) return lineHeight;
+  const fontSize = parseFloat(style.fontSize);
+  return (Number.isFinite(fontSize) && fontSize > 0 ? fontSize : 14) * CLAMP_LINE_HEIGHT;
+}
+
+function watchClampOverflow(
+  clip: HTMLElement,
+  maxLines: number,
+  onChange: (overflows: boolean) => void,
+) {
+  const imgs = new Set<HTMLImageElement>();
+  const measure = () => {
+    const content = (clip.firstElementChild as HTMLElement | null) ?? clip;
+    const height = Math.max(content.scrollHeight, content.offsetHeight);
+    onChange(height > clampLineHeightPx(clip) * maxLines + 1);
+  };
+  const onImgDone = () => measure();
+  const bindImages = () => {
+    clip.querySelectorAll('img').forEach((img) => {
+      if (imgs.has(img)) return;
+      imgs.add(img);
+      if (img.complete) return;
+      img.addEventListener('load', onImgDone);
+      img.addEventListener('error', onImgDone);
+    });
+  };
+
+  bindImages();
+  measure();
+
+  const inner = (clip.firstElementChild as HTMLElement | null) ?? clip;
+  const ro = new ResizeObserver(() => {
+    bindImages();
+    measure();
+  });
+  ro.observe(inner);
+  if (inner !== clip) ro.observe(clip);
+
+  const mo = new MutationObserver(() => {
+    bindImages();
+    measure();
+  });
+  mo.observe(clip, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+
+  return () => {
+    ro.disconnect();
+    mo.disconnect();
+    imgs.forEach((img) => {
+      img.removeEventListener('load', onImgDone);
+      img.removeEventListener('error', onImgDone);
+    });
+  };
+}
 
 function isSafeHttpSrc(src: string) {
   return src.startsWith('https://') || src.startsWith('http://') || src.startsWith('/');
@@ -244,29 +309,28 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   return <div className="chat-md">{blocks}</div>;
 });
 
-export const ChatMarkdownClamped = memo(function ChatMarkdownClamped({
-  text,
+export const ChatContentClamped = memo(function ChatContentClamped({
   maxLines = AI_REPLY_MAX_LINES,
+  resetKey,
   onOpenLarge,
-  media,
+  children,
 }: {
-  text: string;
   maxLines?: number;
-  onOpenLarge: (text: string) => void;
-  media?: ChatMarkdownMedia;
+  resetKey: string;
+  onOpenLarge: () => void;
+  children: ReactNode;
 }) {
   const clipRef = useRef<HTMLDivElement | null>(null);
   const [expanded, setExpanded] = useState(false);
-  const [overflows, setOverflows] = useState(
-    () => text.replace(/\r\n/g, '\n').split('\n').length > maxLines,
-  );
+  const [overflows, setOverflows] = useState(() => likelyOverflows(resetKey, maxLines));
 
   useLayoutEffect(() => {
-    if (expanded) return;
+    setExpanded(false);
+    setOverflows(likelyOverflows(resetKey, maxLines));
     const el = clipRef.current;
     if (!el) return;
-    setOverflows(el.scrollHeight > el.clientHeight + 1);
-  }, [text, expanded, maxLines]);
+    return watchClampOverflow(el, maxLines, setOverflows);
+  }, [resetKey, maxLines]);
 
   return (
     <div className="chat-md-clip-wrap">
@@ -277,7 +341,7 @@ export const ChatMarkdownClamped = memo(function ChatMarkdownClamped({
         }`}
         style={!expanded ? ({ '--chat-md-clamp-lines': maxLines } as CSSProperties) : undefined}
       >
-        <ChatMarkdown text={text} media={media} />
+        <div className="chat-md-clip-inner">{children}</div>
       </div>
       {(overflows || expanded) && (
         <div className="chat-md-toolbar">
@@ -296,7 +360,7 @@ export const ChatMarkdownClamped = memo(function ChatMarkdownClamped({
             type="button"
             className="chat-md-tool"
             title="Xem lớn — xem toàn bộ trên form markdown riêng"
-            onClick={() => onOpenLarge(text)}
+            onClick={onOpenLarge}
           >
             <IconMaximize size={14} />
             <span>Xem lớn</span>
@@ -304,6 +368,28 @@ export const ChatMarkdownClamped = memo(function ChatMarkdownClamped({
         </div>
       )}
     </div>
+  );
+});
+
+export const ChatMarkdownClamped = memo(function ChatMarkdownClamped({
+  text,
+  maxLines = AI_REPLY_MAX_LINES,
+  onOpenLarge,
+  media,
+}: {
+  text: string;
+  maxLines?: number;
+  onOpenLarge: (text: string) => void;
+  media?: ChatMarkdownMedia;
+}) {
+  return (
+    <ChatContentClamped
+      maxLines={maxLines}
+      resetKey={text}
+      onOpenLarge={() => onOpenLarge(text)}
+    >
+      <ChatMarkdown text={text} media={media} />
+    </ChatContentClamped>
   );
 });
 

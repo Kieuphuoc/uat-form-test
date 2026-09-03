@@ -18,6 +18,12 @@ import {
   IconUsers,
 } from '../components/AppIcons';
 import { ChatAvatar } from '../components/chat/ChatAvatar';
+import {
+  ChatContentClamped,
+  ChatMarkdownClamped,
+  ChatMarkdownViewer,
+} from '../components/chat/ChatMarkdown';
+import { parseFaqSetIdFromFolder, useFaqMarkdownMedia } from '../components/chat/FaqMarkdownViewer';
 import { ZaloFilePreviewModal } from '../components/chat/ZaloFilePreviewModal';
 import { ZaloGoogleIcon } from '../components/chat/ZaloGoogleIcon';
 import { ZaloComposer, type ZaloSendPayload } from '../components/chat/ZaloComposer';
@@ -133,6 +139,10 @@ function renderMentionLinkText(msg: ZaloMessage, displayText: string): ReactNode
   });
   if (cursor < displayText.length) parts.push(...renderTextWithLinks(displayText.slice(cursor), `${msg.id}-tail`));
   return parts;
+}
+
+function zaloTextUsesMarkdown(text: string) {
+  return /!\[[^\]]*\]\([^)]+\)/.test(text) || /faq-file:/i.test(text);
 }
 
 function ZaloMessageText({ msg }: { msg: ZaloMessage }) {
@@ -288,6 +298,7 @@ export function ZaloChatPage() {
   const [folderDraft, setFolderDraft] = useState<ZaloFolderConfig & { minutes?: number }>({});
   const [bots, setBots] = useState<ChatBotCatalogItem[]>([]);
   const [filePreview, setFilePreview] = useState<ZaloAttachment | null>(null);
+  const [mdViewer, setMdViewer] = useState<{ title: string; text: string } | null>(null);
   const [infoVisible, setInfoVisible] = useState(true);
   const [listWidth, setListWidth] = useState(() => storedWidth(LIST_WIDTH_KEY, 320));
   const [infoWidth, setInfoWidth] = useState(() => storedWidth(INFO_WIDTH_KEY, 300));
@@ -334,6 +345,16 @@ export function ZaloChatPage() {
     () => botsOfType(bots, 'faq', folderDraft.faqFolderId),
     [bots, folderDraft.faqFolderId],
   );
+  const faqSetId = useMemo(() => {
+    const current = data.conversations.find((item) => item.id === activeId);
+    if (!current) return 0;
+    return parseFaqSetIdFromFolder(data.folderMap[current.zalo_thread_id]?.faqFolderId);
+  }, [activeId, data.conversations, data.folderMap]);
+  const faqMedia = useFaqMarkdownMedia(faqSetId > 0 ? faqSetId : null);
+  const onOpenLarge = useCallback((text: string) => {
+    const current = data.conversations.find((item) => item.id === activeId);
+    setMdViewer({ title: current?.name || 'Nội dung tin nhắn', text });
+  }, [activeId, data.conversations]);
 
   useEffect(() => {
     activeIdRef.current = activeId;
@@ -1242,6 +1263,8 @@ export function ZaloChatPage() {
                   const on = msg.content.includes('bật');
                   const member = members.find((m) => m.zalo_uid && m.zalo_uid === msg.sender_zalo_uid);
                   const avatarSrc = msg.sender_avatar_url || member?.avatar_url;
+                  const displayText = zaloMessageDisplayText(msg);
+                  const useMarkdown = msg.sender_type === 'bot' || zaloTextUsesMarkdown(displayText);
                   return (
                     <div key={msg.id} data-zalo-msg={msg.zalo_msg_id || msg.id} data-message-id={msg.id}>
                       {day && day !== prevDay && <div className="chat-day">{day}</div>}
@@ -1282,7 +1305,22 @@ export function ZaloChatPage() {
                                     onPreview={openFilePreview}
                                   />
                                 ))}
-                                {zaloMessageDisplayText(msg) ? <ZaloMessageText msg={msg} /> : null}
+                                {displayText ? (
+                                  useMarkdown ? (
+                                    <ChatMarkdownClamped
+                                      text={displayText}
+                                      media={faqMedia}
+                                      onOpenLarge={onOpenLarge}
+                                    />
+                                  ) : (
+                                    <ChatContentClamped
+                                      resetKey={displayText}
+                                      onOpenLarge={() => onOpenLarge(displayText)}
+                                    >
+                                      <ZaloMessageText msg={msg} />
+                                    </ChatContentClamped>
+                                  )
+                                ) : null}
                                 <span className="chat-msg-time">{zaloFmtTime(msg.zalo_created_at)}</span>
                               </div>
                             </div>
@@ -1584,6 +1622,14 @@ export function ZaloChatPage() {
           onClose={() => setFilePreview(null)}
         />
       )}
+      {mdViewer ? (
+        <ChatMarkdownViewer
+          title={mdViewer.title}
+          text={mdViewer.text}
+          media={faqMedia}
+          onClose={() => setMdViewer(null)}
+        />
+      ) : null}
       {toast && <div className="zalo-toast">{toast}</div>}
     </div>
   );
