@@ -45,6 +45,7 @@ type Props = {
   onSetAvatar: (file: File) => Promise<void>;
   onAddMembers: () => void;
   onLeave: () => void;
+  onDelete: () => void;
   onToggleNotify?: () => void;
   onBlock?: () => void;
   onUnblock?: () => void;
@@ -113,6 +114,7 @@ export function ConversationInfo({
   onSetAvatar,
   onAddMembers,
   onLeave,
+  onDelete,
   onToggleNotify,
   onBlock,
   onUnblock,
@@ -132,12 +134,15 @@ export function ConversationInfo({
   const [folderUrl, setFolderUrl] = useState<string | null>(null);
   const [preview, setPreview] = useState<ChatAttachmentItem | null>(null);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [stickyExpired, setStickyExpired] = useState(false);
+  const canBlock = !isGroup && !isBot && !!relation;
 
   useEffect(() => {
     setTitle(conversation?.title ?? '');
     setRenaming(false);
     setLeaveConfirmOpen(false);
+    setDeleteConfirmOpen(false);
   }, [conversation?.id, conversation?.title]);
 
   const conversationId = conversation?.id ?? null;
@@ -230,17 +235,6 @@ export function ConversationInfo({
       <header className="chat-info-head">
         <strong>Thông tin</strong>
         <div className="chat-info-head-actions">
-          {isGroup && (
-            <button
-              type="button"
-              className="chat-icon-btn is-danger"
-              title={isOwner ? 'Giải tán nhóm' : 'Rời nhóm'}
-              disabled={busy}
-              onClick={() => setLeaveConfirmOpen(true)}
-            >
-              <IconTrash size={18} />
-            </button>
-          )}
           {onToggleNotify && (
             <button
               type="button"
@@ -258,6 +252,28 @@ export function ConversationInfo({
               )}
             </button>
           )}
+          {canBlock && relation && (
+            <button
+              type="button"
+              className={`chat-icon-btn${relation.relation === 'blocked' ? ' is-danger' : ''}`}
+              title={relation.relation === 'blocked' && relation.i_blocked_peer ? 'Bỏ chặn tin nhắn' : 'Chặn tin nhắn'}
+              disabled={busy || (relation.relation === 'blocked' && !relation.i_blocked_peer)}
+              onClick={
+                relation.relation === 'blocked' && relation.i_blocked_peer ? onUnblock : onBlock
+              }
+            >
+              <IconBlock size={18} />
+            </button>
+          )}
+          <button
+            type="button"
+            className="chat-icon-btn is-danger"
+            title="Xóa hội thoại"
+            disabled={busy}
+            onClick={() => setDeleteConfirmOpen(true)}
+          >
+            <IconTrash size={18} />
+          </button>
           <button type="button" className="chat-icon-btn" onClick={onClose} title="Đóng">
             <IconClose size={18} />
           </button>
@@ -299,21 +315,6 @@ export function ConversationInfo({
                   }}
                 />
               </>
-            )}
-            {!isGroup && !isBot && relation && (
-              <button
-                type="button"
-                className={`chat-icon-btn chat-info-avatar-btn${
-                  relation.relation === 'blocked' ? ' is-danger' : ''
-                }`}
-                title={relation.relation === 'blocked' && relation.i_blocked_peer ? 'Bỏ chặn' : 'Chặn'}
-                disabled={busy || (relation.relation === 'blocked' && !relation.i_blocked_peer)}
-                onClick={
-                  relation.relation === 'blocked' && relation.i_blocked_peer ? onUnblock : onBlock
-                }
-              >
-                <IconBlock size={16} />
-              </button>
             )}
           </div>
           {renaming ? (
@@ -464,6 +465,14 @@ export function ConversationInfo({
                 </li>
               ))}
             </ul>
+            <button
+              type="button"
+              className="chat-danger chat-info-leave-btn"
+              disabled={busy}
+              onClick={() => setLeaveConfirmOpen(true)}
+            >
+              {isOwner ? 'Giải tán nhóm' : 'Rời nhóm'}
+            </button>
           </div>
         )}
 
@@ -500,6 +509,18 @@ export function ConversationInfo({
           onClose={() => setPreview(null)}
         />
       )}
+      <ChatConfirmDialog
+        open={deleteConfirmOpen}
+        title="Xóa hội thoại?"
+        message="Hội thoại sẽ biến khỏi danh sách của bạn. Tin nhắn không bị xóa; hội thoại hiện lại khi có tin mới hoặc khi bạn mở lại từ danh bạ."
+        confirmLabel="Xóa hội thoại"
+        busy={busy}
+        onCancel={() => setDeleteConfirmOpen(false)}
+        onConfirm={() => {
+          setDeleteConfirmOpen(false);
+          onDelete();
+        }}
+      />
       <ChatConfirmDialog
         open={leaveConfirmOpen}
         title={isOwner ? 'Giải tán nhóm?' : 'Rời khỏi nhóm?'}

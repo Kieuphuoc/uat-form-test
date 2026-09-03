@@ -845,6 +845,23 @@ export function ChatPage() {
     }
   }, [activeId, navigate, refreshConversations]);
 
+  const onDeleteConversation = useCallback(async () => {
+    if (!activeId) return;
+    setBusy(true);
+    try {
+      await chatApi.hideConversation(activeId);
+      setConversations((prev) => prev.filter((item) => item.id !== activeId));
+      await refreshConversations();
+      setPane('list');
+      navigateChat(navigate, '/chat');
+      setError(null);
+    } catch (e) {
+      setError(errorMessage(e, 'Không xóa được hội thoại.'));
+    } finally {
+      setBusy(false);
+    }
+  }, [activeId, navigate, refreshConversations]);
+
   const applyRelation = useCallback((next: ContactRelation) => {
     setDetail((prev) => (prev ? { ...prev, relation: next } : prev));
   }, []);
@@ -1032,6 +1049,7 @@ export function ChatPage() {
               setPicker('add-members');
             }}
             onLeave={() => void onLeave()}
+            onDelete={() => void onDeleteConversation()}
             onToggleNotify={() => void onToggleNotify()}
             onBlock={() => void onBlock()}
             onUnblock={() => void onUnblock()}

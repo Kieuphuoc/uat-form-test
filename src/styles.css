@@ -7665,6 +7665,11 @@ button.chat-badge:hover {
   color: var(--muted);
 }
 
+.chat-info-leave-btn {
+  margin-top: 10px;
+  width: 100%;
+}
+
 .chat-info-link {
   font-size: 12px;
   color: var(--accent);

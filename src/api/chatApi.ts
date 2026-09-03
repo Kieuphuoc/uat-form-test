@@ -626,6 +626,9 @@ export const chatApi = {
       { method: 'POST' },
     ),
 
+  hideConversation: (id: number) =>
+    chatFetch<{ message: string }>(`/api/chat/conversations/${id}/hide`, { method: 'POST' }),
+
   setNotifyMode: (id: number, notifyMode: ConversationNotifyMode) =>
     chatFetch<{ notify_mode: ConversationNotifyMode }>(`/api/chat/conversations/${id}/notify`, {
       method: 'PUT',
