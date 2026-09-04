@@ -1,9 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { FormModeTitleIcon } from './formModeTitleIcon';
+import { HrmHeaderBar } from './hrm/HrmHeaderBar';
 import {
   FORM_CHROME_MSG,
   FORM_OPEN_SHELL_MSG,
   postFormBack,
+  postFormHome,
   postFormHeaderAction,
   type FormChromeAction,
   type FormChromeState,
@@ -46,11 +48,12 @@ function readChrome(raw: unknown): Chrome | null {
 
 type Props = {
   fallbackTitle?: string;
+  slug?: string;
   children: ReactNode;
 };
 
 /** Header runtime khi không embed mobile — Back + title, ẩn modal-header trong form. */
-export function FormOuterChrome({ fallbackTitle = 'Arito Form', children }: Props) {
+export function FormOuterChrome({ fallbackTitle = 'Arito Form', slug, children }: Props) {
   const [chrome, setChrome] = useState<Chrome>({
     title: fallbackTitle,
     canBack: false,
@@ -82,58 +85,86 @@ export function FormOuterChrome({ fallbackTitle = 'Arito Form', children }: Prop
   const title = chrome.title.trim() || fallbackTitle;
 
   return (
-    <div className="form-outer-chrome">
-      <header className="form-outer-chrome__bar">
-        <div className="form-outer-chrome__left">
-          {chrome.canBack ? (
-            <button
-              type="button"
-              className="form-outer-chrome__back"
-              onClick={() => postFormBack()}
-              aria-label="Quay lại"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M15 18l-6-6 6-6"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-          ) : (
-            <span className="form-outer-chrome__mark" aria-hidden />
-          )}
-          <h1 className="form-outer-chrome__title">
+    <div className="form-outer-chrome" data-runtime-slug={slug || undefined}>
+      {slug === 'hrm' ? (
+        <HrmHeaderBar
+          titleNode={
             <span className="form-title-with-mode">
               <span className="form-title-with-mode__text">{title}</span>
               {chrome.formMode ? <FormModeTitleIcon mode={chrome.formMode} /> : null}
             </span>
-          </h1>
-        </div>
-        {chrome.headerActions.length > 0 ? (
-          <div className="form-outer-chrome__actions">
-            {chrome.headerActions.map((a) => {
-              const icon = a.icon || (a.label ? undefined : '⬜');
-              const iconOnly = !a.label;
-              return (
+          }
+          canBack={chrome.canBack}
+          onBack={() => postFormBack()}
+          onHome={() => postFormHome()}
+          actions={chrome.headerActions.map((a) => ({
+            id: a.id,
+            label: a.label,
+            onClick: () => postFormHeaderAction(a.id),
+          }))}
+        />
+      ) : (
+        <header className="form-outer-chrome__bar">
+          <div className="form-outer-chrome__left">
+            {chrome.canBack ? (
               <button
-                key={a.id}
                 type="button"
-                className={`form-outer-chrome__link${iconOnly ? ' form-outer-chrome__link--icon' : ''}`}
-                aria-label={a.label || icon || a.id}
-                title={a.label || icon || a.id}
-                onClick={() => postFormHeaderAction(a.id)}
+                className="form-outer-chrome__back"
+                onClick={() => postFormBack()}
+                aria-label="Quay lại"
               >
-                {icon ? <span className={`form-outer-chrome__link-icon${a.icon ? '' : ' form-outer-chrome__link-icon--blank'}`} aria-hidden>{icon}</span> : null}
-                {a.label ? <span className="form-outer-chrome__link-text">{a.label}</span> : null}
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M15 18l-6-6 6-6"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
               </button>
-              );
-            })}
+            ) : (
+              <span className="form-outer-chrome__mark" aria-hidden />
+            )}
+            <h1 className="form-outer-chrome__title">
+              <span className="form-title-with-mode">
+                <span className="form-title-with-mode__text">{title}</span>
+                {chrome.formMode ? <FormModeTitleIcon mode={chrome.formMode} /> : null}
+              </span>
+            </h1>
           </div>
-        ) : null}
-      </header>
+          {chrome.headerActions.length > 0 ? (
+            <div className="form-outer-chrome__actions">
+              {chrome.headerActions.map((a) => {
+                const icon = a.icon || (a.label ? undefined : '⬜');
+                const iconOnly = !a.label;
+                return (
+                  <button
+                    key={a.id}
+                    type="button"
+                    className={`form-outer-chrome__link${iconOnly ? ' form-outer-chrome__link--icon' : ''}`}
+                    aria-label={a.label || icon || a.id}
+                    title={a.label || icon || a.id}
+                    onClick={() => postFormHeaderAction(a.id)}
+                  >
+                    {icon ? (
+                      <span
+                        className={`form-outer-chrome__link-icon${a.icon ? '' : ' form-outer-chrome__link-icon--blank'}`}
+                        aria-hidden
+                      >
+                        {icon}
+                      </span>
+                    ) : null}
+                    {a.label ? (
+                      <span className="form-outer-chrome__link-text">{a.label}</span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </header>
+      )}
       <div className="form-outer-chrome__body">{children}</div>
       {toast ? <div className="toast toast-tr info">{toast}</div> : null}
     </div>

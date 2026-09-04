@@ -12,6 +12,7 @@
     "@microsoft/signalr": "^10.0.11",
     "highlight.js": "^11.11.1",
     "html5-qrcode": "^2.3.8",
+    "lucide-react": "^1.34.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.6.3"

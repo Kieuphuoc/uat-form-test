@@ -37,9 +37,11 @@ export function RedirectPage({ defaultNext = '/admin' }: Props) {
         return;
       }
 
+      const target = safeNext.startsWith('/redirect') ? '/' : safeNext;
       setMessage(session.error || 'Đăng nhập thất bại — chưa có cookie keycloak gửi tới Form.Api.');
       window.setTimeout(() => {
-        window.location.replace(`${safeNext}${safeNext.includes('?') ? '&' : '?'}login_error=1`);
+        // Về đúng chỗ đã bấm đăng nhập (vd. /chat), không dồn hết về /admin.
+        window.location.replace(`${target}${target.includes('?') ? '&' : '?'}login_error=1`);
       }, 1800);
     })();
   }, [acceptSession, params, jwt, defaultNext]);

@@ -2,6 +2,7 @@
 
 export const FORM_CHROME_MSG = 'arito-form-chrome' as const;
 export const FORM_BACK_MSG = 'arito-form-back' as const;
+export const FORM_HOME_MSG = 'arito-form-home' as const;
 export const FORM_OPEN_SHELL_MSG = 'arito-form-open-shell' as const;
 export const FORM_HEADER_ACTION_MSG = 'arito-form-header-action' as const;
 export const FORM_CHROME_REQUEST_MSG = 'arito-form-chrome-request' as const;
@@ -96,6 +97,22 @@ export function requestOpenUrl(raw: string): boolean {
 
 export function postFormBack(): void {
   const msg = { type: FORM_BACK_MSG };
+  try {
+    window.postMessage(msg, '*');
+  } catch {
+    /* ignore */
+  }
+  document.querySelectorAll('iframe').forEach((el) => {
+    try {
+      el.contentWindow?.postMessage(msg, '*');
+    } catch {
+      /* ignore */
+    }
+  });
+}
+
+export function postFormHome(): void {
+  const msg = { type: FORM_HOME_MSG };
   try {
     window.postMessage(msg, '*');
   } catch {

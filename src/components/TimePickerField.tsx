@@ -15,6 +15,7 @@ import {
   normalizeTimeFormat,
   parseTimeInput,
 } from '../lib/valueFormat';
+import { FormIcon } from './form/FormIcon';
 
 function pad2(n: number): string {
   return String(n).padStart(2, '0');
@@ -218,7 +219,7 @@ export function TimePickerField({
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => setOpen((v) => !v)}
         >
-          🕐
+          <FormIcon name="clock" size={18} />
         </button>
       </div>
 

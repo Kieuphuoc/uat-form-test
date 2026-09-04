@@ -68,6 +68,37 @@ import {
   type ViewportMode,
 } from '../lib/pcLayout';
 import { FormDebugBug } from './FormDebugBug';
+import { FormIcon } from './form/FormIcon';
+import { FormIconButton } from './form/FormIconButton';
+import { HrmAttendanceView } from './hrm/HrmAttendanceView';
+import { HrmAttendanceHistoryView } from './hrm/HrmAttendanceHistoryView';
+import { HrmComingSoonBanner } from './hrm/HrmComingSoonBanner';
+import { HrmPendingDetail } from './hrm/HrmPendingDetail';
+import { HrmPendingEmpty, HrmPendingHeader, HrmPendingToolbar } from './hrm/HrmPendingEmpty';
+import { HrmPendingView } from './hrm/HrmPendingView';
+import { HrmProcessedView } from './hrm/HrmProcessedView';
+import { HrmBookingView } from './hrm/HrmBookingView';
+import { HrmCreateView } from './hrm/HrmCreateView';
+import { HrmMyRequestsView } from './hrm/HrmMyRequestsView';
+import {
+  hrmComingSoonFeature,
+  isHrmAttendanceForm,
+  isHrmComingSoonForm,
+  isAttendanceHistoryHeader,
+} from '../lib/hrmAttendance';
+import { isHrmProcessedForm } from '../lib/hrmProcessed';
+import { isHrmBookingForm } from '../lib/hrmBooking';
+import { isHrmMyRequestsForm } from '../lib/hrmMyRequests';
+import { isHrmCreateForm } from '../lib/hrmCreate';
+import { hrmIconButtonTheme } from '../lib/hrmTheme';
+import {
+  countPendingRows,
+  isHrmPendingForm,
+  pendingDetailModel,
+  pendingRowKind,
+  pendingRowMatchesQuery,
+  type PendingTabId,
+} from '../lib/hrmPending';
 import { FormTitleWithMode } from './formModeTitleIcon';
 import {
   GRID_CHECK_COL_PX,
@@ -92,6 +123,7 @@ import { formatMapLocations } from '../lib/mapLocations';
 import {
   emitFormChrome,
   FORM_BACK_MSG,
+  FORM_HOME_MSG,
   FORM_CHROME_REQUEST_MSG,
   FORM_HEADER_ACTION_MSG,
   requestOpenShell,
@@ -200,11 +232,15 @@ function renderListCell(col: FormListColumnDef, row: Record<string, unknown>): R
     return <input type="checkbox" checked={truthyCell(raw)} readOnly disabled tabIndex={-1} />;
   }
   if (type === 'icon') {
-    return <span aria-hidden>{asInputValue(raw) || '⬜'}</span>;
+    return (
+      <span aria-hidden>
+        <FormIcon name={asInputValue(raw) || 'layout-grid'} size={16} />
+      </span>
+    );
   }
   if (type === 'image') {
     const id = asInputValue(raw);
-    return id ? <ListRowMediaThumb value={raw} size={28} fallback="🖼" /> : null;
+    return id ? <ListRowMediaThumb value={raw} size={28} fallback="image" /> : null;
   }
   return <span className="form-list-cell-text">{asInputValue(raw)}</span>;
 }
@@ -283,7 +319,7 @@ function ListRowMediaThumb({
   }
   return (
     <span className="form-list-item-thumb-fallback" style={{ width: size, height: size }}>
-      {fallback}
+      <FormIcon name={fallback} size={Math.round(size * 0.45)} />
     </span>
   );
 }
@@ -292,13 +328,15 @@ function ListItemLeading({
   row,
   tpl,
   media,
+  fallbackIcon,
 }: {
   row: Record<string, unknown>;
   tpl: FormListItemTemplate;
   media: boolean;
+  fallbackIcon?: string;
 }) {
   const size = Math.max(28, tpl.imageWidth ?? 48);
-  const defaultIcon = tpl.defaultIcon?.trim() || '📦';
+  const defaultIcon = tpl.defaultIcon?.trim() || fallbackIcon || 'package';
   const iconVal = tpl.iconField ? asInputValue(row[tpl.iconField]).trim() : '';
   const imageVal = tpl.imageField ? row[tpl.imageField] : undefined;
   const hasImage = media && imageVal != null && asInputValue(imageVal).trim() !== '';
@@ -310,10 +348,10 @@ function ListItemLeading({
       </span>
     );
   }
-  if (iconVal || tpl.defaultIcon || media) {
+  if (iconVal || tpl.defaultIcon || media || fallbackIcon) {
     return (
       <span className="form-list-item-icon" style={{ width: size, height: size }} aria-hidden>
-        {iconVal || defaultIcon}
+        <FormIcon name={iconVal || defaultIcon} size={Math.round(size * 0.45)} />
       </span>
     );
   }
@@ -505,6 +543,16 @@ export function FormRuntimeView({
   const [toast, setToast] = useState<Toast>(null);
   /** Override collapsed theo groupId (undefined = dùng defaultCollapsed). */
   const [groupCollapsed, setGroupCollapsed] = useState<Record<string, boolean>>({});
+  const [pendingTab, setPendingTab] = useState<PendingTabId>('all');
+  const [pendingQuery, setPendingQuery] = useState('');
+  const [pendingDetail, setPendingDetail] = useState<{
+    row: Record<string, unknown>;
+    key: string;
+    canOpen: boolean;
+    activate: () => void;
+  } | null>(null);
+  const [attendanceSub, setAttendanceSub] = useState<'main' | 'history'>('main');
+  const [hrmTab, setHrmTab] = useState<'attendance' | 'pending' | 'processed' | 'booking' | 'create' | 'my-requests'>('attendance');
   const drawerDirtyRef = useRef(false);
   const valuesSnapshotRef = useRef<string | null>(null);
 
@@ -520,6 +568,43 @@ export function FormRuntimeView({
   const isDrawerSplit = isOverlay && overlayMode === 'drawer' && allowDrawer;
   /** Khi drawer PC: khung chính vẫn là form cha; `top` là form sửa bên phải. */
   const visualFrame = isDrawerSplit && stack.length > 1 ? stack[stack.length - 2]! : top;
+  const isAttendance = isHrmAttendanceForm(slug, visualFrame.form);
+  const isComingSoon = isHrmComingSoonForm(slug, visualFrame.form);
+  const isProcessedForm = isHrmProcessedForm(slug, visualFrame.form, visualFrame.values, lan);
+  const isPendingForm = isHrmPendingForm(slug, visualFrame.form, visualFrame.values, lan);
+  const isBookingForm = isHrmBookingForm(slug, visualFrame.form, visualFrame.values, lan);
+  const isMyRequestsForm = isHrmMyRequestsForm(slug, visualFrame.form, visualFrame.values, lan);
+  const isCreateForm = isHrmCreateForm(slug, visualFrame.form, visualFrame.values, lan);
+  const isProcessed = isProcessedForm || (slug === 'hrm' && hrmTab === 'processed');
+  const isPending = isPendingForm || (slug === 'hrm' && hrmTab === 'pending');
+  const isBooking = isBookingForm || (slug === 'hrm' && hrmTab === 'booking');
+  const isCreate = isCreateForm || (slug === 'hrm' && hrmTab === 'create');
+  const isMyRequests = isMyRequestsForm || (slug === 'hrm' && hrmTab === 'my-requests');
+  const pendingPlaceholder = isPending && isComingSoon && (visualFrame.form.lists?.length ?? 0) === 0;
+  const hrmLayout = String(visualFrame.form.layout || 'stack').toLowerCase();
+  const isHrmContext = slug === 'hrm' || isPending || isProcessed || isAttendance || isBooking || isCreate || isMyRequests;
+  const hrmScreen =
+    isHrmContext
+      ? isProcessed
+        ? 'processed'
+        : isPending
+          ? 'pending'
+          : isBooking
+            ? 'booking'
+            : isCreate
+              ? 'create'
+              : isMyRequests
+                ? 'my-requests'
+                : isAttendance
+                  ? attendanceSub === 'history'
+                    ? 'attendance-history'
+                    : 'attendance'
+                  : isComingSoon
+                    ? 'coming-soon'
+                    : hrmLayout === 'drawer'
+                      ? 'dashboard'
+                      : 'form'
+      : undefined;
   const pcActive = isPcLayoutActive(visualFrame.form, {
     viewportMode,
     width: viewportWidth,
@@ -535,6 +620,25 @@ export function FormRuntimeView({
   /** Designer preview giữ modal-header; runtime gom title ra chrome ngoài. */
   const useOuterChrome = !embedded;
   const isModal = isOverlay && !useOuterChrome;
+
+  useEffect(() => {
+    setPendingTab('all');
+    setPendingQuery('');
+    setPendingDetail(null);
+    setAttendanceSub('main');
+    const urlTab = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('tab') : null;
+    if (urlTab === 'processed' || isProcessedForm) {
+      setHrmTab('processed');
+    } else if (urlTab === 'pending' || isPendingForm) {
+      setHrmTab('pending');
+    } else if (urlTab === 'booking' || isBookingForm) {
+      setHrmTab('booking');
+    } else if (urlTab === 'create' || urlTab === 'them' || isCreateForm) {
+      setHrmTab('create');
+    } else if (urlTab === 'my-requests' || urlTab === 'don-cua-ban' || isMyRequestsForm) {
+      setHrmTab('my-requests');
+    }
+  }, [visualFrame.form.id, isProcessedForm, isPendingForm, isBookingForm, isMyRequestsForm, isCreateForm]);
 
   useEffect(() => {
     if (!onDirtyChange) return;
@@ -1056,18 +1160,36 @@ export function FormRuntimeView({
   const emitCurrentChrome = useCallback(() => {
     if (!useOuterChrome) return;
     const chromeFrame = isDrawerSplit ? visualFrame : top;
-    const title = resolveLocalizedText(chromeFrame.form.title, lan) || chromeFrame.form.id;
-    const headerActions = headerControls
+    const title = pendingDetail
+      ? 'Chi tiết'
+      : isAttendance && attendanceSub === 'history'
+        ? 'Lịch sử chấm công'
+        : isProcessed
+          ? 'Đã xử lý'
+        : isPending
+          ? 'Chờ duyệt'
+        : isBooking
+          ? 'Đặt phòng họp'
+        : isCreate
+          ? 'Tạo đơn mới'
+        : isMyRequests
+          ? 'Đơn của bạn'
+          : resolveLocalizedText(chromeFrame.form.title, lan) || chromeFrame.form.id;
+    const headerActions = (isAttendance
+      ? headerControls.filter((hc) => !isAttendanceHistoryHeader(hc, lan))
+      : headerControls
+    )
       .filter((hc) => isControlVisible(hc, visualFrame.formMode))
       .map((hc) => {
         const face = resolveButtonFace(hc, lan);
         return { id: hc.id, label: face.text, icon: face.icon || undefined };
       });
+    const isHrmView = slug === 'hrm' || isPending || isProcessed || isAttendance || isBooking || isCreate || isMyRequests;
     emitFormChrome({
       title,
-      canBack: stack.length > 1,
+      canBack: stack.length > 1 || (isAttendance && attendanceSub === 'history') || (slug === 'hrm' && hrmTab !== 'attendance'),
       headerActions,
-      formMode: chromeFrame.formMode,
+      formMode: isHrmView ? undefined : chromeFrame.formMode,
     });
   }, [
     useOuterChrome,
@@ -1077,6 +1199,15 @@ export function FormRuntimeView({
     headerControls,
     lan,
     stack.length,
+    isPending,
+    isProcessed,
+    isBooking,
+    isCreate,
+    isMyRequests,
+    hrmTab,
+    slug,
+    pendingDetail,
+    attendanceSub,
   ]);
 
   useEffect(() => {
@@ -1092,7 +1223,36 @@ export function FormRuntimeView({
         emitCurrentChrome();
         return;
       }
+      if (data.type === FORM_HOME_MSG) {
+        if (slug === 'hrm') {
+          setHrmTab('attendance');
+          setAttendanceSub('main');
+          setStack((s) => (s.length > 0 ? [s[0]] : s));
+          if (typeof window !== 'undefined' && window.history.replaceState) {
+            const u = new URL(window.location.href);
+            u.searchParams.delete('tab');
+            window.history.replaceState({}, '', u.toString());
+          }
+          return;
+        }
+        setStack((s) => (s.length > 0 ? [s[0]] : s));
+        return;
+      }
       if (data.type === FORM_BACK_MSG) {
+        if (isAttendance && attendanceSub === 'history') {
+          setAttendanceSub('main');
+          return;
+        }
+        if (slug === 'hrm' && hrmTab !== 'attendance') {
+          setHrmTab('attendance');
+          setStack((s) => (s.length > 0 ? [s[0]] : s));
+          if (typeof window !== 'undefined' && window.history.replaceState) {
+            const u = new URL(window.location.href);
+            u.searchParams.delete('tab');
+            window.history.replaceState({}, '', u.toString());
+          }
+          return;
+        }
         setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
         return;
       }
@@ -1105,7 +1265,7 @@ export function FormRuntimeView({
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [useOuterChrome, headerControls, openLinkedForm, runActions, emitCurrentChrome]);
+  }, [useOuterChrome, headerControls, openLinkedForm, runActions, emitCurrentChrome, isAttendance, attendanceSub, slug, hrmTab, stack.length]);
 
   const renderControl = (c: FormControlDef, inRow = false): ReactNode => {
     if (!isControlVisible(c, visualFrame.formMode)) return null;
@@ -1209,11 +1369,15 @@ export function FormRuntimeView({
     if (c.type === 'iconButton') {
       const bg = c.color?.trim() || '#2f6fed';
       const face = resolveButtonFace(c, lan);
+      const iconLabel = face.text || textText || labelText || c.id;
+      const hrmDash = slug === 'hrm' && hrmScreen === 'dashboard';
       return (
-        <button
+        <FormIconButton
           key={c.id}
-          type="button"
-          className="form-icon-btn"
+          icon={c.icon?.trim() || face.icon}
+          label={iconLabel}
+          color={bg}
+          tileTheme={hrmDash ? hrmIconButtonTheme(iconLabel) : undefined}
           disabled={busy || c.enabled === false}
           style={layoutStyle}
           aria-label={face.aria}
@@ -1221,12 +1385,7 @@ export function FormRuntimeView({
             if (c.linkFormId?.trim()) void openLinkedForm(c.linkFormId.trim());
             else if (c.onClick?.length) void runActions(c.onClick);
           }}
-        >
-          <span className="form-icon-btn__tile" style={{ background: bg }}>
-            {c.icon?.trim() || face.icon}
-          </span>
-          {face.text ? <span className="form-icon-btn__label">{face.text}</span> : null}
-        </button>
+        />
       );
     }
 
@@ -1255,13 +1414,14 @@ export function FormRuntimeView({
               className={`form-btn__icon${(c.icon ?? '').trim() ? '' : ' form-btn__icon--blank'}`}
               aria-hidden
             >
-              {face.icon}
+              <FormIcon name={c.icon || face.icon} hint={face.text} size={16} />
             </span>
           ) : null}
           {face.text ? <span className="form-btn__text">{face.text}</span> : null}
         </button>
       );
     }
+
 
     if (c.type === 'checkbox') {
       return (
@@ -1517,11 +1677,11 @@ export function FormRuntimeView({
           }
         >
           <span className="form-control-group-chevron" aria-hidden>
-            {collapsed ? '▸' : '▾'}
+            <FormIcon name={collapsed ? 'chevron-right' : 'chevron-down'} size={14} />
           </span>
           {g.icon ? (
             <span className="form-control-group-icon" aria-hidden>
-              {g.icon}
+              <FormIcon name={g.icon} size={15} />
             </span>
           ) : null}
           <span className="form-control-group-title">{g.label}</span>
@@ -1563,10 +1723,24 @@ export function FormRuntimeView({
   };
 
   const body = (
-    <div className={`form-shell${hasFooter ? ' form-shell--has-footer' : ''}`}>
+    <div
+      className={`form-shell${hasFooter && !isAttendance && !isProcessed && !isPending && !isBooking && !isCreate && !isMyRequests ? ' form-shell--has-footer' : ''}`}
+      data-runtime-slug={slug || undefined}
+      data-hrm-screen={hrmScreen}
+    >
       <div
         className={`form-scroll ${
-          visualFrame.form.layout === 'drawer'
+          isProcessed
+            ? 'hrm-proc-scroll'
+            : isPending
+              ? 'hrm-pend-scroll'
+              : isBooking
+                ? 'hrm-book-scroll'
+                : isCreate || isMyRequests
+                  ? 'hrm-pend-scroll'
+                  : isAttendance
+                    ? 'hrm-att-scroll'
+            : visualFrame.form.layout === 'drawer'
             ? 'form-drawer'
             : pcActive
               ? 'form-pc-grid'
@@ -1616,7 +1790,7 @@ export function FormRuntimeView({
               }}
               disabled={busy}
             >
-              ×
+              <FormIcon name="x" size={16} />
             </button>
           </div>
         </div>
@@ -1642,13 +1816,135 @@ export function FormRuntimeView({
               onClick={() => onClose()}
               disabled={busy}
             >
-              ×
+              <FormIcon name="x" size={16} />
             </button>
           </div>
         </div>
       )}
 
-      {pcActive
+      {isComingSoon && !isPending && !isBooking && !isCreate && !isMyRequests ? (
+        <HrmComingSoonBanner
+          feature={hrmComingSoonFeature(visualFrame.form, visualFrame.values, lan)}
+        />
+      ) : null}
+
+
+      {isCreate ? (
+        <HrmCreateView
+          form={visualFrame.form}
+          lan={lan}
+          busy={busy}
+          onBack={() => {
+            if (stack.length > 1) {
+              setStack((prev) => prev.slice(0, -1));
+            } else {
+              setHrmTab('attendance');
+            }
+          }}
+          onGoToMyRequests={() => setHrmTab('my-requests')}
+          onGoToBooking={() => setHrmTab('booking')}
+        />
+      ) : isMyRequests ? (
+        <HrmMyRequestsView
+          form={visualFrame.form}
+          lan={lan}
+          busy={busy}
+          onBack={() => {
+            if (stack.length > 1) {
+              setStack((prev) => prev.slice(0, -1));
+            } else {
+              setHrmTab('attendance');
+            }
+          }}
+          onGoToCreate={() => setHrmTab('create')}
+        />
+      ) : isProcessed ? (
+        <HrmProcessedView
+          form={visualFrame.form}
+          values={visualFrame.values}
+          datasets={visualFrame.datasets}
+          lan={lan}
+          busy={busy}
+          onControlClick={(c) => {
+            if (c.linkFormId?.trim()) void openLinkedForm(c.linkFormId.trim());
+            else void runActions(c.onClick ?? []);
+          }}
+          onBack={() => {
+            if (stack.length > 1) {
+              setStack((prev) => prev.slice(0, -1));
+            } else {
+              setHrmTab('attendance');
+            }
+          }}
+        />
+      ) : isPending ? (
+        <HrmPendingView
+          form={visualFrame.form}
+          values={visualFrame.values}
+          datasets={visualFrame.datasets}
+          lan={lan}
+          busy={busy}
+          onControlClick={(c) => {
+            if (c.linkFormId?.trim()) void openLinkedForm(c.linkFormId.trim());
+            else void runActions(c.onClick ?? []);
+          }}
+          onBack={() => {
+            if (stack.length > 1) {
+              setStack((prev) => prev.slice(0, -1));
+            } else {
+              setHrmTab('attendance');
+            }
+          }}
+        />
+      ) : isBooking ? (
+        <HrmBookingView
+          form={visualFrame.form}
+          lan={lan}
+          busy={busy}
+          onBack={() => {
+            if (stack.length > 1) {
+              setStack((prev) => prev.slice(0, -1));
+            } else {
+              setHrmTab('attendance');
+            }
+          }}
+        />
+      ) : isAttendance ? (
+        attendanceSub === 'history' ? (
+          <HrmAttendanceHistoryView
+            form={visualFrame.form}
+            values={visualFrame.values}
+            datasets={visualFrame.datasets}
+            lan={lan}
+          />
+        ) : (
+          <HrmAttendanceView
+            form={visualFrame.form}
+            values={visualFrame.values}
+            formMode={visualFrame.formMode}
+            lan={lan}
+            busy={busy}
+            onControlClick={(c) => {
+              if (c.linkFormId?.trim()) void openLinkedForm(c.linkFormId.trim());
+              else void runActions(c.onClick ?? []);
+            }}
+            onMapsChange={(id, serialized) => setValue(id, serialized)}
+            onOpenHistory={() => setAttendanceSub('history')}
+          />
+        )
+      ) : pendingPlaceholder ? (
+        <>
+          <HrmPendingToolbar
+            tab={pendingTab}
+            onTab={setPendingTab}
+            counts={{ all: 0, wait: 0, ok: 0, no: 0 }}
+            query={pendingQuery}
+            onQuery={setPendingQuery}
+            showSearch
+          />
+          <HrmPendingEmpty />
+        </>
+      ) : pcActive
         ? controlGroups.map((g) => (
             <div key={
               g.kind === 'group'
@@ -1662,7 +1958,7 @@ export function FormRuntimeView({
           ))
         : controlGroups.map(renderLayoutGroup)}
 
-      {lists.map((list) => {
+      {!isAttendance && !isProcessed && !isPending && !isBooking && !isCreate && !isMyRequests && lists.map((list, listIndex) => {
         const rawRows = visualFrame.datasets[list.bind] ?? [];
         const rows = filterListRows(rawRows, list, visualFrame.state);
         const multi = list.selection === 'multiple';
@@ -1708,6 +2004,15 @@ export function FormRuntimeView({
         const searchOn = isListSearchEnabled(list);
         const qBind = list.search?.queryBind || `${list.id}Query`;
         const searchQuery = String(visualFrame.state[qBind] ?? '');
+        const pendingCounts = isPending ? countPendingRows(rows, itemTpl.metaField) : null;
+        const shownRows = isPending
+          ? rows.filter((r) => {
+              const kind = pendingRowKind(r, itemTpl.metaField);
+              if (pendingTab !== 'all' && kind !== pendingTab) return false;
+              if (!searchOn && pendingQuery.trim()) return pendingRowMatchesQuery(r, pendingQuery);
+              return true;
+            })
+          : rows;
 
         const onRowActivate = (row: Record<string, unknown>, key: string) => {
           if (multi) {
@@ -1780,10 +2085,23 @@ export function FormRuntimeView({
         return (
           <div
             key={list.id}
-            className={`stack form-drawer-span form-list${isListLayout ? ' form-list--bare' : ' card'}${showGrid ? ' form-list--grid' : ''}`}
+            className={`stack form-drawer-span form-list${isListLayout || isPending ? ' form-list--bare' : ' card'}${showGrid ? ' form-list--grid' : ''}${isPending ? ' hrm-pend-list' : ''}`}
             style={pcActive ? { gridColumn: '1 / -1' } : undefined}
           >
-            {!isListLayout && (
+            {isPending && listIndex === 0 ? (
+              <HrmPendingToolbar
+                tab={pendingTab}
+                onTab={setPendingTab}
+                counts={pendingCounts ?? { all: 0, wait: 0, ok: 0, no: 0 }}
+                query={pendingQuery}
+                onQuery={setPendingQuery}
+                showSearch={!searchOn}
+              />
+            ) : null}
+            {isPending && listIndex === 0 ? (
+              <HrmPendingHeader count={pendingCounts?.wait ?? shownRows.length} />
+            ) : null}
+            {!isListLayout && !isPending && (
               <div className="form-list-head">
                 <strong className="muted">{list.id}</strong>
                 {multi && isCards && (
@@ -1816,8 +2134,13 @@ export function FormRuntimeView({
 
             {isCards ? (
               <div className={`form-list-items form-list-items--${listTpl}`}>
-                {rows.length === 0 && <p className="muted">{uiCopy(lan, 'noData')}</p>}
-                {rows.map((row, idx) => {
+                {shownRows.length === 0 &&
+                  (isPending ? (
+                    <HrmPendingEmpty compact />
+                  ) : (
+                    <p className="muted">{uiCopy(lan, 'noData')}</p>
+                  ))}
+                {shownRows.map((row, idx) => {
                   const key = String(list.rowKey ? row[list.rowKey] : idx);
                   const rowSelected = multi ? selectedSet.has(key) : visualFrame.selectedRowKey === key;
                   const line1 = joinRowFields(row, itemTpl.line1, sep);
@@ -1825,16 +2148,40 @@ export function FormRuntimeView({
                   const meta = itemTpl.metaField
                     ? asInputValue(row[itemTpl.metaField]).trim()
                     : '';
+                  const statusKind = isPending ? pendingRowKind(row, itemTpl.metaField) : undefined;
+                  const statusLabel = isPending
+                    ? meta || (statusKind === 'ok' ? 'Đã duyệt' : statusKind === 'no' ? 'Từ chối' : 'Chờ duyệt')
+                    : meta;
                   return (
                     <div
                       key={key}
                       role="button"
                       tabIndex={0}
-                      className={`form-list-item${rowSelected ? ' selected' : ''}`}
-                      onClick={() => onRowActivate(row, key)}
+                      className={`form-list-item${rowSelected ? ' selected' : ''}${isPending ? ' hrm-pend__item' : ''}`}
+                      onClick={() => {
+                        if (isPending && !multi) {
+                          setPendingDetail({
+                            row,
+                            key,
+                            canOpen: !!(list.onRowClick?.length || (showGrid && editFormId)),
+                            activate: () => onRowActivate(row, key),
+                          });
+                          return;
+                        }
+                        onRowActivate(row, key);
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault();
+                          if (isPending && !multi) {
+                            setPendingDetail({
+                              row,
+                              key,
+                              canOpen: !!(list.onRowClick?.length || (showGrid && editFormId)),
+                              activate: () => onRowActivate(row, key),
+                            });
+                            return;
+                          }
                           onRowActivate(row, key);
                         }
                       }}
@@ -1852,7 +2199,12 @@ export function FormRuntimeView({
                           />
                         </span>
                       )}
-                      <ListItemLeading row={row} tpl={itemTpl} media={listTpl === 'media'} />
+                      <ListItemLeading
+                        row={row}
+                        tpl={itemTpl}
+                        media={listTpl === 'media'}
+                        fallbackIcon={isPending ? 'inbox' : undefined}
+                      />
                       <div className="form-list-item-body">
                         {line1 ? <div className="form-list-item-line1">{line1}</div> : null}
                         {line2 ? <div className="form-list-item-line2">{line2}</div> : null}
@@ -1860,7 +2212,13 @@ export function FormRuntimeView({
                           <div className="form-list-item-line1">{key}</div>
                         ) : null}
                       </div>
-                      {meta ? <div className="form-list-item-meta muted">{meta}</div> : null}
+                      {statusLabel ? (
+                        <div
+                          className={`form-list-item-meta${statusKind ? ` hrm-pend__status hrm-pend__status--${statusKind}` : ' muted'}`}
+                        >
+                          {statusLabel}
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}
@@ -1908,21 +2266,32 @@ export function FormRuntimeView({
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.length === 0 && (
+                  {shownRows.length === 0 && (
                     <tr>
                       <td colSpan={Math.max(1, colCount)} className="muted">
-                        {uiCopy(lan, 'noData')}
+                        {isPending ? 'Chưa có phiếu phù hợp.' : uiCopy(lan, 'noData')}
                       </td>
                     </tr>
                   )}
-                  {rows.map((row, idx) => {
+                  {shownRows.map((row, idx) => {
                     const key = String(list.rowKey ? row[list.rowKey] : idx);
                     const rowSelected = multi ? selectedSet.has(key) : visualFrame.selectedRowKey === key;
                     return (
                       <tr
                         key={key}
                         className={`clickable${rowSelected ? ' selected' : ''}`}
-                        onClick={() => onRowActivate(row, key)}
+                        onClick={() => {
+                          if (isPending && !multi) {
+                            setPendingDetail({
+                              row,
+                              key,
+                              canOpen: !!(list.onRowClick?.length || (showGrid && editFormId)),
+                              activate: () => onRowActivate(row, key),
+                            });
+                            return;
+                          }
+                          onRowActivate(row, key);
+                        }}
                       >
                         {multi && (
                           <td
@@ -1970,7 +2339,22 @@ export function FormRuntimeView({
         );
       })}
       </div>
-      {hasFooter ? (
+      {isPending && pendingDetail ? (
+        <HrmPendingDetail
+          model={pendingDetailModel(pendingDetail.row)}
+          onBack={() => setPendingDetail(null)}
+          onOpen={
+            pendingDetail.canOpen
+              ? () => {
+                  const act = pendingDetail.activate;
+                  setPendingDetail(null);
+                  act();
+                }
+              : undefined
+          }
+        />
+      ) : null}
+      {hasFooter && !isAttendance && !isProcessed && !isPending && !isBooking && !isCreate && !isMyRequests ? (
         <div className="form-footer" role="group" aria-label="Footer">
           <div className="form-footer-inner form-footer-inner--row">{footerNodes}</div>
         </div>
@@ -2128,7 +2512,7 @@ function FormListSearchBox({
               inputRef.current?.focus();
             }}
           >
-            ×
+            <FormIcon name="x" size={14} />
           </button>
         ) : null}
       </div>

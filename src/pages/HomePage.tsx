@@ -1,14 +1,23 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { fetchAuthConfig, type DemoRuntime } from '../api/authApi';
 import { useAuth } from '../auth/AuthContext';
-import { IconApps, IconChat, IconDesign, IconForm, IconZalo } from '../components/AppIcons';
-
-function demoIcon(icon?: string) {
-  if (icon === 'apps') return <IconApps size={26} />;
-  if (icon === 'chat') return <IconChat size={26} />;
-  return <IconForm size={26} />;
-}
+import { IconZalo } from '../components/AppIcons';
+import { HomeNavbar } from '../components/home/HomeNavbar';
+import { HomeTileCard, type TileTheme } from '../components/home/HomeTileCard';
+import { HomeGuestLanding } from '../components/home/HomeGuestLanding';
+import {
+  MapPin,
+  Plus,
+  UserRoundCheck,
+  FileCheck,
+  FileText,
+  PenLine,
+  FolderOpen,
+  ClipboardList,
+  CalendarCheck,
+  MessageSquare,
+} from 'lucide-react';
+import { FormIcon } from '../components/form/FormIcon';
 
 export function HomePage() {
   const { status, jwt, user, isAdmin, canAccessAdmin, login, logout, mobile, loginError } = useAuth();
@@ -29,8 +38,8 @@ export function HomePage() {
 
   if (status === 'loading') {
     return (
-      <div className="shell">
-        <p className="muted">Đang kiểm tra phiên…</p>
+      <div className="home-hrm-page" style={{ justifyContent: 'center', alignItems: 'center' }}>
+        <p className="muted">Đang kiểm tra phiên đăng nhập…</p>
       </div>
     );
   }
@@ -42,131 +51,146 @@ export function HomePage() {
   const showAdmin = canAccessAdmin || developMode;
   const displayName = user?.nickname || user?.email || `user #${user?.userId ?? 0}`;
 
-  return (
-    <div className="shell wide stack home">
-      <header className="home-head">
-        <div>
-          <h1>Arito Form</h1>
-          <p className="muted">Chat nội bộ và runtime form.</p>
-        </div>
-        {!mobile && (
-          <div className="row home-head-actions">
-            <Link to="/account/zalo" className="home-admin-link">
-              Liên kết Zalo
-            </Link>
-            {showAdmin && (
-              <Link to="/admin" className="home-admin-link">
-                Admin
-              </Link>
-            )}
-            <button type="button" className="secondary" onClick={() => logout()}>
-              Đăng xuất
-            </button>
-          </div>
-        )}
-      </header>
-
-      <div className="home-tiles">
-        <Link to="/account/zalo" className="home-tile" title="Gắn tài khoản Arito với Zalo Mini App">
-          <span className="home-tile-icon">
-            <IconZalo size={26} />
-          </span>
-          <span className="home-tile-label">Zalo</span>
-          <span className="home-tile-desc">Liên kết Mini App bằng QR</span>
-        </Link>
-        <Link to="/chat" className="home-tile home-tile--primary" title="Nhắn tin nội bộ, nhóm làm việc">
-          <span className="home-tile-icon">
-            <IconChat size={26} />
-          </span>
-          <span className="home-tile-label">Chat</span>
-          <span className="home-tile-desc">Nhắn tin nội bộ, nhóm làm việc</span>
-        </Link>
-        {demos.map((demo) => {
-          const slug = demo.slug?.trim();
-          if (!slug) return null;
-          return (
-            <Link
-              key={slug}
-              to={`/runtime/${encodeURIComponent(slug)}`}
-              className="home-tile"
-              title={demo.description || demo.label || slug}
-            >
-              <span className="home-tile-icon">{demoIcon(demo.icon)}</span>
-              <span className="home-tile-label">{demo.label || slug}</span>
-              <span className="home-tile-desc">{demo.description || `Runtime ${slug}`}</span>
-            </Link>
-          );
-        })}
-      </div>
-
-      <p className="muted home-status">
-        Đã đăng nhập: {displayName}
-        {isAdmin ? ' · admin' : ''}
-      </p>
-    </div>
+  // Kiểm tra các runtime khả dụng từ server API
+  const hrmDemo = demos.find((d) => d.slug?.trim().toLowerCase() === 'hrm');
+  const approvalDemo = demos.find((d) => d.slug?.trim().toLowerCase() === 'approval');
+  
+  // Lọc ra các demos tùy chỉnh khác chưa được fix cứng ở 9 ô tiêu chuẩn
+  const customDemos = demos.filter(
+    (d) => !['hrm', 'approval'].includes(d.slug?.trim().toLowerCase() || '')
   );
-}
 
-const INTRO_SECTIONS = [
-  {
-    icon: <IconForm size={24} />,
-    title: 'Runtime form',
-    body: 'Chạy form nghiệp vụ đã thiết kế: đơn từ HRM, danh mục, quy trình duyệt. Cùng một app trên web và khi nhúng mobile.',
-  },
-  {
-    icon: <IconDesign size={24} />,
-    title: 'Designer',
-    body: 'Kéo thả control, gán event và SQL, xuất bản app. Admin dùng để quản lý file form và chỉnh layout.',
-  },
-  {
-    icon: <IconChat size={24} />,
-    title: 'Chat nội bộ',
-    body: 'Nhắn tin cá nhân và nhóm làm việc trên cùng tài khoản AritoID, không cần đăng nhập thêm.',
-  },
-  {
-    icon: <IconApps size={24} />,
-    title: 'Demo & embed',
-    body: 'Sau khi đăng nhập, trang chủ mở các runtime demo. Cùng form đó cũng chạy khi nhúng trong app mobile.',
-  },
-];
-
-function HomeGuestLanding({
-  loginError,
-  onLogin,
-}: {
-  loginError: string | null;
-  onLogin: () => void;
-}) {
   return (
-    <div className="home-guest">
-      <main className="home-guest-body">
-        <section className="home-guest-hero">
-          <div className="home-guest-brand">
-            <img src="/favicon.ico" alt="" />
-            <h1>Arito Form</h1>
-          </div>
-          <p className="home-guest-lead">
-            Nền tảng thiết kế và chạy form nghiệp vụ trên web và mobile. Đăng nhập AritoID để dùng Chat,
-            xem runtime demo và vào công cụ Admin / Designer.
-          </p>
-        </section>
+    <div className="home-hrm-page">
+      <HomeNavbar
+        displayName={displayName}
+        isAdmin={isAdmin}
+        showAdminLink={showAdmin}
+        mobile={mobile}
+        onLogout={logout}
+      />
 
-        <section className="home-guest-grid" aria-label="Giới thiệu Arito Form">
-          {INTRO_SECTIONS.map((item) => (
-            <article key={item.title} className="home-guest-card">
-              <span className="home-tile-icon">{item.icon}</span>
-              <h2>{item.title}</h2>
-              <p>{item.body}</p>
-            </article>
-          ))}
-        </section>
+      <main className="home-hrm-container">
+        {/* Lưới các thẻ tính năng chuẩn HRM */}
+        <section className="home-hrm-grid" aria-label="Danh sách ứng dụng HRM">
+          {/* 1. Chấm công */}
+          <HomeTileCard
+            to={hrmDemo ? `/runtime/${encodeURIComponent(hrmDemo.slug)}` : '/runtime/hrm'}
+            title="Chấm công"
+            desc="Điểm danh vị trí & ca làm"
+            icon={<MapPin size={26} />}
+            theme="yellow"
+          />
 
-        <footer className="home-guest-login">
-          {loginError && <div className="banner">{loginError}</div>}
-          <button type="button" onClick={onLogin}>
-            Đăng nhập với AritoID
-          </button>
-        </footer>
+          {/* 2. Thêm */}
+          <HomeTileCard
+            to="/runtime/hrm?tab=create"
+            title="Thêm"
+            desc="Tạo các loại đơn từ mới"
+            icon={<Plus size={26} />}
+            theme="grey"
+          />
+
+          {/* 3. Chờ duyệt */}
+          <HomeTileCard
+            to={approvalDemo ? `/runtime/${encodeURIComponent(approvalDemo.slug)}` : '/runtime/approval'}
+            title="Chờ duyệt"
+            desc="Đơn từ cần phê duyệt"
+            icon={<UserRoundCheck size={26} />}
+            theme="red"
+            badge={21}
+          />
+
+          {/* 4. Đã xử lý */}
+          <HomeTileCard
+            to="/runtime/hrm?tab=processed"
+            title="Đã xử lý"
+            desc="Lịch sử duyệt đơn từ"
+            icon={<FileCheck size={26} />}
+            theme="blue"
+          />
+
+          {/* 5. Tài liệu */}
+          <HomeTileCard
+            to="/chat"
+            title="Tài liệu"
+            desc="Kho biểu mẫu & tài liệu"
+            icon={<FileText size={26} />}
+            theme="blue"
+          />
+
+          {/* 6. Đã ký */}
+          <HomeTileCard
+            to="/chat"
+            title="Đã ký"
+            desc="Văn bản đã hoàn tất ký"
+            icon={<PenLine size={26} />}
+            theme="blue"
+          />
+
+          {/* 7. Tài liệu của bạn */}
+          <HomeTileCard
+            to="/chat"
+            title="Tài liệu của bạn"
+            desc="Hồ sơ cá nhân & hợp đồng"
+            icon={<FolderOpen size={26} />}
+            theme="blue"
+          />
+
+          {/* 8. Đơn của bạn */}
+          <HomeTileCard
+            to="/runtime/hrm?tab=my-requests"
+            title="Đơn của bạn"
+            desc="Danh sách đơn đã gửi"
+            icon={<ClipboardList size={26} />}
+            theme="blue"
+          />
+
+          {/* 9. Booking */}
+          <HomeTileCard
+            to="/runtime/hrm?tab=booking"
+            title="Booking"
+            desc="Đặt phòng họp & thiết bị"
+            icon={<CalendarCheck size={26} />}
+            theme="grey"
+          />
+
+          {/* 10. Chat nội bộ */}
+          <HomeTileCard
+            to="/chat"
+            title="Chat nội bộ"
+            desc="Nhắn tin cá nhân & nhóm"
+            icon={<MessageSquare size={26} />}
+            theme="green"
+          />
+
+          {/* 11. Zalo Mini App */}
+          <HomeTileCard
+            to="/account/zalo"
+            title="Zalo Mini App"
+            desc="Liên kết QR tài khoản"
+            icon={<IconZalo size={26} />}
+            theme="blue"
+          />
+
+          {/* 12+. Demos mở rộng khác từ Server */}
+          {customDemos.map((demo, index) => {
+            const slug = demo.slug?.trim();
+            if (!slug) return null;
+            const themes: TileTheme[] = ['purple', 'blue', 'green', 'grey'];
+            const theme = themes[index % themes.length];
+            return (
+              <HomeTileCard
+                key={slug}
+                to={`/runtime/${encodeURIComponent(slug)}`}
+                title={demo.label || slug}
+                desc={demo.description || `Runtime ${slug}`}
+                icon={<FormIcon name={demo.icon || 'file-text'} hint={demo.label || slug} size={26} />}
+                theme={theme}
+              />
+            );
+          })}
+        </section>
       </main>
     </div>
   );

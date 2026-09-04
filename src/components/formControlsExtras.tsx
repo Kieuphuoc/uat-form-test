@@ -27,6 +27,7 @@ import {
   type OpenAsKind,
 } from '../lib/openAs';
 import { requestImagesFromParent } from '../lib/deviceImagePick';
+import { FormIcon } from './form/FormIcon';
 
 export function OpenAsAnchor({
   kind,
@@ -124,14 +125,7 @@ export function RuntimeColorInput({
 }
 
 function CloudUploadIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" className="form-attach-cloud-svg">
-      <path
-        fill="currentColor"
-        d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"
-      />
-    </svg>
-  );
+  return <FormIcon name="cloud-upload" size={22} className="form-attach-cloud-svg" />;
 }
 
 /** Thumb: blob local hoặc tải /image/256 một lần rồi cache theo file id. */
@@ -419,7 +413,7 @@ export function RuntimeFileImageInput({
                         removeAt(idx);
                       }}
                     >
-                      ×
+                      <FormIcon name="x" size={11} strokeWidth={2.25} />
                     </button>
                   ) : null}
                 </div>
@@ -436,7 +430,7 @@ export function RuntimeFileImageInput({
                 onClick={() => void pickViaShellOrInput('camera')}
               >
                 <span className="form-image-action-icon" aria-hidden>
-                  📷
+                  <FormIcon name="camera" size={16} />
                 </span>
                 {uiCopy(lan, 'takePhoto')}
               </button>
@@ -448,7 +442,7 @@ export function RuntimeFileImageInput({
                   onClick={() => void pickViaShellOrInput('album')}
                 >
                   <span className="form-image-action-icon" aria-hidden>
-                    🖼️
+                    <FormIcon name="image" size={16} />
                   </span>
                   {uiCopy(lan, 'chooseImage')}
                 </button>
@@ -517,7 +511,7 @@ export function RuntimeFileImageInput({
                     title={uiCopy(lan, 'remove')}
                     onClick={() => removeAt(idx)}
                   >
-                    ×
+                    <FormIcon name="x" size={14} />
                   </button>
                 ) : null}
               </li>

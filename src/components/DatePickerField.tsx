@@ -17,6 +17,7 @@ import {
   normalizeDateFormat,
   parseDateInput,
 } from '../lib/valueFormat';
+import { FormIcon } from './form/FormIcon';
 
 const WEEKDAYS_VI = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 
@@ -227,7 +228,7 @@ export function DatePickerField({
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => setOpen((v) => !v)}
         >
-          📅
+          <FormIcon name="calendar" size={18} />
         </button>
       </div>
 
@@ -246,7 +247,7 @@ export function DatePickerField({
                 })
               }
             >
-              ‹
+              <FormIcon name="chevron-left" size={16} />
             </button>
             <span className="form-date-picker__month">
               Tháng {view.m + 1} / {view.y}
@@ -263,7 +264,7 @@ export function DatePickerField({
                 })
               }
             >
-              ›
+              <FormIcon name="chevron-right" size={16} />
             </button>
           </div>
           <div className="form-date-picker__weekdays">

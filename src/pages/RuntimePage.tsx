@@ -125,7 +125,7 @@ export function RuntimePage() {
 
   if (status === 'loading') {
     return (
-      <div className="shell">
+      <div className="shell" data-runtime-slug={slug || undefined}>
         <p className="muted">{uiCopy(lan, 'initializing')}</p>
       </div>
     );
@@ -133,7 +133,7 @@ export function RuntimePage() {
 
   if (!jwt) {
     return (
-      <div className="shell stack">
+      <div className="shell stack" data-runtime-slug={slug || undefined}>
         <div className="banner">
           Cần JWT. Mở tab mobile với <code>authMode=embed_token</code>, hoặc đăng nhập qua Form.Api
           rồi lưu token.
@@ -145,7 +145,7 @@ export function RuntimePage() {
 
   if (error) {
     return (
-      <div className="shell stack">
+      <div className="shell stack" data-runtime-slug={slug || undefined}>
         <div className="banner">{error}</div>
         {!mobile && <Link to="/admin">Admin</Link>}
       </div>
@@ -154,7 +154,7 @@ export function RuntimePage() {
 
   if (!data) {
     return (
-      <div className="shell">
+      <div className="shell" data-runtime-slug={slug || undefined}>
         <p className="muted">{uiCopy(lan, 'loadingForm')}</p>
       </div>
     );
@@ -173,5 +173,9 @@ export function RuntimePage() {
   );
 
   if (mobile) return host;
-  return <FormOuterChrome fallbackTitle={data.form.id}>{host}</FormOuterChrome>;
+  return (
+    <FormOuterChrome fallbackTitle={data.form.id} slug={data.slug}>
+      {host}
+    </FormOuterChrome>
+  );
 }
