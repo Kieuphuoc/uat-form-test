@@ -249,9 +249,12 @@ export function ChatAppShell() {
     <div className={`chat-shell${mobile ? ' chat-shell--mobile' : ''}`} data-chat-theme={me?.chat_theme || 'default'}>
       {!mobile && !hiddenNavbar && (
         <header className="chat-shell-header">
-          <Link to="/chat" className="chat-shell-brand" title="Arito Chat">
-            <img src="/favicon.ico" alt="" />
-            <h1>Arito Chat</h1>
+          <Link to="/chat" className="chat-shell-brand" title="ActiveSignal">
+            <img
+              src="/logo-activesignal-horizontal.png"
+              alt="ActiveSignal"
+              className="chat-shell-brand-logo"
+            />
           </Link>
 
           <nav className="chat-shell-nav" aria-label="Chat">
